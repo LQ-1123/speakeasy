@@ -66,8 +66,9 @@ export function HoldToTalk({
   const end = useCallback(() => {
     if (!pressingRef.current) return;
     pressingRef.current = false;
-    setDragCancel(false);
-    void finish();
+    // 关键：不能先 setDragCancel(false)。finish() 需要读取当前 cancelRef 来决定
+    // 「上滑取消」还是「松手发送」；先清掉会导致上滑后依然发送。
+    void finish().finally(() => setDragCancel(false));
   }, [finish, setDragCancel]);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {

@@ -72,6 +72,20 @@ function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
   return Array.from(map.values()).sort((a, b) => timeOf(a) - timeOf(b));
 }
 
+/** 服务端轮询回来的「自己消息」是否与本地乐观气泡是同一条。 */
+function samePendingMessage(local: Message, server: Message): boolean {
+  if (!local.pending || local.sender !== "user" || server.sender !== "user") return false;
+  if (local.msg_type !== server.msg_type) return false;
+  const delta = Math.abs(timeOf(local) - timeOf(server));
+  if (!Number.isFinite(delta) || delta > 120_000) return false;
+  if (local.msg_type === "text") {
+    return local.transcript.trim() === server.transcript.trim();
+  }
+  // 语音/图片：类型一致 + 时间接近即视为同一条（语音转写/图片 URL 在服务端才确定）
+  return true;
+}
+
+
 function TextBubble({ message, friend, mine }: { message: Message; friend: Friend; mine: boolean }) {
   return (
     <div className={`se-bubble-row ${mine ? "me" : ""}`}>
@@ -216,7 +230,19 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     try {
       const list = await api.chatMessages(friendRef.current.id, 30);
       if (!mountedRef.current) return;
-      setMessages((prev) => mergeMessages(prev, list));
+      setMessages((prev) => {
+        // 发送请求还没返回时，轮询会先拿到服务端的同一条消息；
+        // 先移除对应的本地乐观气泡，再合并，避免自己消息出现两遍。
+        const remaining = [...prev];
+        for (const incoming of list) {
+          if (incoming.sender !== "user") continue;
+          const idx = remaining.findIndex(
+            (message) => message.pending && samePendingMessage(message, incoming),
+          );
+          if (idx >= 0) remaining.splice(idx, 1);
+        }
+        return mergeMessages(remaining, list);
+      });
       // 聊天窗打开时拉到的消息都已展示 → 标已读（含迟到的好友消息）
       void api.markRead(friendRef.current.id).catch(() => undefined);
       if (nearBottom) requestAnimationFrame(() => scrollToBottom());

@@ -154,7 +154,7 @@ export function HoldToTalk({
       ) : starting || sending ? (
         <>
           <Loader2 size={compact ? 14 : 17} className="animate-spin" />
-          <span>{sending ? "发送中…" : "准备中…"}</span>
+          <span>{sending ? "对方正在说话…" : "准备中…"}</span>
         </>
       ) : (
         <>

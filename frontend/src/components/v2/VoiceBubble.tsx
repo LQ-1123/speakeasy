@@ -251,7 +251,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
           <button type="button" onClick={toggleRate} className="se-rate" aria-label="切换倍速">
             {rate === 1 ? "1.0x" : "0.8x"}
           </button>
-          {message.pending ? <span className="text-[10.5px] text-[color:var(--se-faint)]">发送中…</span> : null}
+          {message.pending ? <span className="text-[10.5px] text-[color:var(--se-faint)]">已发送</span> : null}
         </div>
 
         {expanded ? (

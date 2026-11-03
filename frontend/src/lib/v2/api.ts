@@ -20,9 +20,11 @@ import {
   parseMemoryPayload,
   parseMessages,
   parseMoments,
+  parseBatchTranslationResponse,
   parseSttSaveResult,
   parseSttSettings,
   parseSttVerify,
+  parseTranslationResponse,
   type BootstrapPayload,
   type ChatTurnResponse,
   type Expression,
@@ -40,8 +42,10 @@ import {
   type SttSaveInput,
   type SttSaveResult,
   type SttSettingsPayload,
+  type BatchTranslationResponse,
   type SttTestInput,
   type SttVerifyResult,
+  type TranslationResult,
   type UserProfile,
 } from "@/lib/v2/types";
 
@@ -554,4 +558,37 @@ export function apiErrorText(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err) return err;
   return "操作失败，请稍后重试";
+}
+
+
+/* ================================================================== */
+/* 聊天内翻译（ChatView「译」按钮 / 批量最近消息）                       */
+/* ================================================================== */
+
+export interface TranslateInput {
+  text: string;
+  /** 省略时后端自动判断方向；UI 按 sender 显式传：好友→zh、自己→好友语言 */
+  target?: string;
+  source?: "auto";
+  friend_id?: string;
+}
+
+export function translateText(input: TranslateInput): Promise<TranslationResult> {
+  return request("/translate", parseTranslationResponse, {
+    method: "POST",
+    body: JSON.stringify({ source: "auto", ...input }),
+    timeoutMs: 45000,
+  });
+}
+
+export function translateBatch(input: {
+  texts: string[];
+  target?: string;
+  friend_id?: string;
+}): Promise<BatchTranslationResponse> {
+  return request("/translate/batch", parseBatchTranslationResponse, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 90000,
+  });
 }

@@ -756,3 +756,55 @@ export function parseSttSaveResult(raw: unknown): SttSaveResult {
     verified: isRecord(r.verified) ? parseSttVerify(r.verified) : null,
   };
 }
+
+
+/* ================================================================== */
+/* 聊天内翻译（POST /api/v2/translate、/translate/batch）                */
+/* ================================================================== */
+
+export interface TranslationResult {
+  ok: boolean;
+  text: string;
+  translation: string;
+  target: string;
+  target_label: string;
+  cached: boolean;
+  error: string;
+  message: string;
+}
+
+export interface BatchTranslationResponse {
+  ok: boolean;
+  target: string;
+  items: TranslationResult[];
+  message: string;
+}
+
+export function parseTranslationItem(raw: unknown): TranslationResult {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ok: r.ok === true,
+    text: str(r.text),
+    translation: str(r.translation),
+    target: str(r.target),
+    target_label: str(r.target_label),
+    cached: r.cached === true,
+    error: str(r.error),
+    message: str(r.message),
+  };
+}
+
+export function parseTranslationResponse(raw: unknown): TranslationResult {
+  return parseTranslationItem(raw);
+}
+
+export function parseBatchTranslationResponse(raw: unknown): BatchTranslationResponse {
+  const r = isRecord(raw) ? raw : {};
+  const items = Array.isArray(r.items) ? r.items.map(parseTranslationItem) : [];
+  return {
+    ok: r.ok === true,
+    target: str(r.target),
+    items,
+    message: str(r.message),
+  };
+}

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from app.llm import runtime_config as llm_runtime
 from app.logging_utils import get_logger
 from app.v2 import moments as moments_mod
+from app.v2 import translate as translate_mod
 from app.v2.timeutil import local_date_str, local_state
 from app.v2.voices import load_archetypes
 from app.voice.stt_config import (
@@ -83,6 +84,19 @@ class SttConfigIn(BaseModel):
     language: str | None = None
     timeout_s: float | None = None
     verify: bool = True
+
+
+class TranslateIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    target: str | None = None
+    source: str = "auto"
+    friend_id: str | None = None
+
+
+class TranslateBatchIn(BaseModel):
+    texts: list[str] = Field(min_length=1, max_length=20)
+    target: str | None = None
+    friend_id: str | None = None
 
 
 class SttTestIn(BaseModel):
@@ -639,6 +653,64 @@ async def chat_idle(request: Request, friend_id: str) -> dict:
     services = _services(request)
     services.chat.trigger_memory(friend_id)
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# 翻译（聊天内对照）
+# --------------------------------------------------------------------------- #
+async def _translate_one(
+    services: Any,
+    text: str,
+    *,
+    target: str | None,
+    friend: dict | None,
+) -> dict:
+    resolved = translate_mod.resolve_target(text, friend=friend, target=target)
+    context = ""
+    if friend:
+        context = (
+            f"{friend.get('name', 'friend')} from {friend.get('city', '')} "
+            f"({friend.get('nationality', '')}), chatting casually"
+        )
+    return await translate_mod.translate_text(
+        services.engines.llm, text, target=resolved, context=context
+    )
+
+
+@router.post("/translate")
+async def translate_message(request: Request, body: TranslateIn) -> dict:
+    """翻译一条消息；target 省略时自动判断方向（外语→中文 / 中文→好友语言）。"""
+    services = _services(request)
+    friend = None
+    if body.friend_id:
+        friend = await _thread(services.db.get_friend, body.friend_id)
+    return await _translate_one(
+        services, body.text, target=body.target, friend=friend
+    )
+
+
+@router.post("/translate/batch")
+async def translate_batch(request: Request, body: TranslateBatchIn) -> dict:
+    """批量翻译（聊天记录对照）；target 省略时逐条自动判断方向。"""
+    services = _services(request)
+    friend = None
+    if body.friend_id:
+        friend = await _thread(services.db.get_friend, body.friend_id)
+    items = list(
+        await asyncio.gather(
+            *(
+                _translate_one(services, text, target=body.target, friend=friend)
+                for text in body.texts
+            )
+        )
+    )
+    first_error = next((item for item in items if not item.get("ok")), None)
+    return {
+        "ok": bool(items) and all(item.get("ok") for item in items),
+        "target": translate_mod.normalize_language(body.target) or None,
+        "items": items,
+        "message": (first_error or {}).get("message", ""),
+    }
 
 
 # --------------------------------------------------------------------------- #

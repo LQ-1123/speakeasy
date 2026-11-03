@@ -101,6 +101,15 @@
 
 完整字段与降级语义见 [`docs/V2_STT.md`](V2_STT.md)。LLM 配置沿用 1.0 的 `/api/llm/config|test|reset`。
 
+## 4.6 翻译（聊天内对照）
+
+| 方法/路由 | 说明 |
+|---|---|
+| `POST /api/v2/translate` | body `{text, target?, source?, friend_id?}`；`target` 省略时自动判断：含中日韩字符 → 好友 `reply_language`（无好友则 en），否则 → zh。返回 `{ok, text, translation, target, target_label, cached, message}`；无 LLM Key 返回 `ok:false, error:"llm_not_configured"` + 中文提示。 |
+| `POST /api/v2/translate/batch` | body `{texts:[...], target?, friend_id?}` → `{ok, items:[...], message}`；用于「翻译最近消息」。 |
+
+翻译复用已配置的 OpenAI 兼容 LLM（进程内 LRU 缓存，按 text+target），不额外消耗翻译 API。
+
 ## 5. 音频
 
 | 方法/路由 | 说明 |

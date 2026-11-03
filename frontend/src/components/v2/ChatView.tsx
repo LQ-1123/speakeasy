@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
+  Languages,
   Loader2,
   MoreHorizontal,
   Phone,
@@ -20,7 +21,7 @@ import { SuggestionPill } from "@/components/v2/SuggestionPill";
 import { useToast } from "@/components/v2/Toast";
 import { VoiceBubble } from "@/components/v2/VoiceBubble";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/v2/ui";
-import { api } from "@/lib/v2/api";
+import { api, apiErrorText, translateBatch, translateText } from "@/lib/v2/api";
 import {
   chatDayLabel,
   closenessLabel,
@@ -28,9 +29,10 @@ import {
   localStateOf,
   relativeLabel,
   replyLanguageMeta,
+  replyLanguageOf,
   shouldShowDayDivider,
 } from "@/lib/v2/format";
-import type { Message } from "@/lib/v2/types";
+import type { Message, TranslationResult } from "@/lib/v2/types";
 import type { Friend } from "@/lib/v2/types";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
 
@@ -44,6 +46,13 @@ interface ChatViewProps {
 
 const SUGGESTION_POLL_MS = 2500;
 const SUGGESTION_TIMEOUT_MS = 20000;
+/** 「翻译最近消息」最多处理多少条 */
+const TRANSLATE_RECENT_LIMIT = 10;
+
+interface TranslationEntry {
+  result: TranslationResult;
+  open: boolean;
+}
 
 function timeOf(message: Message): number {
   const t = new Date(message.created_at).getTime();
@@ -85,6 +94,10 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const [infoOpen, setInfoOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  /** 每条消息的译文缓存（按 message.id），open 控制展开/收起 */
+  const [translations, setTranslations] = useState<Record<string, TranslationEntry>>({});
+  const [translatingIds, setTranslatingIds] = useState<Record<string, boolean>>({});
+  const [batchTranslating, setBatchTranslating] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -156,6 +169,8 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   }, [scrollToBottom]);
 
   useEffect(() => {
+    setTranslations({});
+    setTranslatingIds({});
     void loadMessages();
     return () => {
       stopPolling();
@@ -265,6 +280,127 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
 
   const friendStateTone = local.period === "night" || local.period === "late_night";
 
+  /**
+   * 翻译目标语言（Lead 的 UX 约定）：
+   * - 好友消息：外语 → 中文对照（zh）
+   * - 我的消息：中文/英文 → 对方语言（reply_language，回退 en）
+   */
+  const targetFor = useCallback(
+    (message: Message): string => (message.sender === "user" ? replyLanguageOf(friend) : "zh"),
+    [friend],
+  );
+
+  const toggleTranslation = useCallback(
+    async (message: Message) => {
+      const text = message.transcript.trim();
+      if (!text || message.pending) return;
+
+      const existing = translations[message.id];
+      if (existing) {
+        setTranslations((prev) => ({
+          ...prev,
+          [message.id]: { ...existing, open: !existing.open },
+        }));
+        return;
+      }
+      if (translatingIds[message.id]) return;
+
+      setTranslatingIds((prev) => ({ ...prev, [message.id]: true }));
+      try {
+        const result = await translateText({
+          text,
+          target: targetFor(message),
+          friend_id: friend.id,
+        });
+        if (!result.ok) {
+          // 无 LLM Key 时直接展示后端 message（引导去右上角 ⚙ 个人设置）
+          showToast(result.message || "翻译失败，请稍后重试", "error");
+          return;
+        }
+        if (!result.translation.trim() || result.translation.trim() === text) {
+          // 原文已经是目标语言（例如英语好友的英语消息），不显示无意义的「译文」
+          showToast(`原文已经是${result.target_label || "目标语言"}，无需翻译`, "info");
+          return;
+        }
+        setTranslations((prev) => ({ ...prev, [message.id]: { result, open: true } }));
+      } catch (err) {
+        showToast(apiErrorText(err), "error");
+      } finally {
+        setTranslatingIds((prev) => {
+          const next = { ...prev };
+          delete next[message.id];
+          return next;
+        });
+      }
+    },
+    [friend.id, showToast, targetFor, translatingIds, translations],
+  );
+
+  /** ⋯ 菜单：批量翻译最近 N 条（按 sender 分组 target，分别走 batch）。 */
+  const handleTranslateRecent = useCallback(async () => {
+    if (batchTranslating) return;
+    const candidates = messages
+      .filter((message) => !message.pending && message.transcript.trim().length > 0)
+      .slice(-TRANSLATE_RECENT_LIMIT);
+    if (candidates.length === 0) {
+      showToast("还没有可翻译的聊天记录", "info");
+      return;
+    }
+    setBatchTranslating(true);
+    try {
+      // batch 接口只有一个 target：按目标语言分组成 1~2 个请求
+      const groups = new Map<string, Message[]>();
+      for (const message of candidates) {
+        const target = targetFor(message);
+        const list = groups.get(target) ?? [];
+        list.push(message);
+        groups.set(target, list);
+      }
+      const responses = await Promise.all(
+        Array.from(groups.entries()).map(async ([target, group]) => ({
+          target,
+          group,
+          response: await translateBatch({
+            texts: group.map((message) => message.transcript),
+            target,
+            friend_id: friend.id,
+          }),
+        })),
+      );
+
+      const nextTranslations: Record<string, TranslationEntry> = { ...translations };
+      let added = 0;
+      let firstFailure = "";
+      for (const { group, response } of responses) {
+        group.forEach((message, index) => {
+          const item = response.items[index];
+          const sameAsSource =
+            item && item.ok && item.translation.trim() === message.transcript.trim();
+          if (item && item.ok && !sameAsSource) {
+            nextTranslations[message.id] = { result: item, open: true };
+            added += 1;
+          } else if (item && !item.ok && !firstFailure) {
+            firstFailure = item.message || response.message || "";
+          }
+        });
+        if (response.items.length === 0 && !firstFailure) {
+          firstFailure = response.message || "批量翻译失败";
+        }
+      }
+      if (added > 0) {
+        setTranslations(nextTranslations);
+        showToast(`已翻译最近 ${added} 条消息`, "success");
+      }
+      if (firstFailure) {
+        showToast(firstFailure, "error");
+      }
+    } catch (err) {
+      showToast(apiErrorText(err), "error");
+    } finally {
+      setBatchTranslating(false);
+    }
+  }, [batchTranslating, friend.id, messages, showToast, targetFor, translations]);
+
   const handleDeleteFriend = async () => {
     if (deleting) return;
     const ok = window.confirm(
@@ -332,6 +468,17 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
                 }}
               >
                 <Users size={14} /> 好友资料
+              </button>
+              <button
+                type="button"
+                disabled={batchTranslating}
+                onClick={() => {
+                  setMenuOpen(false);
+                  void handleTranslateRecent();
+                }}
+              >
+                {batchTranslating ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
+                {batchTranslating ? "翻译中…" : "翻译最近消息"}
               </button>
               <button
                 type="button"
@@ -403,6 +550,50 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
                 <div className="flex justify-end pr-[52px]">
                   <SuggestionPill suggestion={message.suggestion} message={message} friend={friend} />
                 </div>
+              ) : null}
+
+              {!message.pending && message.transcript.trim() ? (
+                <>
+                  <div className={`se-translate-row ${mine ? "me" : ""}`}>
+                    <button
+                      type="button"
+                      className={`se-translate-btn ${translations[message.id] ? "done" : ""}`}
+                      aria-label="翻译这条消息"
+                      aria-expanded={translations[message.id]?.open === true}
+                      disabled={translatingIds[message.id] === true}
+                      onClick={() => void toggleTranslation(message)}
+                    >
+                      {translatingIds[message.id] ? (
+                        <Loader2 size={10} className="animate-spin" />
+                      ) : (
+                        <Languages size={11} />
+                      )}
+                      {translatingIds[message.id] ? "翻译中…" : "译"}
+                    </button>
+                    {translations[message.id]?.result.cached ? (
+                      <span className="se-translate-cached">缓存</span>
+                    ) : null}
+                  </div>
+                  {translations[message.id]?.open ? (
+                    <div className={`se-translate-wrap ${mine ? "me" : ""}`}>
+                      <button
+                        type="button"
+                        className="se-translation"
+                        onClick={() => void toggleTranslation(message)}
+                        aria-label="收起译文"
+                      >
+                        <span className="se-translation-head">
+                          <Languages size={10} />
+                          译 · {translations[message.id]?.result.target_label || "中文"}
+                          <span className="se-translation-collapse">收起</span>
+                        </span>
+                        <span className="se-translation-text">
+                          {translations[message.id]?.result.translation}
+                        </span>
+                      </button>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </div>
           );

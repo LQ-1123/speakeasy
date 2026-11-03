@@ -28,6 +28,7 @@
 | 实时语音通话 | 1.0 的 `/ws` 通道与 `/classic` 页面保留可用（新 UI 暂以"即将上线"占位，接口未破坏） | `backend/app/routers/ws.py`、`frontend/src/app/classic` |
 | 多语言好友（ja/ko/pt/es-MX…） | 28 个声线原型（14 国 × 男女）；「偶遇」国家/语种筛选**严格生效**（无匹配返回 422 + 支持列表）；好友按 `reply_language` 用该语言回复，TTS 用对应语言声线；日语/韩语等语音输入走多语言 STT 模型或云端 SenseVoice | `voice_archetypes.json`、`spawner.py`、`chat_service.py`、`DiscoverTab.tsx` |
 | 云端 STT（SenseVoiceSmall） | 个人设置里填硅基流动 Key 即热切换到 `FunAudioLLM/SenseVoiceSmall`；云端失败自动回退本地 Whisper→mock | `backend/app/voice/sensevoice.py`、`stt_config.py`、`v2/router.py`、`frontend/src/components/v2/SettingsPanel.tsx` |
+| 聊天内翻译 | 每条消息「译」按钮（好友消息→中文、自己消息→对方语言）+ ⋯「翻译最近消息」批量对照；复用 LLM Key，无 Key 时明确提示 | `v2/translate.py`、`ChatView.tsx` |
 | 删除好友 | 单聊右上角「⋯」→「删除好友」（二次确认），后端级联删除消息/朋友圈/音频并清理推荐关系 | `router.py`、`ChatView.tsx` |
 | 移动端三 Tab + PWA | 消息 / 动态·偶遇 / 表达本·画像；微信式浅色；按住说话；PWA manifest+SW+图标 | `frontend/src/components/v2/*`、`frontend/public/*` |
 | SQLite 5 表 | `user_profile` / `friends` / `messages` / `moments` / `saved_expressions`（额外列见 db.py） | `backend/app/v2/db.py` |

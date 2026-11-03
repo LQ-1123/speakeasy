@@ -42,7 +42,7 @@ export interface UseHandsFreeVadOptions {
 
 const CALIBRATION_MS = 500;
 const MIN_SPEECH_MS = 300;
-const SILENCE_MS = 1200;
+const SILENCE_MS = 800;
 const MAX_UTTERANCE_MS = 30000;
 const TICK_MS = 50;
 const MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];

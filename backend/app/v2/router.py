@@ -656,9 +656,12 @@ async def call_warmup(request: Request, friend_id: str) -> dict:
     prewarm = getattr(stt_engine, "prewarm", None)
     if callable(prewarm):
         try:
-            services.spawn_bg(prewarm(language=lang))
+            services.spawn_bg(prewarm(language=lang, fast=True))
         except TypeError:
-            services.spawn_bg(prewarm())
+            try:
+                services.spawn_bg(prewarm(language=lang))
+            except TypeError:
+                services.spawn_bg(prewarm())
         except Exception:  # noqa: BLE001 - 预热失败不影响通话
             pass
 

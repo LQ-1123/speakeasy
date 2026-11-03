@@ -253,8 +253,10 @@ class STTEngine:
         self._load_lock = asyncio.Lock()
         # 非英语（ja/ko/...) 专用的多语言模型；distil-large-v3 是英语专用，不能拿来转写日语
         self._multilingual_model: Any = None
+        self._call_model: Any = None
         self._multilingual_error: str | None = None
         self._multilingual_lock = asyncio.Lock()
+        self._call_model_lock = asyncio.Lock()
         self._resolved_device = str(self.cfg.device)
         self._resolved_compute = str(self.cfg.compute_type)
         self._closed = False
@@ -409,8 +411,8 @@ class STTEngine:
     # ------------------------------------------------------------------ #
     # 生命周期
     # ------------------------------------------------------------------ #
-    async def prewarm(self, language: str | None = None) -> None:
-        """懒加载模型（线程池里做）。非英语时预加载多语言模型。失败不抛。"""
+    async def prewarm(self, language: str | None = None, fast: bool = False) -> None:
+        """懒加载模型（线程池里做）。通话模式预热 call_model。失败不抛。"""
         if self._closed:
             log.debug("STT prewarm() 在已关闭的引擎上调用，忽略")
             return
@@ -418,6 +420,9 @@ class STTEngine:
             log.info("STT backend=mock，无需加载模型")
             return
         try:
+            if fast:
+                await self._ensure_call_model()
+                return
             lang = str(language or "").strip().lower()
             if lang and lang not in ("en", "english", "auto"):
                 await self._ensure_multilingual_model()
@@ -541,6 +546,52 @@ class STTEngine:
                     )
             return None
 
+    async def _ensure_call_model(self) -> Any:
+        """通话专用快速模型（默认 small，~0.8s/短句），显著低于 distil-large。"""
+        if self._call_model is not None:
+            return self._call_model
+        name = str(getattr(self.cfg, "call_model", "") or "small").strip()
+        if not name:
+            name = "small"
+        async with self._call_model_lock:
+            if self._call_model is not None:
+                return self._call_model
+            try:
+                from faster_whisper import WhisperModel  # noqa: PLC0415 - 重依赖
+            except Exception as exc:  # noqa: BLE001
+                log.warning("通话 STT 模型导入失败: %s", exc)
+                return None
+            attempts: list[tuple[str, str]] = [(self.cfg.device, self.cfg.compute_type)]
+            if self.cfg.cpu_fallback and str(self.cfg.device).lower() != "cpu":
+                attempts.append(("cpu", "int8"))
+            for device, compute in attempts:
+                try:
+                    log.info(
+                        "STT 加载通话快速模型 model=%s device=%s compute_type=%s ...",
+                        name, device, compute,
+                    )
+                    sw = Stopwatch()
+                    model = await asyncio.to_thread(
+                        WhisperModel,
+                        name,
+                        device=device,
+                        compute_type=compute,
+                        num_workers=max(1, int(self.cfg.num_workers)),
+                        download_root=self.cfg.download_root or None,
+                        local_files_only=bool(self.cfg.local_files_only),
+                    )
+                    self._call_model = model
+                    log.info(
+                        "STT 通话快速模型 ready: model=%s (load %.0fms)", name, sw.elapsed_ms()
+                    )
+                    return model
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "STT 通话快速模型加载失败 (device=%s compute_type=%s): %s: %s",
+                        device, compute, type(exc).__name__, exc,
+                    )
+            return None
+
     def _degrade_to_mock(self, reason: str) -> None:
         if self._requested in ("auto", "mock"):
             if self._backend != "mock":
@@ -561,7 +612,8 @@ class STTEngine:
         self._closed = True
         model, self._model = self._model, None
         multi_model, self._multilingual_model = self._multilingual_model, None
-        for item in (model, multi_model):
+        call_model, self._call_model = self._call_model, None
+        for item in (model, multi_model, call_model):
             if item is None:
                 continue
             try:
@@ -590,6 +642,7 @@ class STTEngine:
         *,
         language: str | None = None,
         prefer_local: bool = False,
+        fast: bool = False,
     ) -> Transcript:
         """把 PCM16 语音转成文本。
 
@@ -642,20 +695,25 @@ class STTEngine:
                 )
             return await self._transcribe_mock(sw, duration, language=effective_language)
 
-        if use_multilingual:
-            model = await self._ensure_multilingual_model()
-            if model is None:
-                log.warning(
-                    "多语言模型不可用，非英语转写返回空（%s）", effective_language
-                )
-                return Transcript(
-                    text="", language=effective_language, duration_s=duration,
-                    latency_ms=sw.elapsed_ms(), backend="unavailable", segments=[],
-                )
-        else:
-            model = await self._ensure_model()
-            if model is None:
-                return await self._transcribe_mock(sw, duration, language=effective_language)
+        model = None
+        if fast:
+            # 通话延迟优先：用 call_model（默认 small）转写，避免 distil-large 的 2-3s
+            model = await self._ensure_call_model()
+        if model is None:
+            if use_multilingual:
+                model = await self._ensure_multilingual_model()
+                if model is None:
+                    log.warning(
+                        "多语言模型不可用，非英语转写返回空（%s）", effective_language
+                    )
+                    return Transcript(
+                        text="", language=effective_language, duration_s=duration,
+                        latency_ms=sw.elapsed_ms(), backend="unavailable", segments=[],
+                    )
+            else:
+                model = await self._ensure_model()
+                if model is None:
+                    return await self._transcribe_mock(sw, duration, language=effective_language)
 
         try:
             args: tuple[Any, ...] = (

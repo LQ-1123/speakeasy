@@ -43,12 +43,20 @@ class FakeSTT:
     def __init__(self) -> None:
         self.last_language: str | None = "unset"
         self.last_prefer_local: bool | None = None
+        self.last_fast: bool | None = None
 
     async def transcribe(
-        self, pcm16: bytes, sample_rate: int = 16000, *, language=None, prefer_local=False
+        self,
+        pcm16: bytes,
+        sample_rate: int = 16000,
+        *,
+        language=None,
+        prefer_local=False,
+        fast=False,
     ):
         self.last_language = language
         self.last_prefer_local = prefer_local
+        self.last_fast = fast
         return SimpleNamespace(text="Hi, I really like indie games and coffee.", language="en",
                                latency_ms=1.0, backend="mock")
 
@@ -517,6 +525,7 @@ async def test_call_stream_turn_events_and_persistence(client):
     assert "sentence" in kinds
     assert kinds[-1] == "done"
     assert services.engines.stt.last_prefer_local is True  # 通话走本地 STT
+    assert services.engines.stt.last_fast is True  # 通话走快速模型
     transcript_event = next(e for e in events if e["type"] == "transcript")
     assert transcript_event["text"].startswith("Hi, I really like")
     sentence_events = [e for e in events if e["type"] == "sentence"]

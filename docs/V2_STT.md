@@ -164,3 +164,11 @@ def cloud_health(self) -> dict                 # 见上 health 结构 + backend 
   （默认 `small`；首次使用自动下载约 500MB，可设 `tiny` / `medium` / `large-v3`）。
 - 配置 SiliconFlow SenseVoiceSmall 时，云端会**自动识别语种**，优先走云端。
 - 对应环境变量：`STT_MULTILINGUAL_MODEL=small`（`.env` 扁平项）。
+
+
+## 通话快速模型（延迟优先）
+
+- 通话回合默认走本地 faster-whisper **call_model**（`STT_CALL_MODEL`，默认 `small`），
+  不再使用 `distil-large-v3`；短句实测 ≈0.9~1.3s（M1 Pro CPU int8），配合 VAD 800ms 断句。
+- 聊天语音条保持原有策略（云端优先/本地兜底）。
+- 若想更准可把 `STT_CALL_MODEL` 设为 `base`/`small`/`medium`；延迟会相应变化。

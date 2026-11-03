@@ -31,7 +31,7 @@
 | 用户动态 + AI 评论 | 「动态·偶遇」顶部「分享此刻…」发布文字/图片动态；AI 好友按各自语言异步评论（含 emoji），4s 轮询自动出现 | `v2/user_moments.py`、`PublishMoment.tsx`、`DiscoverTab.tsx` |
 | 图片多模态 | 聊天/动态可上传 JPG/PNG/WebP/GIF（≤8MB）；聊天发图后多模态 LLM 结合图片回复语音条；动态可配图 | `v2/media_store.py`、`ImageBubble`、`PublishMoment.tsx` |
 | 表情 | Composer 48 个 emoji 选择面板；AI 回复最多 1 个 emoji，TTS 不念 emoji | `Composer.tsx`、`spawner.py`、`chat_service.py` |
-| 语音通话（免提） | 全屏 CallView：**VAD 免提自动对话**（直接说话，静音 1.2s 自动断句），**流式回复**：后端本地 STT 优先 + 逐句 TTS，首句音频到达即播、渐进字幕，播完自动续听；支持静音/结束/计时；结束保存 call_summary | `CallView.tsx`、`useHandsFreeVad.ts`、`router.py`、`chat_service.py` |
+| 语音通话（免提） | 全屏 CallView：**VAD 免提自动对话**（直接说话，静音 1.2s 自动断句），**流式回复**：后端本地 STT 优先（通话专用 `small` 快速模型，~1s 转写，VAD 800ms 断句）+ 逐句 TTS，首句音频到达即播、渐进字幕，播完自动续听；支持静音/结束/计时；结束保存 call_summary | `CallView.tsx`、`useHandsFreeVad.ts`、`router.py`、`chat_service.py` |
 | 聊天内翻译 | 每条消息「译」按钮（好友消息→中文、自己消息→对方语言）+ ⋯「翻译最近消息」批量对照；**朋友圈动态每条可「译」、支持「全部翻译」**；复用 LLM Key，无 Key 时明确提示 | `v2/translate.py`、`ChatView.tsx`、`DiscoverTab.tsx` |
 | 删除好友 | 单聊右上角「⋯」→「删除好友」（二次确认），后端级联删除消息/朋友圈/音频并清理推荐关系 | `router.py`、`ChatView.tsx` |
 | 移动端三 Tab + PWA | 消息 / 动态·偶遇 / 表达本·画像；微信式浅色；按住说话；PWA manifest+SW+图标 | `frontend/src/components/v2/*`、`frontend/public/*` |

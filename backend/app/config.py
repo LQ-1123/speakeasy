@@ -73,6 +73,7 @@ class STTSettings(BaseModel):
     mock_latency_ms: int = 60
     # ---- 多语言本地转写（distil-large-v3 是英语专用；ja/ko 等用多语言小模型）----
     multilingual_model: str = "small"         # small / medium / large-v3；按需懒加载
+    call_model: str = "small"                 # 通话专用快速模型（延迟优先，默认 small）
     # ---- 云端 STT（SiliconFlow SenseVoiceSmall；可在个人设置里热切换）----
     provider: str = "auto"                    # auto | local | siliconflow
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
@@ -179,6 +180,7 @@ class Settings(BaseSettings):
     stt_siliconflow_model: str = ""
     stt_siliconflow_timeout_s: float | None = None
     stt_multilingual_model: str = ""
+    stt_call_model: str = ""
 
     server: ServerSettings = Field(default_factory=ServerSettings)
     vad: VADSettings = Field(default_factory=VADSettings)
@@ -226,6 +228,8 @@ class Settings(BaseSettings):
             self.stt.siliconflow_timeout_s = float(self.stt_siliconflow_timeout_s)
         if self.stt_multilingual_model:
             self.stt.multilingual_model = self.stt_multilingual_model
+        if self.stt_call_model:
+            self.stt.call_model = self.stt_call_model
         return self
 
     # ---- 路径 ----

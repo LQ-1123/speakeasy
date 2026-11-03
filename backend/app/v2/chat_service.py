@@ -504,7 +504,7 @@ class ChatService:
         lang = _language_of(friend)
         stt_language = None if lang == "en" else lang
         transcript, stt_meta = await self._transcribe(
-            decoded["pcm16"], language=stt_language, prefer_local=True
+            decoded["pcm16"], language=stt_language, prefer_local=True, fast=True
         )
         if not transcript:
             transcript = "（语音没有识别清楚，可以再说一次吗？）"
@@ -907,7 +907,12 @@ class ChatService:
     # STT / LLM / TTS
     # ------------------------------------------------------------------ #
     async def _transcribe(
-        self, pcm16: bytes, *, language: str | None = None, prefer_local: bool = False
+        self,
+        pcm16: bytes,
+        *,
+        language: str | None = None,
+        prefer_local: bool = False,
+        fast: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         """返回 (文本, STT 元信息)，元信息用于前端展示/排查（backend、latency）。
 
@@ -916,10 +921,21 @@ class ChatService:
         try:
             try:
                 result = await self.engines.stt.transcribe(
-                    pcm16, 16000, language=language, prefer_local=prefer_local
+                    pcm16,
+                    16000,
+                    language=language,
+                    prefer_local=prefer_local,
+                    fast=fast,
                 )
-            except TypeError:  # 兼容不支持 language/prefer_local 参数的旧 STT 实现
-                result = await self.engines.stt.transcribe(pcm16, 16000, language=language)
+            except TypeError:  # 兼容参数较少的旧 STT 实现
+                try:
+                    result = await self.engines.stt.transcribe(
+                        pcm16, 16000, language=language, prefer_local=prefer_local
+                    )
+                except TypeError:
+                    result = await self.engines.stt.transcribe(
+                        pcm16, 16000, language=language
+                    )
             text = (getattr(result, "text", "") or "").strip()
             meta = {
                 "backend": getattr(result, "backend", "unknown"),
@@ -938,15 +954,14 @@ class ChatService:
                         pass
             else:
                 stt_cfg = getattr(self.engines.stt, "cfg", None)
+                local_model = getattr(stt_cfg, "model_size", None)
+                multi = getattr(stt_cfg, "multilingual_model", None)
                 lang = str(meta.get("language") or "").lower()
                 if lang and lang not in ("en", "english"):
-                    multi = getattr(stt_cfg, "multilingual_model", None)
                     if multi:
                         meta["model"] = f"faster-whisper:{multi}"
-                else:
-                    local_model = getattr(stt_cfg, "model_size", None)
-                    if local_model:
-                        meta["model"] = f"faster-whisper:{local_model}"
+                elif local_model:
+                    meta["model"] = f"faster-whisper:{local_model}"
             return text, meta
         except Exception as exc:  # noqa: BLE001
             log.warning("STT 失败（降级为空）: %s: %s", type(exc).__name__, exc)

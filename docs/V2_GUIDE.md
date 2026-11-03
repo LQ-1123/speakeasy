@@ -26,7 +26,7 @@
 | 气泡内联批注 | 用户气泡下 `✨ 地道表达` 胶囊：better_version/解释/tag、🔊 试听、⭐ 收藏；无 key 时规则库兜底 | `suggestion.py`、`frontend/src/components/v2/SuggestionPill.tsx` |
 | 表达本刻意复现 | learning 表达每轮抽 1–2 条注入 prompt；用户实战说出 → mastery+1，满 3 次 mastered | `chat_service.py`、`v2/router.py` |
 | 实时语音通话 | 1.0 的 `/ws` 通道与 `/classic` 页面保留可用（新 UI 暂以"即将上线"占位，接口未破坏） | `backend/app/routers/ws.py`、`frontend/src/app/classic` |
-| 多语言好友（ja/ko/pt/es-MX…） | 28 个声线原型（14 国 × 男女）；「偶遇」国家/语种筛选**严格生效**（无匹配返回 422 + 支持列表）；好友按 `reply_language` 用该语言回复，TTS 用对应语言声线；日语/韩语等语音输入走多语言 STT 模型或云端 SenseVoice | `voice_archetypes.json`、`spawner.py`、`chat_service.py`、`DiscoverTab.tsx` |
+| 多语言好友（ja/ko/pt/es-MX…） | 28 个声线原型（14 国 × 男女）；「偶遇」国家/语种筛选**严格生效**（无匹配返回 422 + 支持列表）；好友按 `reply_language` 用该语言回复，TTS 用对应语言声线；**回复语言有后置校验/纠偏**（跑偏成英文时自动重写，仍失败则用目标语言模板兜底，绝不发错语言）；日语/韩语等语音输入走多语言 STT 模型或云端 SenseVoice | `voice_archetypes.json`、`spawner.py`、`chat_service.py`、`DiscoverTab.tsx` |
 | 云端 STT（SenseVoiceSmall） | 个人设置里填硅基流动 Key 即热切换到 `FunAudioLLM/SenseVoiceSmall`；云端失败自动回退本地 Whisper→mock | `backend/app/voice/sensevoice.py`、`stt_config.py`、`v2/router.py`、`frontend/src/components/v2/SettingsPanel.tsx` |
 | 聊天内翻译 | 每条消息「译」按钮（好友消息→中文、自己消息→对方语言）+ ⋯「翻译最近消息」批量对照；**朋友圈动态每条可「译」、支持「全部翻译」**；复用 LLM Key，无 Key 时明确提示 | `v2/translate.py`、`ChatView.tsx`、`DiscoverTab.tsx` |
 | 删除好友 | 单聊右上角「⋯」→「删除好友」（二次确认），后端级联删除消息/朋友圈/音频并清理推荐关系 | `router.py`、`ChatView.tsx` |

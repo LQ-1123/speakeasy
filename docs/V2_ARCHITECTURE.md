@@ -164,6 +164,9 @@ def moment_for_prompt(moment: dict) -> str
 ```
 
 ### 4.7 `chat_service`（Lead）
+
+> 语言硬约束：`_llm_reply` 生成后会检查是否为目标语言（zh/ja/ko/en 脚本判定）；
+> 不符则调用 `_rewrite_in_language` 重写，仍不符则用 `_mock_reply` 的目标语言模板兜底。
 ```python
 class ChatService:
     def __init__(self, engines, db: DB, memory: MemoryManager, voice: FriendVoiceSynth,

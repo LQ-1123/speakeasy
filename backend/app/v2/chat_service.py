@@ -143,6 +143,61 @@ def _language_of(friend: dict) -> str:
     return lang if lang in LANGUAGE_NAMES else "en"
 
 
+#: 语言脚本特征：用于检查「模型是不是又回英文了」
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")
+_HANGUL_RE = re.compile(r"[\uac00-\ud7af]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def _visible_chars(text: str) -> int:
+    return sum(1 for ch in (text or "") if not ch.isspace())
+
+
+def _matches_language(text: str, lang: str) -> bool:
+    """粗判一段回复是否为目标语言（足够抓「中文好友突然整段英文」）。
+
+    只做脚本级判断，不判断英/法/德等拉丁语系之间的差异（那需要模型）。
+    """
+    body = text or ""
+    total = _visible_chars(body)
+    if total == 0:
+        return True
+    cjk = len(_CJK_RE.findall(body))
+    kana = len(_KANA_RE.findall(body))
+    hangul = len(_HANGUL_RE.findall(body))
+    latin = len(_LATIN_RE.findall(body))
+    cjk_ratio = (cjk + kana) / total
+    latin_ratio = latin / total
+
+    if lang == "zh":
+        return cjk >= 2 and cjk_ratio >= 0.25
+    if lang == "ja":
+        return kana >= 1 or cjk_ratio >= 0.35
+    if lang == "ko":
+        return hangul >= 1 and hangul / total >= 0.2
+    if lang in ("de", "fr", "es", "it", "pt"):
+        # 拉丁语系之间无法脚本区分；只拒绝「几乎全中文/日文/韩文」的回复
+        return cjk_ratio < 0.4 and latin >= 2
+    if lang == "en":
+        return cjk_ratio < 0.25
+    return True
+
+
+def _sanitize_persona_language(persona: str) -> str:
+    """修复旧版本生成的角色 prompt 里的语言矛盾句（「Never switch ... (or Chinese)」）。"""
+    text = persona or ""
+    text = text.replace(
+        "Never switch to English (or Chinese)",
+        "Never switch to English or any other language",
+    )
+    text = text.replace(
+        "even if the learner writes in English or Chinese",
+        "even if the learner writes in another language",
+    )
+    return text
+
+
 def _native_quirk_prefix(quirk: str, lang: str) -> str:
     q = (quirk or "").strip()
     if not q:
@@ -387,7 +442,7 @@ class ChatService:
         return _language_of(friend)
 
     def _system_prompt(self, friend: dict, review_exprs: list[dict]) -> str:
-        persona = (friend.get("personality_prompt") or "").strip()
+        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())
         try:
             memory_ctx = self.memory.build_context(friend, review_expressions=review_exprs)
         except Exception as exc:  # noqa: BLE001
@@ -400,7 +455,8 @@ class ChatService:
         else:
             language_rule = (
                 f"You always reply in natural {lang_name}. Even if the learner writes in English or "
-                f"mixes languages, answer in {lang_name}. Keep it to 1-2 short spoken sentences, "
+                f"mixes languages, answer ONLY in {lang_name} — never write an English sentence "
+                "as the reply, and never translate. Keep it to 1-2 short spoken sentences, "
                 "like a real chat message. "
             )
         base = (
@@ -473,8 +529,51 @@ class ChatService:
 
         text = _clean_reply("".join(chunks))
         if text:
+            lang = _language_of(friend)
+            if not _matches_language(text, lang):
+                log.info(
+                    "好友回复语言不符（期望 %s，实际 %r），尝试纠偏",
+                    lang, text[:80],
+                )
+                fixed = await self._rewrite_in_language(friend, text, lang)
+                if fixed:
+                    return fixed
+                # 纠偏失败：用目标语言的确定性回复兜底，绝不发错语言
+                return self._mock_reply(friend, user_text)
             return text
-        return self._fallback_reply(friend)
+        return self._mock_reply(friend, user_text)
+
+    async def _rewrite_in_language(self, friend: dict, text: str, lang: str) -> str | None:
+        """让模型把自己刚写错语言的回复改写成目标语言；失败返回 None。"""
+        lang_name = LANGUAGE_NAMES.get(lang, lang)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"You rewrite a chat reply so it is entirely in natural {lang_name}. "
+                    "Keep the meaning, tone and any personal details. "
+                    f"Output ONLY the rewritten {lang_name} reply — no English sentences, "
+                    "no translation, no explanation."
+                ),
+            },
+            {"role": "user", "content": text},
+        ]
+        chunks: list[str] = []
+        try:
+            async for delta in self.engines.llm.stream_chat(
+                messages, temperature=0.2, max_tokens=220
+            ):
+                if delta:
+                    chunks.append(delta)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("回复语言纠偏失败（%s: %s）", type(exc).__name__, exc)
+            return None
+        fixed = _clean_reply("".join(chunks))
+        if fixed and _matches_language(fixed, lang):
+            return fixed
+        return None
 
     def _fallback_reply(self, friend: dict) -> str:
         quirks = friend.get("speech_quirks") or []

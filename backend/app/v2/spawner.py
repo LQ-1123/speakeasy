@@ -931,8 +931,8 @@ class PersonaSpawner:
         return header + (
             "## How you speak (CRITICAL)\n"
             f"- You always talk to the learner in natural {lang_name}. Never switch to English "
-            f"(or Chinese), even if the learner writes in English or Chinese; if they seem lost, "
-            f"rephrase simply in {lang_short}.\n"
+            f"or any other language, even if the learner writes in another language; if they seem "
+            f"lost, rephrase simply in {lang_short}.\n"
             f"- Your voice is a native {country} speaker, so your {lang_short} sounds natural — "
             f"you handle the WORDING.\n"
             f"- Occasionally use your natural expressions: {quirks}. At most one per turn; "

@@ -153,7 +153,97 @@ const LANG_LABELS: Record<string, string> = {
   sv: "瑞典语",
   pl: "波兰语",
   ar: "阿拉伯语",
+  "es-mx": "西班牙语（墨西哥）",
 };
+
+export interface LangMeta {
+  flag: string;
+  label: string;
+}
+
+/** 语言 → 旗帜 + 母语写法（好友语言标签用）。 */
+const LANG_META: Record<string, LangMeta> = {
+  en: { flag: "🇬🇧", label: "English" },
+  ja: { flag: "🇯🇵", label: "日本語" },
+  ko: { flag: "🇰🇷", label: "한국어" },
+  pt: { flag: "🇧🇷", label: "Português" },
+  de: { flag: "🇩🇪", label: "Deutsch" },
+  fr: { flag: "🇫🇷", label: "Français" },
+  es: { flag: "🇪🇸", label: "Español" },
+  "es-mx": { flag: "🇲🇽", label: "Español (MX)" },
+  it: { flag: "🇮🇹", label: "Italiano" },
+  zh: { flag: "🇨🇳", label: "中文" },
+  ru: { flag: "🇷🇺", label: "Русский" },
+  tr: { flag: "🇹🇷", label: "Türkçe" },
+  nl: { flag: "🇳🇱", label: "Nederlands" },
+  sv: { flag: "🇸🇪", label: "Svenska" },
+  pl: { flag: "🇵🇱", label: "Polski" },
+  ar: { flag: "🇸🇦", label: "العربية" },
+};
+
+export function languageMeta(code: string): LangMeta {
+  const key = (code || "").trim().toLowerCase();
+  if (!key) return LANG_META.en ?? { flag: "🌐", label: "English" };
+  const direct = LANG_META[key];
+  if (direct) return direct;
+  const base = key.split("-")[0] ?? "";
+  const baseMeta = LANG_META[base];
+  if (baseMeta) return baseMeta;
+  return { flag: "🌐", label: key.toUpperCase() };
+}
+
+/** 好友当前用来回复的语言：优先后端 reply_language，回退 native_lang。 */
+export function replyLanguageOf(friend: Pick<Friend, "reply_language" | "native_lang">): string {
+  const lang = (friend.reply_language || friend.native_lang || "en").trim().toLowerCase();
+  return lang || "en";
+}
+
+export function replyLanguageMeta(friend: Pick<Friend, "reply_language" | "native_lang">): LangMeta {
+  return languageMeta(replyLanguageOf(friend));
+}
+
+/** 国家原值（后端 country）→ 旗帜 + 中文名；Discover 筛选项展示用。 */
+const COUNTRY_META: Record<string, LangMeta> = {
+  "united states": { flag: "🇺🇸", label: "美国" },
+  "united kingdom": { flag: "🇬🇧", label: "英国" },
+  japan: { flag: "🇯🇵", label: "日本" },
+  korea: { flag: "🇰🇷", label: "韩国" },
+  "south korea": { flag: "🇰🇷", label: "韩国" },
+  brazil: { flag: "🇧🇷", label: "巴西" },
+  mexico: { flag: "🇲🇽", label: "墨西哥" },
+  italy: { flag: "🇮🇹", label: "意大利" },
+  germany: { flag: "🇩🇪", label: "德国" },
+  france: { flag: "🇫🇷", label: "法国" },
+  spain: { flag: "🇪🇸", label: "西班牙" },
+  australia: { flag: "🇦🇺", label: "澳大利亚" },
+  india: { flag: "🇮🇳", label: "印度" },
+  ireland: { flag: "🇮🇪", label: "爱尔兰" },
+  china: { flag: "🇨🇳", label: "中国" },
+  canada: { flag: "🇨🇦", label: "加拿大" },
+  netherlands: { flag: "🇳🇱", label: "荷兰" },
+  sweden: { flag: "🇸🇪", label: "瑞典" },
+  norway: { flag: "🇳🇴", label: "挪威" },
+  poland: { flag: "🇵🇱", label: "波兰" },
+  portugal: { flag: "🇵🇹", label: "葡萄牙" },
+  russia: { flag: "🇷🇺", label: "俄罗斯" },
+  turkey: { flag: "🇹🇷", label: "土耳其" },
+  thailand: { flag: "🇹🇭", label: "泰国" },
+  vietnam: { flag: "🇻🇳", label: "越南" },
+  indonesia: { flag: "🇮🇩", label: "印度尼西亚" },
+  singapore: { flag: "🇸🇬", label: "新加坡" },
+  argentina: { flag: "🇦🇷", label: "阿根廷" },
+  chile: { flag: "🇨🇱", label: "智利" },
+  colombia: { flag: "🇨🇴", label: "哥伦比亚" },
+  egypt: { flag: "🇪🇬", label: "埃及" },
+  morocco: { flag: "🇲🇦", label: "摩洛哥" },
+};
+
+export function countryMeta(country: string): LangMeta {
+  const key = (country || "").trim().toLowerCase();
+  const meta = COUNTRY_META[key];
+  if (meta) return meta;
+  return { flag: "🌍", label: country || "不限" };
+}
 
 export function langLabel(code: string): string {
   const key = code.trim().toLowerCase();

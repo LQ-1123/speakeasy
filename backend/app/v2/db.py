@@ -24,6 +24,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from app.logging_utils import get_logger
+
+log = get_logger(__name__)
+
 #: 每张表里需要 JSON 编解码的列
 _JSON_COLUMNS: dict[str, tuple[str, ...]] = {
     "user_profile": ("target_languages", "fact_sheet"),
@@ -55,6 +59,7 @@ _FRIEND_DEFAULTS: dict[str, Any] = {
     "voice_rate": "+0%",
     "voice_pitch": "+0Hz",
     "language_mix_mode": "en_only",
+    "reply_language": "en",
     "age": 25,
     "occupation": "",
     "personality_prompt": "",
@@ -145,6 +150,7 @@ class DB:
                     timezone TEXT NOT NULL DEFAULT 'UTC',
                     native_lang TEXT NOT NULL DEFAULT 'en',
                     language_mix_mode TEXT DEFAULT 'en_only',
+                    reply_language TEXT DEFAULT 'en',
                     age INTEGER DEFAULT 25,
                     occupation TEXT DEFAULT '',
                     personality_prompt TEXT NOT NULL DEFAULT '',
@@ -201,6 +207,12 @@ class DB:
                 );
                 """
             )
+            # 轻量迁移：老 DB 补 reply_language 列（v2.1 多语言好友）
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(friends)").fetchall()}
+            if "reply_language" not in columns:
+                conn.execute("ALTER TABLE friends ADD COLUMN reply_language TEXT DEFAULT 'en'")
+                log.info("migrated friends table: added reply_language column")
+
             row = conn.execute("SELECT id FROM user_profile WHERE id=1").fetchone()
             if row is None:
                 conn.execute(
@@ -317,6 +329,7 @@ class DB:
             "name", "avatar_seed", "archetype_id", "voice_id", "voice_rate", "voice_pitch",
             "nationality", "city", "timezone", "native_lang", "language_mix_mode", "age",
             "occupation", "personality_prompt", "speech_quirks", "bio", "status",
+            "reply_language", "language_mix_mode",
             "referred_by_friend_id", "request_message", "closeness_level", "total_turns",
             "shared_episodes", "open_loops", "last_interaction_at",
         }

@@ -2,42 +2,40 @@
 
 /** 动态 · 偶遇 Tab：偶遇好友（国家/语种筛选）+ 好友申请 + 朋友圈动态流（按住语音评论）。 */
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Compass, Loader2, MessageCircle, RefreshCw, Sparkles, Users, X } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
 import { HoldToTalk } from "@/components/v2/HoldToTalk";
 import { useToast } from "@/components/v2/Toast";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/v2/ui";
-import { flagOf, localStateOf, relativeLabel } from "@/lib/v2/format";
+import { getArchetypeFilters } from "@/lib/v2/api";
+import { countryMeta, flagOf, langLabel, languageMeta, localStateOf, relativeLabel } from "@/lib/v2/format";
 import type { Friend, Moment } from "@/lib/v2/types";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
 
-const NATIONS = [
-  { value: "", label: "🌍 国家不限" },
-  { value: "Italy", label: "🇮🇹 意大利" },
-  { value: "Germany", label: "🇩🇪 德国" },
-  { value: "Japan", label: "🇯🇵 日本" },
-  { value: "Korea", label: "🇰🇷 韩国" },
-  { value: "France", label: "🇫🇷 法国" },
-  { value: "Spain", label: "🇪🇸 西班牙" },
-  { value: "Brazil", label: "🇧🇷 巴西" },
-  { value: "Mexico", label: "🇲🇽 墨西哥" },
-  { value: "UK", label: "🇬🇧 英国" },
-  { value: "USA", label: "🇺🇸 美国" },
+/**
+ * 接口不可用时的兜底列表：值必须与后端 `archetypes` 的 country / language 原值完全一致，
+ * 否则 spawner 严格筛选会匹配不到原型（用户反馈过的「选日本却得到英语好友」问题）。
+ */
+const FALLBACK_COUNTRIES = [
+  "Australia",
+  "Brazil",
+  "China",
+  "France",
+  "Germany",
+  "India",
+  "Ireland",
+  "Italy",
+  "Japan",
+  "Korea",
+  "Mexico",
+  "Spain",
+  "United Kingdom",
+  "United States",
 ];
 
-const LANGS = [
-  { value: "", label: "语种不限" },
-  { value: "en", label: "英语" },
-  { value: "it", label: "意大利语" },
-  { value: "de", label: "德语" },
-  { value: "ja", label: "日语" },
-  { value: "ko", label: "韩语" },
-  { value: "fr", label: "法语" },
-  { value: "es", label: "西班牙语" },
-  { value: "pt", label: "葡萄牙语" },
-];
+const FALLBACK_LANGUAGES = ["de", "en", "es", "fr", "it", "ja", "ko", "pt", "zh"];
 
 const GENDERS = [
   { value: "", label: "性别不限" },
@@ -85,6 +83,49 @@ export function DiscoverTab({
   const [language, setLanguage] = useState("");
   const [gender, setGender] = useState("");
   const [commentingId, setCommentingId] = useState<string | null>(null);
+  const [countries, setCountries] = useState<string[]>(FALLBACK_COUNTRIES);
+  const [languages, setLanguages] = useState<string[]>(FALLBACK_LANGUAGES);
+
+  // 筛选项动态化：国家/语种来自后端声线原型池（失败保留对齐后的静态兜底）
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await getArchetypeFilters();
+        if (cancelled) return;
+        if (data.countries.length > 0) setCountries(data.countries);
+        if (data.languages.length > 0) setLanguages(data.languages);
+      } catch {
+        /* 接口不可用时用静态兜底（值已与后端对齐） */
+      }
+    })();
+    // 深链预选：/?tab=discover&country=Japan&language=ja（截图/调试用）
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const country = params.get("country");
+      const lang = params.get("language");
+      if (country) setNationality(country);
+      if (lang) setLanguage(lang);
+    } catch {
+      /* 忽略非法 URL */
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 深链/历史选择可能不在后端当前列表中，补一个选项避免 <select> 显示空白
+  const countryOptions = useMemo(() => {
+    const list = [...countries];
+    if (nationality && !list.includes(nationality)) list.unshift(nationality);
+    return list;
+  }, [countries, nationality]);
+
+  const languageOptions = useMemo(() => {
+    const list = [...languages];
+    if (language && !list.includes(language)) list.unshift(language);
+    return list;
+  }, [languages, language]);
 
   return (
     <div className="pb-3">
@@ -113,11 +154,15 @@ export function DiscoverTab({
               onChange={(event) => setNationality(event.target.value)}
               className="se-filter"
             >
-              {NATIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
+              <option value="">🌍 国家不限</option>
+              {countryOptions.map((country) => {
+                const meta = countryMeta(country);
+                return (
+                  <option key={country} value={country}>
+                    {meta.flag} {meta.label}
+                  </option>
+                );
+              })}
             </select>
             <select
               aria-label="语种筛选"
@@ -125,11 +170,15 @@ export function DiscoverTab({
               onChange={(event) => setLanguage(event.target.value)}
               className="se-filter"
             >
-              {LANGS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
+              <option value="">🗣 语种不限</option>
+              {languageOptions.map((code) => {
+                const meta = languageMeta(code);
+                return (
+                  <option key={code} value={code}>
+                    {meta.flag} {langLabel(code)}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="flex gap-2">
@@ -155,6 +204,14 @@ export function DiscoverTab({
               {discovering ? "正在偶遇…" : "偶遇"}
             </button>
           </div>
+          {nationality || language ? (
+            <p className="se-filter-hint">
+              严格匹配：
+              {nationality ? `${countryMeta(nationality).flag} ${countryMeta(nationality).label}` : "任意国家"}
+              {" · "}
+              {language ? `${languageMeta(language).flag} ${langLabel(language)}` : "任意语种"}
+            </p>
+          ) : null}
         </div>
       </div>
 

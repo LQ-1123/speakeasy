@@ -6,9 +6,11 @@
 - ``cloud_health()`` 字段完整、计数与时间戳正确；
 - 云端成功 → 返回 ``backend="sensevoice-siliconflow"`` 且不加载本地模型；
 - 云端失败（401/超时）→ 自动回退本地 mock，绝不抛；
-- provider=local 时绝不调用云端。
+- provider=local 时绝不调用云端；
+- ``transcribe(..., language=...)`` 透传到本地 faster-whisper（fake model，不加载真模型），
+  云端路径不受影响、mock 路径的语言元数据同步覆盖。
 
-全程不联网（httpx.MockTransport）、不加载 faster-whisper（backend=mock）。
+全程不联网（httpx.MockTransport）、不加载 faster-whisper（backend=mock 或 fake model）。
 """
 
 from __future__ import annotations
@@ -338,3 +340,121 @@ async def test_cloud_success_then_failure_keeps_health_history(monkeypatch) -> N
     assert "503" in health["last_error"]
     # 失败不会清掉上一次成功时间
     assert health["last_success_at"] == success_at
+
+
+# --------------------------------------------------------------------------- #
+# STT language 透传（v2.1 多语言好友：chat_service 传 friend.reply_language）
+# --------------------------------------------------------------------------- #
+class _FakeSegment:
+    def __init__(self, text: str = "こんにちは") -> None:
+        self.text = text
+        self.start = 0.0
+        self.end = 0.5
+        self.avg_logprob = -0.1
+        self.no_speech_prob = 0.01
+
+
+class _FakeInfo:
+    pass
+
+
+class _FakeWhisperModel:
+    """只记录 ``model.transcribe(**kwargs)`` 的假 faster-whisper 模型。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def transcribe(self, audio, **kwargs):
+        self.calls.append(kwargs)
+        return [_FakeSegment()], _FakeInfo()
+
+
+def test_transcribe_sync_passes_language_to_whisper() -> None:
+    engine = STTEngine(STTSettings(backend="faster-whisper", language="en"))
+    model = _FakeWhisperModel()
+    audio = np.zeros(SR_IN // 2, dtype=np.float32)
+
+    # 未显式传 language → 用 cfg.language
+    engine._transcribe_sync(model, audio)
+    assert model.calls[-1]["language"] == "en"
+
+    # 显式传 language → 覆盖本次调用的 cfg.language
+    engine._transcribe_sync(model, audio, "ja")
+    assert model.calls[-1]["language"] == "ja"
+
+    engine._transcribe_sync(model, audio, "ko")
+    assert model.calls[-1]["language"] == "ko"
+
+
+async def test_transcribe_forwards_language_on_local_path(monkeypatch) -> None:
+    engine = STTEngine(STTSettings(backend="faster-whisper", language="en"))
+
+    async def fake_ensure_model():
+        return object()
+
+    multi = object()
+
+    async def fake_ensure_multilingual_model():
+        return multi
+
+    monkeypatch.setattr(engine, "_ensure_model", fake_ensure_model)
+    monkeypatch.setattr(engine, "_ensure_multilingual_model", fake_ensure_multilingual_model)
+
+    captured: dict = {}
+
+    def fake_sync(model, audio, language=None):
+        captured["language"] = language
+        captured["model"] = model
+        return "名前は？", [], language or "en"
+
+    monkeypatch.setattr(engine, "_transcribe_sync", fake_sync)
+
+    # 非英语 → 走多语言模型，语言透传
+    transcript = await engine.transcribe(_tone_pcm(0.3), SR_IN, language="ja")
+    assert captured["language"] == "ja"
+    assert captured["model"] is multi
+    assert transcript.language == "ja"
+    assert transcript.backend == "faster-whisper"
+
+    # 不传 language → 走主模型，透传 None（_transcribe_sync 内部回落 cfg.language）
+    await engine.transcribe(_tone_pcm(0.3), SR_IN)
+    assert captured["language"] is None
+    assert captured["model"] is not multi
+
+
+async def test_transcribe_language_override_on_mock_backend() -> None:
+    engine = STTEngine(STTSettings(backend="mock", mock_text="hello", mock_latency_ms=0))
+
+    transcript = await engine.transcribe(_tone_pcm(0.2), SR_IN, language="ko")
+    assert transcript.language == "ko"
+    assert transcript.backend == "mock"
+
+    default_transcript = await engine.transcribe(_tone_pcm(0.2), SR_IN)
+    assert default_transcript.language == "en"
+
+
+async def test_cloud_path_unaffected_by_language_kw(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"text": "こんにちは"})
+
+    _patch_transport(monkeypatch, handler)
+    engine = _engine()
+    engine.apply_cloud_config(_cloud_cfg())
+
+    transcript = await engine.transcribe(_tone_pcm(0.3), SR_IN, language="ja")
+    # 云端 SenseVoice 自动识别：仍然走云端成功路径
+    assert transcript.backend == "sensevoice-siliconflow"
+    assert transcript.text == "こんにちは"
+
+
+async def test_non_english_without_multilingual_model_returns_empty(monkeypatch) -> None:
+    engine = STTEngine(STTSettings(backend="faster-whisper", language="en"))
+
+    async def no_multilingual():
+        return None
+
+    monkeypatch.setattr(engine, "_ensure_multilingual_model", no_multilingual)
+    transcript = await engine.transcribe(_tone_pcm(0.2), SR_IN, language="ja")
+    assert transcript.text == ""
+    assert transcript.language == "ja"
+    assert transcript.backend == "unavailable"

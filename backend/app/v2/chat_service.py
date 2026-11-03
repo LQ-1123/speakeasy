@@ -81,6 +81,76 @@ _MOCK_DEFAULT_REPLIES: tuple[str, ...] = (
     "{q}fair enough. What are you up to later today?",
 )
 
+#: 多语言回复：display name（用于 prompt）与确定性 mock 回复池（无 LLM key 时也能说对语言）
+LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "ja": "Japanese (日本語)",
+    "ko": "Korean (한국어)",
+    "pt": "Portuguese (Português)",
+    "es": "Spanish (Español)",
+    "de": "German (Deutsch)",
+    "fr": "French (Français)",
+    "it": "Italian (Italiano)",
+    "zh": "Chinese (中文)",
+}
+
+_MOCK_LANG_REPLIES: dict[str, tuple[str, ...]] = {
+    "ja": (
+        "{q}なるほどね。最近は何をしてることが多い？",
+        "{q}それはいいね。週末は何をする予定？",
+        "{q}へえ、面白いね。もう少し詳しく聞かせて？",
+    ),
+    "ko": (
+        "{q}그렇구나. 요즘 뭐 하고 지내?",
+        "{q}오, 재밌다. 주말에 뭐 해?",
+        "{q}그래? 좀 더 얘기해 줄래?",
+    ),
+    "pt": (
+        "{q}entendi. E o que você tem feito ultimamente?",
+        "{q}que legal. O que você costuma fazer no fim de semana?",
+        "{q}sério? Me conta mais sobre isso.",
+    ),
+    "es": (
+        "{q}ya veo. ¿Y qué has estado haciendo últimamente?",
+        "{q}qué bien. ¿Qué te gusta hacer los fines de semana?",
+        "{q}¿en serio? Cuéntame un poco más.",
+    ),
+    "de": (
+        "{q}verstehe. Und was machst du so in letzter Zeit?",
+        "{q}schön. Was machst du am Wochenende?",
+        "{q}echt? Erzähl mir mehr davon.",
+    ),
+    "fr": (
+        "{q}je vois. Et qu'est-ce que tu fais en ce moment ?",
+        "{q}super. Qu'est-ce que tu fais le week-end ?",
+        "{q}sérieux ? Raconte-moi un peu plus.",
+    ),
+    "it": (
+        "{q}capisco. E cosa fai in questi giorni?",
+        "{q}bello. Cosa fai nel fine settimana?",
+        "{q}davvero? Raccontami qualcosa in più.",
+    ),
+    "zh": (
+        "{q}原来是这样。你最近在忙什么？",
+        "{q}挺好的。周末一般做什么？",
+        "{q}真的吗？多说一点吧。",
+    ),
+}
+
+
+def _language_of(friend: dict) -> str:
+    lang = str(friend.get("reply_language") or "en").strip().lower()
+    return lang if lang in LANGUAGE_NAMES else "en"
+
+
+def _native_quirk_prefix(quirk: str, lang: str) -> str:
+    q = (quirk or "").strip()
+    if not q:
+        return ""
+    if lang in ("ja", "zh"):
+        return f"{q}，"
+    return f"{q}, "
+
 
 def _clean_reply(text: str) -> str:
     text = _MARKDOWN_RE.sub("", text or "")
@@ -156,7 +226,9 @@ class ChatService:
             raise KeyError(friend_id)
 
         decoded = await asyncio.to_thread(self.audio.decode_upload, audio_bytes, filename)
-        transcript, stt_meta = await self._transcribe(decoded["pcm16"])
+        reply_lang = _language_of(friend)
+        stt_language = None if reply_lang == "en" else reply_lang
+        transcript, stt_meta = await self._transcribe(decoded["pcm16"], language=stt_language)
         if not transcript:
             transcript = "（语音没有识别清楚，可以再说一次吗？）"
         dur = int(decoded["duration_ms"] or duration_ms or 0)
@@ -239,7 +311,9 @@ class ChatService:
         friend_msg = await self.store_friend_voice(friend, reply_text)
 
         # 旁路：润色批注 + 记忆提炼 + 表达本实战检测
-        self.spawn_bg(self._suggestion_worker(user_msg["id"], friend, transcript))
+        self.spawn_bg(
+            self._suggestion_worker(user_msg["id"], friend, transcript, _language_of(friend))
+        )
         self._schedule_memory(fid)
         self.spawn_bg(self._expression_mastery_worker(transcript))
 
@@ -250,6 +324,7 @@ class ChatService:
             "closeness_level": level,
             "total_turns": total_turns,
             "memory_updated": False,
+            "reply_language": self._reply_language(friend),
             "stt": stt_meta or {"backend": "unknown", "latency_ms": 0.0},
         }
 
@@ -264,14 +339,23 @@ class ChatService:
     # ------------------------------------------------------------------ #
     # STT / LLM / TTS
     # ------------------------------------------------------------------ #
-    async def _transcribe(self, pcm16: bytes) -> tuple[str, dict[str, Any]]:
-        """返回 (文本, STT 元信息)，元信息用于前端展示/排查（backend、latency）。"""
+    async def _transcribe(
+        self, pcm16: bytes, *, language: str | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """返回 (文本, STT 元信息)，元信息用于前端展示/排查（backend、latency）。
+
+        ``language``：好友回复语言非英语时传给 STT，避免用英语模型硬转写日语/韩语等。
+        """
         try:
-            result = await self.engines.stt.transcribe(pcm16, 16000)
+            try:
+                result = await self.engines.stt.transcribe(pcm16, 16000, language=language)
+            except TypeError:  # 兼容不支持 language 参数的旧 STT 实现
+                result = await self.engines.stt.transcribe(pcm16, 16000)
             text = (getattr(result, "text", "") or "").strip()
             meta = {
                 "backend": getattr(result, "backend", "unknown"),
                 "latency_ms": round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+                "language": getattr(result, "language", None),
             }
             backend = str(meta.get("backend") or "")
             if "sensevoice" in backend:
@@ -284,13 +368,23 @@ class ChatService:
                     except Exception:  # noqa: BLE001
                         pass
             else:
-                local_model = getattr(getattr(self.engines.stt, "cfg", None), "model_size", None)
-                if local_model:
-                    meta["model"] = f"faster-whisper:{local_model}"
+                stt_cfg = getattr(self.engines.stt, "cfg", None)
+                lang = str(meta.get("language") or "").lower()
+                if lang and lang not in ("en", "english"):
+                    multi = getattr(stt_cfg, "multilingual_model", None)
+                    if multi:
+                        meta["model"] = f"faster-whisper:{multi}"
+                else:
+                    local_model = getattr(stt_cfg, "model_size", None)
+                    if local_model:
+                        meta["model"] = f"faster-whisper:{local_model}"
             return text, meta
         except Exception as exc:  # noqa: BLE001
             log.warning("STT 失败（降级为空）: %s: %s", type(exc).__name__, exc)
             return "", {"backend": "error", "latency_ms": 0.0, "error": f"{type(exc).__name__}"}
+
+    def _reply_language(self, friend: dict) -> str:
+        return _language_of(friend)
 
     def _system_prompt(self, friend: dict, review_exprs: list[dict]) -> str:
         persona = (friend.get("personality_prompt") or "").strip()
@@ -299,29 +393,50 @@ class ChatService:
         except Exception as exc:  # noqa: BLE001
             log.warning("build_context 失败（忽略）: %s: %s", type(exc).__name__, exc)
             memory_ctx = ""
+        lang = _language_of(friend)
+        lang_name = LANGUAGE_NAMES[lang]
+        if lang == "en":
+            language_rule = "Reply with 1-2 short sentences of natural spoken English. "
+        else:
+            language_rule = (
+                f"You always reply in natural {lang_name}. Even if the learner writes in English or "
+                f"mixes languages, answer in {lang_name}. Keep it to 1-2 short spoken sentences, "
+                "like a real chat message. "
+            )
         base = (
             f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
             f"{friend.get('nationality', '')}. You are chatting with your friend on a messaging app. "
-            "Reply with 1-2 short sentences of natural spoken English. "
-            "Never mention being an AI. Always leave a hook (a question or an invitation to continue). "
+            + language_rule
+            + "Never mention being an AI. Always leave a hook (a question or an invitation to continue). "
             "Do not use markdown or emojis. Do not write action descriptions."
         )
         return "\n\n".join(p for p in (persona, base, memory_ctx) if p)
 
     def _mock_reply(self, friend: dict, user_text: str) -> str:
-        """无 key 时的 deterministic 人设回复（比通用模板更像真人）。"""
+        """无 key 时的 deterministic 人设回复（比通用模板更像真人）。
+
+        非英语好友用该语言的模板，保证「选日语就真的回日语」在演示模式下也成立。
+        """
         quirks = friend.get("speech_quirks") or []
         quirk = str(quirks[0]).strip() if quirks else ""
-        prefix = f"{quirk[:1].upper()}{quirk[1:]}, " if quirk else ""
         city = str(friend.get("city") or "here")
+        lang = _language_of(friend)
+        seed = zlib.crc32(f"{friend.get('id','')}|{user_text}".encode("utf-8")) & 0xFFFFFFFF
+
+        if lang != "en":
+            pool = _MOCK_LANG_REPLIES.get(lang) or _MOCK_DEFAULT_REPLIES
+            prefix = _native_quirk_prefix(quirk, lang)
+            text = pool[seed % len(pool)].format(q=prefix, city=city)
+            return _clean_reply(text)
+
+        prefix = f"{quirk[:1].upper()}{quirk[1:]}, " if quirk else ""
         topic = "default"
         for name, pattern in _TOPIC_PATTERNS:
             if pattern.search(user_text or ""):
                 topic = name
                 break
         pool = _MOCK_TOPIC_REPLIES.get(topic) or _MOCK_DEFAULT_REPLIES
-        idx = (zlib.crc32(f"{friend.get('id','')}|{user_text}".encode("utf-8")) & 0xFFFFFFFF) % len(pool)
-        text = pool[idx].format(q=prefix, city=city)
+        text = pool[seed % len(pool)].format(q=prefix, city=city)
         return _clean_reply(text)
 
     async def _llm_reply(
@@ -449,13 +564,16 @@ class ChatService:
     # ------------------------------------------------------------------ #
     # 旁路 worker
     # ------------------------------------------------------------------ #
-    async def _suggestion_worker(self, message_id: str, friend: dict, text: str) -> None:
+    async def _suggestion_worker(
+        self, message_id: str, friend: dict, text: str, language: str = "en"
+    ) -> None:
         try:
             result = await generate_suggestion(
                 self.engines.llm,
                 text,
                 friend_name=friend.get("name", ""),
                 friend_context=friend.get("personality_prompt", "")[:200],
+                language=language,
             )
             await asyncio.to_thread(
                 self.db.update_message, message_id, suggestion=result

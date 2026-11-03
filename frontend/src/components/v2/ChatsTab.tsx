@@ -6,7 +6,7 @@ import { Check, ChevronRight, MessageCircle, UserPlus, X } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/v2/ui";
-import { flagOf, localStateOf, relativeLabel } from "@/lib/v2/format";
+import { flagOf, localStateOf, relativeLabel, replyLanguageMeta } from "@/lib/v2/format";
 import type { Friend } from "@/lib/v2/types";
 
 interface ChatsTabProps {
@@ -107,6 +107,7 @@ export function ChatsTab({
           <div className="se-list">
             {friends.map((friend) => {
               const local = localStateOf(friend);
+              const lang = replyLanguageMeta(friend);
               const unread = friend.unread > 0;
               const lastAt = friend.last_message?.created_at || friend.last_interaction_at;
               return (
@@ -129,8 +130,11 @@ export function ChatsTab({
                         {friend.city || friend.nationality}
                       </span>
                     </div>
-                    <p className="mt-0.5 truncate text-[12.5px] leading-relaxed text-[color:var(--se-dim)]">
-                      {previewOf(friend)}
+                    <p className="mt-0.5 flex items-center gap-1 overflow-hidden text-[12.5px] leading-relaxed text-[color:var(--se-dim)]">
+                      <span className="se-lang-tag" title={`回复语言：${lang.label}`}>
+                        {lang.flag} {lang.label}
+                      </span>
+                      <span className="truncate">{previewOf(friend)}</span>
                     </p>
                   </div>
                   <div className="flex w-[62px] shrink-0 flex-col items-end gap-1 self-stretch pt-0.5">

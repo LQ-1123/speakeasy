@@ -9,6 +9,7 @@
 // Friend
 {
   "id": "uuid", "name": "Marco", "avatar_seed": "m-8132", "archetype_id": "it_multilingual_male_01",
+  "reply_language": "it",             // 好友回复语言（en/ja/ko/pt/es/de/fr/it/zh）；TTS 用对应声线
   "voice_id": "it-IT-GiuseppeMultilingualNeural", "voice_rate": "+0%", "voice_pitch": "+0Hz",
   "nationality": "Italy", "city": "Rome", "timezone": "Europe/Rome", "native_lang": "it",
   "language_mix_mode": "en_only", "age": 27, "occupation": "independent vinyl record store clerk",
@@ -38,7 +39,7 @@
 |---|---|
 | `GET /api/v2/bootstrap` | 一次性拉取：profile、词表数量、LLM 是否 mock、好友列表（同 friends）。用于首屏。首次无好友时**异步触发匹配 2 位好友**，返回 `pending_onboarding: true`，前端轮询 `/friends` 直到出现。 |
 | `GET /api/v2/friends?status=` | 好友列表（默认 active）。含 pending_request 列表 `{"friends": [...], "requests": [...], "pending_onboarding": bool}`。首次无好友时后台生成 2 位反差好友（英音 + 意大利），前端轮询直到出现。 |
-| `POST /api/v2/friends/discover` | body `{"nationality":"Germany","language":"de","gender":"female"}`（都可选）→ `{"friend": Friend, "message": Message}`；新好友自动发第一条破冰语音条。 |
+| `POST /api/v2/friends/discover` | body `{"nationality":"Japan","language":"ja","gender":"female"}`（都可选）→ `{"friend": Friend, "message": Message}`；新好友自动发第一条破冰语音条。**筛选严格生效**：不支持的组合返回 422 + 当前支持的国家/语种列表，不再静默换人。 |
 | `GET /api/v2/friends/{id}` | 好友详情 + `memory`（episodes/open_loops）+ `request_message`。 |
 | `POST /api/v2/friends/{id}/accept` | 通过好友申请（pending_request → active），返回 `{"friend":..., "message":...}`，并发第一条语音。 |
 | `POST /api/v2/friends/{id}/decline` | 忽略申请。 |

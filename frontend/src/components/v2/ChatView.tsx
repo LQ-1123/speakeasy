@@ -26,6 +26,7 @@ import {
   errorText,
   localStateOf,
   relativeLabel,
+  replyLanguageMeta,
   shouldShowDayDivider,
 } from "@/lib/v2/format";
 import type { Message } from "@/lib/v2/types";
@@ -89,6 +90,7 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
   friendRef.current = friend;
 
   const local = useMemo(() => localStateOf(friend, now), [friend, now]);
+  const langMeta = useMemo(() => replyLanguageMeta(friend), [friend]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -266,8 +268,11 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
           <ChevronLeft size={24} />
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <div className="flex items-center justify-center gap-1.5">
+          <div className="flex min-w-0 items-center justify-center gap-1.5">
             <span className="truncate text-[15px] font-semibold">{friend.name}</span>
+            <span className="se-lang-tag" title={`回复语言：${langMeta.label}`}>
+              {langMeta.flag} {langMeta.label}
+            </span>
             <span className="text-[12px]" aria-hidden>
               {friend.nationality ? `${local.icon}` : ""}
             </span>
@@ -405,6 +410,12 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
                   </p>
                   <p className="text-[12px] text-[color:var(--se-dim)]">
                     {local.time} 当地 · {closenessLabel(friend.closeness_level)} · {friend.total_turns} 轮对话
+                  </p>
+                  <p className="mt-1 flex items-center gap-1.5 text-[11px] text-[color:var(--se-dim)]">
+                    <span className="se-lang-tag">
+                      {langMeta.flag} {langMeta.label}
+                    </span>
+                    回复语言 · {friend.nationality}
                   </p>
                 </div>
               </div>

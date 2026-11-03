@@ -474,14 +474,26 @@ async def list_friends(request: Request, status: str | None = None) -> dict:
 async def discover_friend(request: Request, body: DiscoverBody | None = None) -> dict:
     services = _services(request)
     body = body or DiscoverBody()
+    has_filters = bool(
+        (body.nationality or "").strip() or (body.language or "").strip() or (body.gender or "").strip()
+    )
     try:
         friend = await services.spawner.spawn(
             nationality=body.nationality,
             language=body.language,
             gender=body.gender,
             status="active",
+            strict_filters=has_filters,
         )
     except Exception as exc:  # noqa: BLE001
+        # 用户明确筛了国家/语种时不能静默换人：返回 422 + 可读原因
+        from app.v2.spawner import ArchetypeNotFound  # noqa: PLC0415
+
+        if isinstance(exc, ArchetypeNotFound):
+            raise HTTPException(
+                status_code=422,
+                detail=getattr(exc, "detail", None) or str(exc),
+            ) from exc
         log.exception("discover 失败")
         raise HTTPException(status_code=502, detail=f"捏人失败: {exc}") from exc
     message = await _send_icebreaker(services, friend)

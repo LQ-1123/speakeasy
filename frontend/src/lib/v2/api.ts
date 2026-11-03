@@ -7,7 +7,7 @@
  * 每个调用都带超时；失败抛 `ApiError`，由 UI 转成中文提示 + 空态。
  */
 
-import { isRecord, str } from "@/lib/guards";
+import { asStringArray, isRecord, str } from "@/lib/guards";
 import {
   parseBootstrap,
   parseChatTurn,
@@ -399,6 +399,31 @@ export const api = {
 };
 
 export type { Friend, Message, Moment, Expression, MemoryPayload, UserProfile };
+
+/* ================================================================== */
+/* 偶遇筛选：声线原型元数据（GET /api/v2/archetypes）                    */
+/* ================================================================== */
+
+export interface ArchetypeFilters {
+  /** 后端 country 原值（United States / United Kingdom / Japan ...） */
+  countries: string[];
+  /** 后端 language 原值（en / ja / ko / pt / es ...） */
+  languages: string[];
+}
+
+export function getArchetypeFilters(): Promise<ArchetypeFilters> {
+  return request(
+    "/archetypes",
+    (raw) => {
+      const r = isRecord(raw) ? raw : {};
+      return {
+        countries: asStringArray(r.countries) ?? [],
+        languages: asStringArray(r.languages) ?? [],
+      };
+    },
+    { timeoutMs: 8000 },
+  );
+}
 
 /* ================================================================== */
 /* 个人设置：LLM（/api/llm/*）与 STT（/api/v2/settings/*）              */

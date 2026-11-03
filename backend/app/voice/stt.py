@@ -251,6 +251,10 @@ class STTEngine:
         self._model: Any = None
         self._load_error: str | None = None
         self._load_lock = asyncio.Lock()
+        # 非英语（ja/ko/...) 专用的多语言模型；distil-large-v3 是英语专用，不能拿来转写日语
+        self._multilingual_model: Any = None
+        self._multilingual_error: str | None = None
+        self._multilingual_lock = asyncio.Lock()
         self._resolved_device = str(self.cfg.device)
         self._resolved_compute = str(self.cfg.compute_type)
         self._closed = False
@@ -312,6 +316,9 @@ class STTEngine:
             "compute_type": self._resolved_compute,
             "loaded": self._model is not None,
             "error": self._load_error,
+            "multilingual_model": str(getattr(self.cfg, "multilingual_model", "") or ""),
+            "multilingual_loaded": self._multilingual_model is not None,
+            "multilingual_error": self._multilingual_error,
             "calls": self._calls,
         }
 
@@ -475,6 +482,61 @@ class STTEngine:
             self._degrade_to_mock(self._load_error or "未知加载失败")
             return None
 
+    async def _ensure_multilingual_model(self) -> Any:
+        """懒加载多语言 faster-whisper 模型（ja/ko/pt/es… 语音条用）。
+
+        为什么需要：默认 ``distil-large-v3`` 是**英语专用**模型，硬用它转写日语会输出
+        "Hello," 之类幻觉。这里按需加载 ``cfg.multilingual_model``（默认 ``small``），
+        仅当请求语言不是英语时触发；首次使用会下载模型（约 500MB）。
+        """
+        if self._multilingual_model is not None:
+            return self._multilingual_model
+        name = str(getattr(self.cfg, "multilingual_model", "") or "small").strip()
+        if not name:
+            name = "small"
+        async with self._multilingual_lock:
+            if self._multilingual_model is not None:
+                return self._multilingual_model
+            try:
+                from faster_whisper import WhisperModel  # noqa: PLC0415 - 重依赖
+            except Exception as exc:  # noqa: BLE001
+                self._multilingual_error = f"faster_whisper import 失败: {type(exc).__name__}: {exc}"
+                return None
+
+            attempts: list[tuple[str, str]] = [(self.cfg.device, self.cfg.compute_type)]
+            if self.cfg.cpu_fallback and str(self.cfg.device).lower() != "cpu":
+                attempts.append(("cpu", "int8"))
+            for device, compute in attempts:
+                try:
+                    log.info(
+                        "STT 加载多语言模型 model=%s device=%s compute_type=%s（首次会下载）...",
+                        name, device, compute,
+                    )
+                    sw = Stopwatch()
+                    model = await asyncio.to_thread(
+                        WhisperModel,
+                        name,
+                        device=device,
+                        compute_type=compute,
+                        num_workers=max(1, int(self.cfg.num_workers)),
+                        download_root=self.cfg.download_root or None,
+                        local_files_only=bool(self.cfg.local_files_only),
+                    )
+                    self._multilingual_model = model
+                    self._multilingual_error = None
+                    log.info(
+                        "STT 多语言模型 ready: model=%s device=%s compute_type=%s (load %.0fms)",
+                        name, device, compute, sw.elapsed_ms(),
+                    )
+                    return model
+                except Exception as exc:  # noqa: BLE001
+                    self._multilingual_error = f"{type(exc).__name__} @ {device}/{compute}: {exc}"
+                    log.warning(
+                        "STT 多语言模型加载失败 (device=%s compute_type=%s): %s: %s",
+                        device, compute, type(exc).__name__, exc,
+                    )
+            return None
+
     def _degrade_to_mock(self, reason: str) -> None:
         if self._requested in ("auto", "mock"):
             if self._backend != "mock":
@@ -494,9 +556,12 @@ class STTEngine:
         """释放模型（int8 ctranslate2 模型在 GC 时释放显存）。"""
         self._closed = True
         model, self._model = self._model, None
-        if model is not None:
+        multi_model, self._multilingual_model = self._multilingual_model, None
+        for item in (model, multi_model):
+            if item is None:
+                continue
             try:
-                await asyncio.to_thread(self._release_model, model)
+                await asyncio.to_thread(self._release_model, item)
             except Exception as exc:  # pragma: no cover
                 log.debug("STT 模型释放失败（忽略）: %s", exc)
         log.debug("STT engine closed (backend=%s)", self._backend)
@@ -514,12 +579,21 @@ class STTEngine:
     # ------------------------------------------------------------------ #
     # 转写
     # ------------------------------------------------------------------ #
-    async def transcribe(self, pcm16: bytes, sample_rate: int = SR_IN) -> Transcript:
+    async def transcribe(
+        self,
+        pcm16: bytes,
+        sample_rate: int = SR_IN,
+        *,
+        language: str | None = None,
+    ) -> Transcript:
         """把 PCM16 语音转成文本。
 
         Args:
             pcm16: 16-bit 小端 mono PCM 字节串。
             sample_rate: 输入采样率；非 16k 时内部重采样（上层已保证 16k）。
+            language: 覆盖本次转写语言（V2 多语言好友传 ``friend.reply_language``）。
+                ``None`` 用 ``cfg.language``；显式传入则覆盖本地 faster-whisper 的
+                ``language``（本次调用级，不改全局配置）；云端 SenseVoice 始终自动识别。
 
         Returns:
             :class:`Transcript`（``text`` 已清洗；空文本表示"没听到有效语音"）。
@@ -529,12 +603,14 @@ class STTEngine:
         sr = int(sample_rate or SR_IN)
         if sr <= 0:
             sr = SR_IN
+        requested_language = str(language).strip() if language else ""
+        effective_language = requested_language or str(self.cfg.language or "en")
 
         audio = pcm16_to_float32(pcm16)
         if audio.size == 0:
             log.debug("STT 收到空音频，返回空转写")
             return Transcript(
-                text="", language=self.cfg.language, duration_s=0.0,
+                text="", language=effective_language, duration_s=0.0,
                 latency_ms=sw.elapsed_ms(), backend=self._backend, segments=[],
             )
         if sr != SR_IN:
@@ -548,23 +624,44 @@ class STTEngine:
         if cloud_transcript is not None:
             return cloud_transcript
 
+        use_multilingual = bool(
+            requested_language and requested_language.lower() not in ("en", "auto", "english")
+        )
         if self._backend == "mock":
-            return await self._transcribe_mock(sw, duration)
+            if use_multilingual:
+                # mock 只有固定英文文本；非英语时别用英文假文本冒充转写
+                return Transcript(
+                    text="", language=effective_language, duration_s=duration,
+                    latency_ms=sw.elapsed_ms(), backend="mock", segments=[],
+                )
+            return await self._transcribe_mock(sw, duration, language=effective_language)
 
-        model = await self._ensure_model()
-        if model is None:
-            return await self._transcribe_mock(sw, duration)
+        if use_multilingual:
+            model = await self._ensure_multilingual_model()
+            if model is None:
+                log.warning(
+                    "多语言模型不可用，非英语转写返回空（%s）", effective_language
+                )
+                return Transcript(
+                    text="", language=effective_language, duration_s=duration,
+                    latency_ms=sw.elapsed_ms(), backend="unavailable", segments=[],
+                )
+        else:
+            model = await self._ensure_model()
+            if model is None:
+                return await self._transcribe_mock(sw, duration, language=effective_language)
 
         try:
-            text, segments, language = await asyncio.to_thread(
-                self._transcribe_sync, model, audio
+            args: tuple[Any, ...] = (
+                (model, audio, requested_language) if requested_language else (model, audio)
             )
+            text, segments, language = await asyncio.to_thread(self._transcribe_sync, *args)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.warning("STT 推理失败（%s: %s），本次返回空转写", type(exc).__name__, exc)
             return Transcript(
-                text="", language=self.cfg.language, duration_s=duration,
+                text="", language=effective_language, duration_s=duration,
                 latency_ms=sw.elapsed_ms(), backend=self._backend, segments=[],
             )
 
@@ -573,12 +670,12 @@ class STTEngine:
         if text and not cleaned:
             log.debug("STT 输出被清洗为空（疑似幻听）: %r", text[:80])
         log.debug(
-            "STT %.0fms dur=%.2fs text=%r (backend=%s)",
-            latency, duration, cleaned[:80], self._backend,
+            "STT %.0fms dur=%.2fs text=%r (backend=%s, lang=%s)",
+            latency, duration, cleaned[:80], self._backend, language or effective_language,
         )
         return Transcript(
             text=cleaned,
-            language=language or self.cfg.language,
+            language=language or effective_language,
             duration_s=duration,
             latency_ms=latency,
             backend=self._backend,
@@ -620,11 +717,14 @@ class STTEngine:
         return transcript
 
     def _transcribe_sync(
-        self, model: Any, audio: np.ndarray
+        self, model: Any, audio: np.ndarray, language: str | None = None
     ) -> tuple[str, list[dict[str, Any]], str]:
-        """真正调用 faster-whisper（在线程池里跑）。"""
+        """真正调用 faster-whisper（在线程池里跑）。
+
+        ``language`` 显式传入时覆盖 ``cfg.language``（仅本次调用）。
+        """
         kwargs: dict[str, Any] = {
-            "language": self.cfg.language,
+            "language": str(language).strip() if language else self.cfg.language,
             "beam_size": max(1, int(self.cfg.beam_size)),
             "best_of": max(1, int(self.cfg.best_of)),
             "vad_filter": False,
@@ -657,10 +757,13 @@ class STTEngine:
                         ),
                     }
                 )
-        language = str(getattr(info, "language", self.cfg.language) or self.cfg.language)
-        return " ".join(texts).strip(), summary, language
+        fallback_language = str(language).strip() if language else self.cfg.language
+        detected = str(getattr(info, "language", fallback_language) or fallback_language)
+        return " ".join(texts).strip(), summary, detected
 
-    async def _transcribe_mock(self, sw: Stopwatch, duration: float) -> Transcript:
+    async def _transcribe_mock(
+        self, sw: Stopwatch, duration: float, language: str | None = None
+    ) -> Transcript:
         """mock 后端：固定延迟 + 固定文本（用于无模型端到端联调）。"""
         delay = max(0, int(self.cfg.mock_latency_ms)) / 1000.0
         if delay > 0:
@@ -668,7 +771,7 @@ class STTEngine:
         text = clean_transcript(str(self.cfg.mock_text)) or str(self.cfg.mock_text)
         return Transcript(
             text=text,
-            language=self.cfg.language,
+            language=str(language).strip() if language else self.cfg.language,
             duration_s=duration,
             latency_ms=sw.elapsed_ms(),
             backend="mock",

@@ -16,7 +16,7 @@ import { NotesTab } from "@/components/v2/NotesTab";
 import { SettingsPanel } from "@/components/v2/SettingsPanel";
 import { TabBar } from "@/components/v2/TabBar";
 import { ToastProvider, useToast } from "@/components/v2/Toast";
-import { api } from "@/lib/v2/api";
+import { api, apiErrorText } from "@/lib/v2/api";
 import {
   emptyFactSheet,
   type Expression,
@@ -434,7 +434,8 @@ function AppInner() {
         showToast(`${response.friend.name} 来打招呼了 👋`, "success");
         openChat(response.friend);
       } catch (err) {
-        showToast(`偶遇失败：${errorText(err)}`, "error");
+        // 后端 422（不支持的组合/原型用尽）时 detail 是中文，直接展示
+        showToast(`偶遇失败：${apiErrorText(err)}`, "error");
       } finally {
         if (mountedRef.current) setDiscovering(false);
       }

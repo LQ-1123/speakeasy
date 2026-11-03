@@ -2,8 +2,9 @@
 
 **全程不联网**：edge 合成被 monkeypatch 成假的 numpy 波形；tone 兜底是纯 numpy。
 覆盖：
-- 20 个原型的数量/必填字段/声线名格式/时区/城市池/名字池/职业池；
-- 10 个国家覆盖（美/英/澳/印/爱尔兰/德/意/西/法/中）；
+- 28 个原型的数量/必填字段/声线名格式/时区/城市池/名字池/职业池；
+- 14 个国家覆盖（美/英/澳/印/爱尔兰/德/意/西/法/中 + 日/韩/巴/墨）；
+- v2.1 新增的 ja/ko/pt/es-MX 声线（真实 edge voice_id）与日韩口头禅；
 - FriendVoiceSynth：edge 成功写 24k wav + duration_ms、rate/pitch 透传、
   进程内缓存、edge 失败降级 tone。
 """
@@ -48,6 +49,22 @@ _REQUIRED_COUNTRIES = {
     "Spain",
     "France",
     "China",
+    # v2.1 多语言好友（Japan/Korea/Brazil/Mexico）
+    "Japan",
+    "Korea",
+    "Brazil",
+    "Mexico",
+}
+#: 新增的 8 个多语言原型：archetype_id → (voice_id, country, native_lang, timezone)
+_MULTILINGUAL_ARCHETYPES: dict[str, tuple[str, str, str, str]] = {
+    "jp_male_01": ("ja-JP-KeitaNeural", "Japan", "ja", "Asia/Tokyo"),
+    "jp_female_01": ("ja-JP-NanamiNeural", "Japan", "ja", "Asia/Tokyo"),
+    "kr_male_01": ("ko-KR-HyunsuMultilingualNeural", "Korea", "ko", "Asia/Seoul"),
+    "kr_female_01": ("ko-KR-SunHiNeural", "Korea", "ko", "Asia/Seoul"),
+    "br_male_01": ("pt-BR-AntonioNeural", "Brazil", "pt", "America/Sao_Paulo"),
+    "br_female_01": ("pt-BR-ThalitaMultilingualNeural", "Brazil", "pt", "America/Sao_Paulo"),
+    "mx_male_01": ("es-MX-JorgeNeural", "Mexico", "es", "America/Mexico_City"),
+    "mx_female_01": ("es-MX-DaliaNeural", "Mexico", "es", "America/Mexico_City"),
 }
 _GENERIC_OCCUPATIONS = {"worker", "employee", "professional", "person", "student", "staff"}
 
@@ -59,9 +76,9 @@ def test_archetypes_file_exists() -> None:
     assert os.path.isfile(ARCHETYPES_PATH), f"缺少声线原型底池: {ARCHETYPES_PATH}"
 
 
-def test_archetype_pool_has_twenty_unique_prototypes() -> None:
+def test_archetype_pool_has_twenty_eight_unique_prototypes() -> None:
     archetypes = load_archetypes()
-    assert len(archetypes) >= 20
+    assert len(archetypes) >= 28
     ids = [a["archetype_id"] for a in archetypes]
     assert len(ids) == len(set(ids)), "archetype_id 必须唯一"
 
@@ -140,6 +157,47 @@ def test_multilingual_and_official_english_voices_are_preferred() -> None:
         voice = archetype["voice_id"]
         if country in english_countries:
             assert voice.startswith("en-"), f"{country} 应使用官方英语声线，实际 {voice}"
+
+
+def test_multilingual_archetypes_ja_ko_pt_es_mx() -> None:
+    """v2.1：新增的 8 个日本/韩国/巴西/墨西哥原型字段与真实声线。"""
+    archetypes = {a["archetype_id"]: a for a in load_archetypes()}
+    assert set(_MULTILINGUAL_ARCHETYPES) <= set(archetypes), (
+        f"缺少原型: {set(_MULTILINGUAL_ARCHETYPES) - set(archetypes)}"
+    )
+
+    for aid, (voice_id, country, native_lang, timezone) in _MULTILINGUAL_ARCHETYPES.items():
+        archetype = archetypes[aid]
+        assert archetype["voice_id"] == voice_id
+        locale = archetype["locale_info"]
+        assert locale["country"] == country
+        assert locale["native_lang"] == native_lang
+        assert locale["timezone"] == timezone
+        ZoneInfo(timezone)  # IANA 合法
+        # 城市池非空且都在该时区语义下（时区本身已验证）
+        assert len(locale["city_pool"]) >= 4
+        # 确定性兜底池
+        assert len(archetype["name_pool"]) >= 8
+        assert len(archetype["occupation_pool"]) >= 8
+        assert archetype["speech_quirks"]
+        assert archetype["vibe_constraints"]["gender"] in ("male", "female")
+
+    # 新声线全部唯一
+    new_voices = [v[0] for v in _MULTILINGUAL_ARCHETYPES.values()]
+    assert len(new_voices) == len(set(new_voices))
+    all_voices = [a["voice_id"] for a in load_archetypes()]
+    for voice in new_voices:
+        assert all_voices.count(voice) == 1, f"声线重复: {voice}"
+
+    # 日/韩原型口头禅应使用对应文字（便于无 LLM 破冰与 prompt 口吻）
+    japanese_quirks = "".join(
+        q for aid in ("jp_male_01", "jp_female_01") for q in archetypes[aid]["speech_quirks"]
+    )
+    assert re.search(r"[\u3040-\u30ff]", japanese_quirks)
+    korean_quirks = "".join(
+        q for aid in ("kr_male_01", "kr_female_01") for q in archetypes[aid]["speech_quirks"]
+    )
+    assert re.search(r"[\uac00-\ud7a3]", korean_quirks)
 
 
 def test_archetype_by_id() -> None:
@@ -262,7 +320,9 @@ async def test_synth_treats_empty_edge_audio_as_failure(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(EdgeTTSEngine, "synthesize_voice", empty)
     synth = FriendVoiceSynth()
-    path, duration_ms = await synth.synth_to_wav("Hi there!", "en-US-AvaMultilingualNeural", out_dir=str(tmp_path))
+    path, duration_ms = await synth.synth_to_wav(
+        "Hi there!", "en-US-AvaMultilingualNeural", out_dir=str(tmp_path)
+    )
     _assert_valid_wav(path)
     assert duration_ms > 0
 

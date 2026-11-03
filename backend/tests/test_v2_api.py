@@ -39,7 +39,11 @@ pytestmark = pytest.mark.asyncio
 class FakeSTT:
     backend_name = "mock"
 
-    async def transcribe(self, pcm16: bytes, sample_rate: int = 16000):
+    def __init__(self) -> None:
+        self.last_language: str | None = "unset"
+
+    async def transcribe(self, pcm16: bytes, sample_rate: int = 16000, *, language=None):
+        self.last_language = language
         return SimpleNamespace(text="Hi, I really like indie games and coffee.", language="en",
                                latency_ms=1.0, backend="mock")
 
@@ -163,6 +167,51 @@ async def test_discover_and_accept_pending(client):
     assert accepted.status_code == 200
     assert accepted.json()["friend"]["status"] == "active"
     assert accepted.json()["message"]["transcript"]
+
+
+async def test_discover_japanese_friend_replies_in_japanese(client):
+    http, services = client
+    r = http.post("/api/v2/friends/discover", json={"nationality": "Japan", "language": "ja"})
+    assert r.status_code == 200, r.text
+    friend = r.json()["friend"]
+    assert friend["nationality"] == "Japan"
+    assert friend["reply_language"] == "ja"
+    assert friend["voice_id"].startswith("ja-JP")
+    assert friend["native_lang"] == "ja"
+
+    r = http.post(f"/api/v2/chat/{friend['id']}/text", json={"text": "こんにちは！最近どう？"})
+    assert r.status_code == 200
+    data = r.json()
+    reply = data["friend_messages"][0]["transcript"]
+    assert data["reply_language"] == "ja"
+    # 日语假名（平假名/片假名）出现在回复里
+    assert any("\u3040" <= ch <= "\u30ff" for ch in reply), reply
+    assert "Japanese" in services.chat._system_prompt(services.db.get_friend(friend["id"]), [])
+
+    # 语音回合：STT 应收到 language="ja"（本地 whisper 用日语识别）
+    files = {"audio": ("voice.wav", _wav_bytes(0.3), "audio/wav")}
+    r = http.post(f"/api/v2/chat/{friend['id']}/voice", files=files)
+    assert r.status_code == 200
+    assert services.engines.stt.last_language == "ja"
+
+
+async def test_discover_english_reply_for_japanese_friend(client):
+    http, services = client
+    r = http.post("/api/v2/friends/discover", json={"nationality": "Japan", "language": "en"})
+    assert r.status_code == 200, r.text
+    friend = r.json()["friend"]
+    assert friend["nationality"] == "Japan"
+    assert friend["reply_language"] == "en"
+    # 仍是日本声线（英语带日本口音）
+    assert friend["voice_id"].startswith("ja-JP")
+
+
+async def test_discover_unsupported_language_returns_422(client):
+    http, _ = client
+    r = http.post("/api/v2/friends/discover", json={"language": "ar"})
+    assert r.status_code == 422
+    detail = r.json().get("detail", "")
+    assert "ar" in detail or "不支持" in detail or "支持" in detail
 
 
 async def test_decline_pending(client):

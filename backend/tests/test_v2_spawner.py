@@ -2,12 +2,13 @@
 
 覆盖：
 - mock LLM 下捏出字段完整的 friend 并真正入库；
-- nationality / language / gender 过滤（含别名）；
+- nationality / language / gender 过滤（含别名）与 strict 严格筛选；
+- ``reply_language``（ja/ko/pt/es/de/it/fr/zh/en）与 ``language="en"`` 语义；
 - ``db.used_archetype_ids()`` 去重、原型池耗尽后不崩；
 - referral → ``pending_request`` + request_message；
-- ``icebreaker`` 非空、英文、带问题钩子；
+- ``icebreaker`` 按 reply_language 生成（含日文/韩文确定性模板）；
 - LLM 成功路径 / 失败 / 非法 JSON 的确定性兜底；
-- personality_prompt 英文且含口音与口头禅约束。
+- personality_prompt 明确回复语言且含口音与口头禅约束。
 """
 
 from __future__ import annotations
@@ -17,11 +18,19 @@ import re
 
 import pytest
 
+from app.v2 import spawner as spawner_mod
 from app.v2.db import DB
-from app.v2.spawner import LANGUAGE_MIX_MODES, PersonaSpawner
+from app.v2.spawner import (
+    LANGUAGE_MIX_MODES,
+    ArchetypeNotFound,
+    PersonaSpawner,
+    language_display_name,
+)
 from app.v2.voices import archetype_by_id, load_archetypes
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_JA_RE = re.compile(r"[\u3040-\u30ff]")
+_KO_RE = re.compile(r"[\uac00-\ud7a3]")
 
 
 # --------------------------------------------------------------------------- #
@@ -106,6 +115,7 @@ async def test_spawn_with_mock_llm_creates_complete_friend(spawner, db) -> None:
     assert friend["referred_by_friend_id"] is None
     assert friend["request_message"] == ""
     assert friend["language_mix_mode"] in LANGUAGE_MIX_MODES
+    assert friend["reply_language"] == "en"  # 无语言/国家筛选默认英语
     assert friend["bio"]
     assert friend["initial_context"]
     assert friend["personality_traits"]
@@ -115,6 +125,7 @@ async def test_spawn_with_mock_llm_creates_complete_friend(spawner, db) -> None:
     assert stored is not None
     assert stored["name"] == friend["name"]
     assert stored["archetype_id"] == friend["archetype_id"]
+    assert stored["reply_language"] == "en"
     # initial_context / personality_traits 无独立 DB 列，但已内嵌进 personality_prompt
     assert "initial_context" not in stored
     assert "personality_traits" not in stored
@@ -336,3 +347,155 @@ async def test_icebreaker_uses_llm_message_when_available(db) -> None:
     message = await spawner.icebreaker(referrer)
     assert message.startswith("Hey! Marco said")
     assert len(llm.calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 多语言好友：reply_language / strict 筛选 / 多语言破冰
+# --------------------------------------------------------------------------- #
+async def test_strict_language_ja_returns_japanese_friend(spawner, db) -> None:
+    friend = await spawner.spawn(language="ja", strict_filters=True)
+    archetype = archetype_by_id(friend["archetype_id"])
+
+    assert friend["reply_language"] == "ja"
+    assert friend["native_lang"] == "ja"
+    assert friend["nationality"] == "Japan"
+    assert friend["voice_id"].startswith("ja-JP-")
+    assert friend["timezone"] == "Asia/Tokyo"
+    assert friend["language_mix_mode"] == "native_primary"
+    assert archetype["locale_info"]["native_lang"] == "ja"
+    assert db.get_friend(friend["id"])["reply_language"] == "ja"
+
+    prompt = friend["personality_prompt"]
+    assert "natural Japanese (日本語)" in prompt
+    assert "Never switch to English" in prompt
+    # 非英语好友的口头禅应来自原型（日文）
+    assert any(_JA_RE.search(str(q)) for q in friend["speech_quirks"])
+
+
+async def test_strict_country_and_gender_resolves_native_reply_language(spawner) -> None:
+    friend = await spawner.spawn(nationality="Japan", gender="female", strict_filters=True)
+    assert friend["reply_language"] == "ja"  # 只给国家 → 用原型母语
+    assert friend["archetype_id"] == "jp_female_01"
+    archetype = archetype_by_id(friend["archetype_id"])
+    assert archetype["vibe_constraints"]["gender"] == "female"
+
+
+async def test_strict_language_en_with_country_japan_replies_english(spawner) -> None:
+    friend = await spawner.spawn(nationality="Japan", language="en", strict_filters=True)
+    assert friend["nationality"] == "Japan"
+    assert friend["native_lang"] == "ja"
+    assert friend["reply_language"] == "en"  # 语言筛选优先：用户要英语回复
+    assert friend["language_mix_mode"] == "en_only"
+    prompt = friend["personality_prompt"]
+    assert "Reply with spoken English only" in prompt
+    assert "natural Japanese" not in prompt
+
+
+async def test_strict_language_ko_and_pt_resolve_correctly(spawner) -> None:
+    ko = await spawner.spawn(language="ko", strict_filters=True)
+    assert ko["reply_language"] == "ko"
+    assert ko["nationality"] == "Korea"
+    assert ko["voice_id"].startswith("ko-KR-")
+
+    pt = await spawner.spawn(language="pt", strict_filters=True)
+    assert pt["reply_language"] == "pt"
+    assert pt["nationality"] == "Brazil"
+    assert pt["voice_id"].startswith("pt-BR-")
+
+
+async def test_strict_country_only_uses_native_language_for_non_english(spawner) -> None:
+    friend = await spawner.spawn(nationality="Italy", strict_filters=True)
+    assert friend["reply_language"] == "it"
+
+    uk = await spawner.spawn(nationality="UK", strict_filters=True)
+    assert uk["reply_language"] == "en"
+
+
+async def test_strict_unsupported_language_raises_archetype_not_found(spawner) -> None:
+    with pytest.raises(ArchetypeNotFound) as ei:
+        await spawner.spawn(language="ar", strict_filters=True)
+    detail = ei.value.detail
+    assert "ar" in detail
+    assert "支持的语种" in detail
+    assert "ja" in detail  # 当前支持列表里包含新语种
+    assert str(ei.value) == detail
+
+
+async def test_strict_unsupported_country_raises_archetype_not_found(spawner) -> None:
+    with pytest.raises(ArchetypeNotFound):
+        await spawner.spawn(nationality="Narnia", strict_filters=True)
+
+
+async def test_strict_never_silently_widens_gender(spawner) -> None:
+    # Japan 原型有男/女；非二元性别严格筛选必须报错而不是退回英语美国好友
+    with pytest.raises(ArchetypeNotFound):
+        await spawner.spawn(nationality="Japan", gender="nonbinary", strict_filters=True)
+
+
+async def test_non_strict_language_unsupported_still_creates_friend(spawner) -> None:
+    # onboarding/referral 用默认 strict_filters=False：容错、不抛
+    friend = await spawner.spawn(language="ar")
+    assert friend["id"]
+    assert friend["reply_language"] == "en"  # 不支持的语言回退英语
+
+
+async def test_pick_archetype_strict_flag(spawner) -> None:
+    picked = spawner.pick_archetype(language="ja", gender="male", strict=True)
+    assert picked["voice_id"] == "ja-JP-KeitaNeural"
+    with pytest.raises(ArchetypeNotFound):
+        spawner.pick_archetype(language="ar", strict=True)
+
+
+async def test_icebreaker_is_japanese_for_ja_friend(spawner) -> None:
+    friend = await spawner.spawn(language="ja", strict_filters=True)
+    message = await spawner.icebreaker(friend)
+
+    assert isinstance(message, str) and message.strip()
+    assert friend["name"] in message
+    assert _JA_RE.search(message), f"日文好友破冰应为日文: {message!r}"
+    assert "？" in message or "?" in message
+
+
+async def test_icebreaker_is_korean_for_ko_friend(spawner) -> None:
+    friend = await spawner.spawn(language="ko", strict_filters=True)
+    message = await spawner.icebreaker(friend)
+    assert _KO_RE.search(message), f"韩文好友破冰应为韩文: {message!r}"
+    assert "?" in message
+
+
+async def test_icebreaker_templates_cover_required_languages() -> None:
+    # 无 LLM 时至少覆盖 ja/ko/pt/es/de/it/fr/zh + en，每种 2-3 条模板
+    required = {"en", "ja", "ko", "pt", "es", "de", "it", "fr", "zh"}
+    assert required <= set(spawner_mod._ICEBREAKER_TEMPLATES)
+    assert required <= set(spawner_mod._ICEBREAKER_QUESTIONS_BY_LANG)
+    for language in required:
+        assert 2 <= len(spawner_mod._ICEBREAKER_TEMPLATES[language]) <= 3
+    for language in required - {"en"}:
+        assert 2 <= len(spawner_mod._ICEBREAKER_QUESTIONS_BY_LANG[language]) <= 3
+    assert len(spawner_mod._ICEBREAKER_QUESTIONS_BY_LANG["en"]) >= 2
+
+
+def test_language_display_name() -> None:
+    assert language_display_name("ja") == "Japanese (日本語)"
+    assert language_display_name("ko") == "Korean (한국어)"
+    assert language_display_name("pt") == "Brazilian Portuguese (português)"
+    assert language_display_name("en") == "English"
+
+
+async def test_spawn_llm_mode_is_forced_native_primary_for_non_english(db) -> None:
+    payload = json.dumps(
+        {
+            "name": "Yuki",
+            "age": 28,
+            "occupation": "illustrator",
+            "personality_traits": ["calm"],
+            "speech_quirks": ["えっと"],
+            "language_mix_mode": "en_only",
+            "bio": "Yuki draws illustrations in Tokyo.",
+            "initial_context": "She is finishing a sketch at home.",
+        }
+    )
+    friend = await PersonaSpawner(db, StubLLM(payload)).spawn(language="ja", strict_filters=True)
+    assert friend["name"] == "Yuki"
+    assert friend["reply_language"] == "ja"
+    assert friend["language_mix_mode"] == "native_primary"

@@ -101,14 +101,14 @@ function connect(wsUrl) {
   });
 }
 
-async function firstFriendId() {
+async function listFriends() {
   try {
     const res = await fetch(`${BASE}/api/v2/friends`);
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
-    return data?.friends?.[0]?.id ?? null;
+    return Array.isArray(data?.friends) ? data.friends : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -159,8 +159,17 @@ try {
     ["discover", `${BASE}/?tab=discover`],
     ["notes", `${BASE}/?tab=notes`],
   ];
-  const friendId = await firstFriendId();
+  const friends = await listFriends();
+  const friendId = friends[0]?.id ?? null;
   if (friendId) views.push(["chat", `${BASE}/?tab=chats&friend=${encodeURIComponent(friendId)}`]);
+
+  // 多语言验收：日本好友聊天（日文气泡）+ 偶遇筛选（Japan / ja 预选）
+  const jaFriend = friends.find((f) => (f.reply_language || f.native_lang) === "ja");
+  if (jaFriend) {
+    views.push(["multilang-chat", `${BASE}/?tab=chats&friend=${encodeURIComponent(jaFriend.id)}`]);
+  }
+  views.push(["multilang-discover", `${BASE}/?tab=discover&country=Japan&language=ja`]);
+
   // 个人设置页（顶部 ⚙ 的深链，见 docs/V2_STT.md §5）
   views.push(["settings", `${BASE}/?tab=chats&settings=1`]);
 

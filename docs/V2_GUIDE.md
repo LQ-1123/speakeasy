@@ -26,6 +26,7 @@
 | 气泡内联批注 | 用户气泡下 `✨ 地道表达` 胶囊：better_version/解释/tag、🔊 试听、⭐ 收藏；无 key 时规则库兜底 | `suggestion.py`、`frontend/src/components/v2/SuggestionPill.tsx` |
 | 表达本刻意复现 | learning 表达每轮抽 1–2 条注入 prompt；用户实战说出 → mastery+1，满 3 次 mastered | `chat_service.py`、`v2/router.py` |
 | 实时语音通话 | 1.0 的 `/ws` 通道与 `/classic` 页面保留可用（新 UI 暂以"即将上线"占位，接口未破坏） | `backend/app/routers/ws.py`、`frontend/src/app/classic` |
+| 多语言好友（ja/ko/pt/es-MX…） | 28 个声线原型（14 国 × 男女）；「偶遇」国家/语种筛选**严格生效**（无匹配返回 422 + 支持列表）；好友按 `reply_language` 用该语言回复，TTS 用对应语言声线；日语/韩语等语音输入走多语言 STT 模型或云端 SenseVoice | `voice_archetypes.json`、`spawner.py`、`chat_service.py`、`DiscoverTab.tsx` |
 | 云端 STT（SenseVoiceSmall） | 个人设置里填硅基流动 Key 即热切换到 `FunAudioLLM/SenseVoiceSmall`；云端失败自动回退本地 Whisper→mock | `backend/app/voice/sensevoice.py`、`stt_config.py`、`v2/router.py`、`frontend/src/components/v2/SettingsPanel.tsx` |
 | 移动端三 Tab + PWA | 消息 / 动态·偶遇 / 表达本·画像；微信式浅色；按住说话；PWA manifest+SW+图标 | `frontend/src/components/v2/*`、`frontend/public/*` |
 | SQLite 5 表 | `user_profile` / `friends` / `messages` / `moments` / `saved_expressions`（额外列见 db.py） | `backend/app/v2/db.py` |
@@ -73,7 +74,7 @@ TTS 走 edge-tts（需联网，失败退 tone），STT 走 faster-whisper（CPU 
 
 ## 5. 验收结果（本机 macOS / Apple Silicon）
 
-- 后端测试：`pytest backend/tests -q` → **327 passed**（1.0 回归 174 + v2 新增 153，含 SenseVoice 云端 STT 34 个离线用例）。
+- 后端测试：`pytest backend/tests -q` → **355 passed**（1.0 回归 174 + v2 新增 153，含 SenseVoice 云端 STT 34 个离线用例）。
 - 前端：`npm run typecheck` ✅、`npm run build:backend` ✅（36 文件 / 16 目录 → `backend/app/static/app`）。
 - 真实链路（无 LLM key）：
   - 首启 onboarding 生成英音 + 意大利好友并各发一条 edge-tts 破冰语音；

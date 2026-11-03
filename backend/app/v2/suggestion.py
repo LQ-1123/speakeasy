@@ -123,23 +123,32 @@ async def generate_suggestion(
     *,
     friend_name: str = "",
     friend_context: str = "",
+    language: str = "en",
 ) -> dict[str, Any] | None:
-    """为一句用户英文生成润色批注。失败/无建议返回 None。"""
+    """为用户的一句话生成润色批注（按好友回复语言，英语/日语/韩语…）。
+
+    离线规则库只覆盖英语；其他语言在没有 LLM 时直接返回 None（不给错误建议）。
+    """
     text = (text or "").strip()
     if len(text) < 3:
         return None
+    language = (language or "en").strip().lower()
+    lang_label = {
+        "en": "English", "ja": "Japanese", "ko": "Korean", "pt": "Portuguese",
+        "es": "Spanish", "de": "German", "fr": "French", "it": "Italian", "zh": "Chinese",
+    }.get(language, language)
 
     def _fallback() -> dict[str, Any] | None:
-        return rule_suggestion(text)
+        return rule_suggestion(text) if language == "en" else None
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a warm English-speaking friend helping a Chinese learner sound more natural. "
-                "Given the learner's sentence, produce ONE concise inline note as strict JSON: "
+                f"You are a warm native {lang_label} speaker helping a Chinese learner sound more natural. "
+                f"Given the learner's {lang_label} sentence, produce ONE concise inline note as strict JSON: "
                 '{"better_version": "...", "explanation": "...", "tag": "grammar|chunk|tone"}. '
-                "better_version must be a full natural sentence (same meaning). "
+                f"better_version must be a full natural {lang_label} sentence (same meaning). "
                 "explanation: one short Chinese sentence explaining why. "
                 "If the sentence is already natural, return {\"better_version\": \"\", \"explanation\": \"\", \"tag\": \"\"}."
                 + (f"\nLearner is chatting with {friend_name}." if friend_name else "")

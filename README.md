@@ -7,6 +7,7 @@
 > - 运行/验收：**[docs/V2_GUIDE.md](docs/V2_GUIDE.md)** · 接口：**[docs/V2_API.md](docs/V2_API.md)**
 > - 启动：`HF_HOME="$PWD/.cache/hf" .venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8000` → <http://127.0.0.1:8000>
 > - 前端：`cd frontend && npm install && npm run build:backend`；PWA 可"添加到主屏幕"
+> - 多语言语伴：偶遇可按国家/语种严格筛选（日/韩/葡/西/德/法/意/中…），好友用**对应语言**回复与发声
 > - 不填 Key 也能完整演示（规则引擎 + edge-tts + 本地 STT）；右上角 **⚙ 个人设置**可填 LLM Key，
 >   并可把语音识别切成 **硅基流动 SenseVoiceSmall**（保存即热生效，失败自动回退本地 Whisper）
 >

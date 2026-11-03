@@ -35,6 +35,8 @@ export interface Friend {
   city: string;
   timezone: string;
   native_lang: string;
+  /** 好友回复语言（后端新增字段；缺省时前端回退 native_lang） */
+  reply_language?: string;
   age: number;
   occupation: string;
   speech_quirks: string[];
@@ -203,6 +205,7 @@ export function parseFriend(raw: unknown): Friend | null {
     city: str(raw.city),
     timezone: str(raw.timezone),
     native_lang: str(raw.native_lang),
+    reply_language: str(raw.reply_language) || undefined,
     age: num(raw.age),
     occupation: str(raw.occupation),
     speech_quirks: asStringArray(raw.speech_quirks) ?? [],

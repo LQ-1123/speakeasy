@@ -1954,3 +1954,55 @@ body:has(.se-app) {
   line-height: 1.6;
   color: var(--se-faint);
 }
+
+
+/* ==================================================================
+   多语言：好友语言标签 / 偶遇严格筛选提示 / CJK 文本换行
+   ================================================================== */
+
+.se-lang-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.045);
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--se-dim);
+  white-space: nowrap;
+}
+
+.se-filter-hint {
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.14);
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* 日语/韩语等无空格文本：长句必须能在气泡内换行，不允许撑破布局 */
+.se-transcript p,
+.se-text-bubble p,
+.se-suggestion-pill,
+.se-suggestion-better,
+.se-suggestion-explain,
+.se-moment p,
+.se-expression-original,
+.se-expression-better,
+.se-chat-hint,
+.se-setting-sub,
+.se-health-row b,
+.se-friend-row p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 建议卡片里的日文原文：标题行限两行展示，避免把气泡顶得太宽 */
+.se-suggestion-pill > span {
+  min-width: 0;
+}

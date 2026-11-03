@@ -156,3 +156,11 @@ def cloud_health(self) -> dict                 # 见上 health 结构 + backend 
 
 **本项目的降级行为**：云端任何 4xx/5xx/超时都不会中断聊天——`STTEngine` 记下 `cloud_health.last_error`
 后自动回退本地 faster-whisper；设置页 health 会显示最近错误与请求数。
+
+## 8. 多语言语音输入（日语/韩语等）
+
+- 默认本地模型 `distil-large-v3` 是**英语专用**，直接转写日语会输出英文幻觉。
+- 非英语好友（`reply_language != en`）的语音条会自动改用 `STT_MULTILINGUAL_MODEL`
+  （默认 `small`；首次使用自动下载约 500MB，可设 `tiny` / `medium` / `large-v3`）。
+- 配置 SiliconFlow SenseVoiceSmall 时，云端会**自动识别语种**，优先走云端。
+- 对应环境变量：`STT_MULTILINGUAL_MODEL=small`（`.env` 扁平项）。

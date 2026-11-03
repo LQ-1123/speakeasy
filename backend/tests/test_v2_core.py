@@ -92,6 +92,14 @@ def test_friend_crud_and_json_columns(db):
     assert friend["closeness_level"] == 2
 
 
+def test_reply_language_default_and_update(db):
+    friend = db.create_friend({"name": "Yui", "timezone": "Asia/Tokyo", "native_lang": "ja"})
+    assert friend["reply_language"] == "en"  # 默认英语；翻译由 spawner 决定
+    friend = db.update_friend(friend["id"], reply_language="ja")
+    assert friend["reply_language"] == "ja"
+    assert db.get_friend(friend["id"])["reply_language"] == "ja"
+
+
 def test_friend_ordering_by_last_interaction(db):
     a = db.create_friend({"name": "A", "timezone": "UTC"})
     b = db.create_friend({"name": "B", "timezone": "UTC"})
@@ -197,6 +205,16 @@ def test_rule_suggestion_hits_and_misses():
     assert rule_suggestion("How to say this in English?") is not None
     assert rule_suggestion("I am agree with you") is not None
     assert rule_suggestion("This coffee is amazing") is None
+
+
+@pytest.mark.asyncio
+async def test_generate_suggestion_non_english_offline_returns_none():
+    class MockLLM:
+        uses_mock = True
+
+    from app.v2.suggestion import generate_suggestion
+
+    assert await generate_suggestion(MockLLM(), "これはいいですね", language="ja") is None
 
 
 @pytest.mark.asyncio

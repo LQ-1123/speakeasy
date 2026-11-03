@@ -143,6 +143,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [remoteReplying, setRemoteReplying] = useState(false);
   const [suggestionPending, setSuggestionPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -297,6 +298,25 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [friend.id]);
 
+  // 服务端「正在生成回复」状态：离开聊天再进来 / 回到主界面时也能恢复
+  useEffect(() => {
+    let active = true;
+    const tick = async () => {
+      try {
+        const status = await api.friendStatus(friendRef.current.id);
+        if (active) setRemoteReplying(status.replying);
+      } catch {
+        /* 网络抖动静默 */
+      }
+    };
+    void tick();
+    const timer = setInterval(tick, 2000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [friend.id]);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
@@ -436,6 +456,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     await send(temp, () => api.sendImage(friend.id, file, caption, file.name || "image.png"));
   };
 
+  const replying = sending || remoteReplying;
   const friendStateTone = local.period === "night" || local.period === "late_night";
 
   /**
@@ -601,7 +622,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
             </span>
           </div>
           <p className="mt-0.5 truncate text-[10.5px] text-[color:var(--se-dim)]">
-            {sending ? (
+            {replying ? (
               <span className="se-header-typing" aria-live="polite">
                 对方正在说话
                 <span className="se-typing-dots" aria-hidden>

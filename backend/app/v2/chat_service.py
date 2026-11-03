@@ -330,6 +330,8 @@ class ChatService:
         self.memory_idle_s = max(0.0, float(memory_idle_s))
         self._tasks: set[asyncio.Task] = set()
         self._memory_tasks: dict[str, asyncio.Task] = {}
+        #: friend_id -> 开始生成回复的 monotonic 时间（前端「对方正在说话」）
+        self._replying: dict[str, float] = {}
 
     # ------------------------------------------------------------------ #
     # 后台任务
@@ -350,6 +352,29 @@ class ChatService:
         self._memory_tasks.clear()
 
     # ------------------------------------------------------------------ #
+    # 「对方正在说话」状态（跨前端组件/离开聊天窗后仍然有效）
+    # ------------------------------------------------------------------ #
+    def mark_replying(self, friend_id: str) -> None:
+        self._replying[str(friend_id)] = time.monotonic()
+
+    def clear_replying(self, friend_id: str) -> None:
+        self._replying.pop(str(friend_id), None)
+
+    def is_replying(self, friend_id: str) -> bool:
+        started = self._replying.get(str(friend_id))
+        if started is None:
+            return False
+        if time.monotonic() - started > 180:  # 异常残留兜底
+            self._replying.pop(str(friend_id), None)
+            return False
+        return True
+
+    def replying_started_at(self, friend_id: str) -> str | None:
+        if not self.is_replying(friend_id):
+            return None
+        return _now_iso()
+
+    # ------------------------------------------------------------------ #
     # 对外主入口
     # ------------------------------------------------------------------ #
     async def handle_voice(
@@ -360,26 +385,30 @@ class ChatService:
         duration_ms: int = 0,
         context: str | None = None,
     ) -> dict:
-        friend = await asyncio.to_thread(self.db.get_friend, friend_id)
-        if friend is None:
-            raise KeyError(friend_id)
+        self.mark_replying(friend_id)
+        try:
+            friend = await asyncio.to_thread(self.db.get_friend, friend_id)
+            if friend is None:
+                raise KeyError(friend_id)
 
-        decoded = await asyncio.to_thread(self.audio.decode_upload, audio_bytes, filename)
-        reply_lang = _language_of(friend)
-        stt_language = None if reply_lang == "en" else reply_lang
-        transcript, stt_meta = await self._transcribe(decoded["pcm16"], language=stt_language)
-        if not transcript:
-            transcript = "（语音没有识别清楚，可以再说一次吗？）"
-        dur = int(decoded["duration_ms"] or duration_ms or 0)
-        return await self._handle_user_text(
-            friend,
-            transcript,
-            msg_type="voice",
-            audio_filename=decoded["audio_filename"],
-            duration_ms=dur,
-            context=context,
-            stt_meta=stt_meta,
-        )
+            decoded = await asyncio.to_thread(self.audio.decode_upload, audio_bytes, filename)
+            reply_lang = _language_of(friend)
+            stt_language = None if reply_lang == "en" else reply_lang
+            transcript, stt_meta = await self._transcribe(decoded["pcm16"], language=stt_language)
+            if not transcript:
+                transcript = "（语音没有识别清楚，可以再说一次吗？）"
+            dur = int(decoded["duration_ms"] or duration_ms or 0)
+            return await self._handle_user_text(
+                friend,
+                transcript,
+                msg_type="voice",
+                audio_filename=decoded["audio_filename"],
+                duration_ms=dur,
+                context=context,
+                stt_meta=stt_meta,
+            )
+        finally:
+            self.clear_replying(friend_id)
 
     async def handle_text(
         self,
@@ -387,13 +416,17 @@ class ChatService:
         text: str,
         context: str | None = None,
     ) -> dict:
-        friend = await asyncio.to_thread(self.db.get_friend, friend_id)
-        if friend is None:
-            raise KeyError(friend_id)
-        return await self._handle_user_text(
-            friend, text, msg_type="text", context=context,
-            stt_meta={"backend": "text", "latency_ms": 0.0},
-        )
+        self.mark_replying(friend_id)
+        try:
+            friend = await asyncio.to_thread(self.db.get_friend, friend_id)
+            if friend is None:
+                raise KeyError(friend_id)
+            return await self._handle_user_text(
+                friend, text, msg_type="text", context=context,
+                stt_meta={"backend": "text", "latency_ms": 0.0},
+            )
+        finally:
+            self.clear_replying(friend_id)
 
     # ------------------------------------------------------------------ #
     # 语音通话（流式：边生成边按句 TTS）
@@ -421,6 +454,22 @@ class ChatService:
         }
 
     async def handle_call_turn_stream(
+        self,
+        friend_id: str,
+        audio_bytes: bytes,
+        filename: str,
+        duration_ms: int = 0,
+    ):
+        self.mark_replying(friend_id)
+        try:
+            async for event in self._handle_call_turn_stream(
+                friend_id, audio_bytes, filename, duration_ms
+            ):
+                yield event
+        finally:
+            self.clear_replying(friend_id)
+
+    async def _handle_call_turn_stream(
         self,
         friend_id: str,
         audio_bytes: bytes,
@@ -625,6 +674,20 @@ class ChatService:
         caption: str = "",
     ) -> dict:
         """用户发图 → 多模态 LLM 结合图片回复 → TTS，落一条 image 消息。"""
+        self.mark_replying(friend_id)
+        try:
+            return await self._handle_image(friend_id, image_bytes, filename, content_type, caption)
+        finally:
+            self.clear_replying(friend_id)
+
+    async def _handle_image(
+        self,
+        friend_id: str,
+        image_bytes: bytes,
+        filename: str,
+        content_type: str = "",
+        caption: str = "",
+    ) -> dict:
         friend = await asyncio.to_thread(self.db.get_friend, friend_id)
         if friend is None:
             raise KeyError(friend_id)

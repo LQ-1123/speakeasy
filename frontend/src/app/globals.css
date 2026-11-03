@@ -3101,3 +3101,15 @@ body:has(.se-app) {
     animation: none !important;
   }
 }
+
+/* 好友列表里的「对方正在说话」 */
+.se-replying {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 500;
+  color: var(--se-green-ink);
+}
+.se-replying .se-typing-dots i {
+  background: var(--se-green-ink);
+}

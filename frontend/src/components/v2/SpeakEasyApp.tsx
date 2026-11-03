@@ -29,7 +29,7 @@ import {
 import { errorText } from "@/lib/v2/format";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
 
-const FRIEND_POLL_MS = 10_000;
+const FRIEND_POLL_MS = 4_000;
 
 const TAB_TITLES: Record<Tab, string> = {
   chats: "SpeakEasy",

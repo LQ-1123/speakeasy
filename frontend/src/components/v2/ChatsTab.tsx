@@ -134,7 +134,18 @@ export function ChatsTab({
                       <span className="se-lang-tag" title={`回复语言：${lang.label}`}>
                         {lang.flag} {lang.label}
                       </span>
-                      <span className="truncate">{previewOf(friend)}</span>
+                      {friend.replying ? (
+                        <span className="se-replying">
+                          对方正在说话
+                          <span className="se-typing-dots" aria-hidden>
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="truncate">{previewOf(friend)}</span>
+                      )}
                     </p>
                   </div>
                   <div className="flex w-[62px] shrink-0 flex-col items-end gap-1 self-stretch pt-0.5">
@@ -152,7 +163,7 @@ export function ChatsTab({
             })}
           </div>
           <p className="px-4 pb-2 pt-3 text-center text-[10.5px] text-[color:var(--se-faint)]">
-            好友列表每 10 秒自动刷新 · 语音条异步回复
+            好友列表每 4 秒自动刷新 · 语音条异步回复
           </p>
         </>
       ) : null}

@@ -184,6 +184,9 @@ async def _friend_public(services: Any, friend: dict) -> dict:
             "is_awake": state["is_awake"],
             "unread": unread,
             "open_loop_due": due,
+            "replying": bool(
+                getattr(getattr(services, "chat", None), "is_replying", lambda _fid: False)(fid)
+            ),
             "last_message": _public_preview(last),
         }
     )
@@ -595,6 +598,24 @@ async def delete_friend(request: Request, friend_id: str) -> dict:
         "friend_id": friend_id,
         "name": friend.get("name"),
         "deleted_audio": removed,
+    }
+
+
+@router.get("/friends/{friend_id}/status")
+async def friend_status(request: Request, friend_id: str) -> dict:
+    """轻量轮询：好友是否正在生成回复（「对方正在说话」跨页面/重进聊天仍可恢复）。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    chat = getattr(services, "chat", None)
+    replying = bool(getattr(chat, "is_replying", lambda _fid: False)(friend_id))
+    return {
+        "friend_id": friend_id,
+        "replying": replying,
+        "started_at": getattr(chat, "replying_started_at", lambda _fid: None)(friend_id)
+        if replying
+        else None,
     }
 
 

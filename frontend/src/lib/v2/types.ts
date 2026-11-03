@@ -53,6 +53,8 @@ export interface Friend {
   local_icon: string;
   local_activity: string;
   unread: number;
+  /** 后端是否有正在生成的回复（「对方正在说话」） */
+  replying?: boolean;
   last_message: LastMessage | null;
 }
 
@@ -240,6 +242,7 @@ export function parseFriend(raw: unknown): Friend | null {
     local_icon: str(raw.local_icon),
     local_activity: str(raw.local_activity),
     unread: num(raw.unread),
+    replying: raw.replying === true,
     last_message: last
       ? {
           sender: str(last.sender) || "friend",

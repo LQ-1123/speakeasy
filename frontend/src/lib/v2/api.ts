@@ -204,6 +204,16 @@ export const api = {
     return friend;
   },
 
+  friendStatus(id: string): Promise<{ replying: boolean; started_at: string | null }> {
+    return request(`/friends/${encodeURIComponent(id)}/status`, (raw) => {
+      const data = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+      return {
+        replying: data.replying === true,
+        started_at: typeof data.started_at === "string" ? data.started_at : null,
+      };
+    });
+  },
+
   discover(filters: { nationality?: string; language?: string; gender?: string }): Promise<{
     friend: Friend;
     message: Message | null;

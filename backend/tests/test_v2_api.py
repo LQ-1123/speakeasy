@@ -535,3 +535,24 @@ async def test_call_warmup_returns_filler(client):
     data = r.json()
     assert data["filler_url"].startswith("/api/v2/audio/")
     assert data["text"]
+
+
+async def test_friend_replying_status_and_list_flag(client):
+    http, services = client
+    friend = await _make_friend(services)
+    services.chat.mark_replying(friend["id"])
+    try:
+        status = http.get(f"/api/v2/friends/{friend['id']}/status").json()
+        assert status["replying"] is True
+        assert status["started_at"]
+        friends = http.get("/api/v2/friends").json()["friends"]
+        row = next(f for f in friends if f["id"] == friend["id"])
+        assert row["replying"] is True
+        # 聊天接口返回的 payload / bootstrap 也带 replying
+        bootstrap = http.get("/api/v2/bootstrap").json()
+        row = next(f for f in bootstrap["friends"] if f["id"] == friend["id"])
+        assert row["replying"] is True
+    finally:
+        services.chat.clear_replying(friend["id"])
+    status = http.get(f"/api/v2/friends/{friend['id']}/status").json()
+    assert status["replying"] is False and status["started_at"] is None

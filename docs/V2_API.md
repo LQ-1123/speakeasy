@@ -109,6 +109,7 @@
 | `POST /api/v2/translate/batch` | body `{texts:[...], target?, friend_id?}` → `{ok, items:[...], message}`；用于「翻译最近消息」。 |
 
 翻译复用已配置的 OpenAI 兼容 LLM（进程内 LRU 缓存，按 text+target），不额外消耗翻译 API。
+同样用于**朋友圈动态**（前端 DiscoverTab 的单条「译」/「全部翻译」，均调用本接口，target=zh）。
 
 ## 5. 音频
 

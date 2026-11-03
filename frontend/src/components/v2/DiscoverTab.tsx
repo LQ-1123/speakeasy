@@ -3,15 +3,15 @@
 /** 动态 · 偶遇 Tab：偶遇好友（国家/语种筛选）+ 好友申请 + 朋友圈动态流（按住语音评论）。 */
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Compass, Loader2, MessageCircle, RefreshCw, Sparkles, Users, X } from "lucide-react";
+import { Check, Compass, Languages, Loader2, MessageCircle, RefreshCw, Sparkles, Users, X } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
 import { HoldToTalk } from "@/components/v2/HoldToTalk";
 import { useToast } from "@/components/v2/Toast";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/v2/ui";
-import { getArchetypeFilters } from "@/lib/v2/api";
+import { apiErrorText, getArchetypeFilters, translateBatch, translateText } from "@/lib/v2/api";
 import { countryMeta, flagOf, langLabel, languageMeta, localStateOf, relativeLabel } from "@/lib/v2/format";
-import type { Friend, Moment } from "@/lib/v2/types";
+import type { Friend, Moment, TranslationResult } from "@/lib/v2/types";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
 
 /**
@@ -83,6 +83,11 @@ export function DiscoverTab({
   const [language, setLanguage] = useState("");
   const [gender, setGender] = useState("");
   const [commentingId, setCommentingId] = useState<string | null>(null);
+  const [momentTranslations, setMomentTranslations] = useState<
+    Record<string, { result: TranslationResult; open: boolean }>
+  >({});
+  const [translatingMoments, setTranslatingMoments] = useState<Record<string, boolean>>({});
+  const [translatingAll, setTranslatingAll] = useState(false);
   const [countries, setCountries] = useState<string[]>(FALLBACK_COUNTRIES);
   const [languages, setLanguages] = useState<string[]>(FALLBACK_LANGUAGES);
 
@@ -126,6 +131,80 @@ export function DiscoverTab({
     if (language && !list.includes(language)) list.unshift(language);
     return list;
   }, [languages, language]);
+
+  const toggleMomentTranslation = async (moment: Moment) => {
+    const existing = momentTranslations[moment.id];
+    if (existing) {
+      setMomentTranslations((prev) => ({
+        ...prev,
+        [moment.id]: { ...existing, open: !existing.open },
+      }));
+      return;
+    }
+    if (translatingMoments[moment.id]) return;
+    setTranslatingMoments((prev) => ({ ...prev, [moment.id]: true }));
+    try {
+      const result = await translateText({
+        text: moment.content,
+        target: "zh",
+        friend_id: moment.friend_id,
+      });
+      if (!result.ok) {
+        showToast(result.message || "翻译失败，请稍后重试", "error");
+        return;
+      }
+      if (!result.translation.trim() || result.translation.trim() === moment.content.trim()) {
+        showToast(`原文已经是${result.target_label || "中文"}，无需翻译`, "info");
+        return;
+      }
+      setMomentTranslations((prev) => ({ ...prev, [moment.id]: { result, open: true } }));
+    } catch (err) {
+      showToast(apiErrorText(err), "error");
+    } finally {
+      setTranslatingMoments((prev) => {
+        const next = { ...prev };
+        delete next[moment.id];
+        return next;
+      });
+    }
+  };
+
+  const handleTranslateAllMoments = async () => {
+    if (translatingAll) return;
+    const pending = moments.filter((moment) => !momentTranslations[moment.id]?.result);
+    if (pending.length === 0) {
+      showToast("所有动态都翻译过了", "info");
+      return;
+    }
+    setTranslatingAll(true);
+    try {
+      const response = await translateBatch({
+        texts: pending.map((moment) => moment.content),
+        target: "zh",
+      });
+      const next: Record<string, { result: TranslationResult; open: boolean }> = {
+        ...momentTranslations,
+      };
+      let added = 0;
+      pending.forEach((moment, index) => {
+        const item = response.items[index];
+        if (item && item.ok && item.translation.trim() !== moment.content.trim()) {
+          next[moment.id] = { result: item, open: true };
+          added += 1;
+        }
+      });
+      if (added > 0) {
+        setMomentTranslations(next);
+        showToast(`已翻译 ${added} 条动态`, "success");
+      } else {
+        showToast(response.message || "动态已经是中文，无需翻译", response.ok ? "info" : "error");
+      }
+    } catch (err) {
+      showToast(apiErrorText(err), "error");
+    } finally {
+      setTranslatingAll(false);
+    }
+  };
 
   return (
     <div className="pb-3">
@@ -257,15 +336,26 @@ export function DiscoverTab({
           <MessageCircle size={14} />
           朋友圈动态
         </span>
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={generating}
-          className="flex items-center gap-1 text-[11.5px] text-[color:var(--se-green)] disabled:opacity-50"
-        >
-          {generating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          {generating ? "生成中…" : "换一批"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void handleTranslateAllMoments()}
+            disabled={translatingAll || moments.length === 0}
+            className="flex items-center gap-1 text-[11.5px] text-[color:var(--se-green)] disabled:opacity-50"
+          >
+            {translatingAll ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+            {translatingAll ? "翻译中…" : "全部翻译"}
+          </button>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={generating}
+            className="flex items-center gap-1 text-[11.5px] text-[color:var(--se-green)] disabled:opacity-50"
+          >
+            {generating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            {generating ? "生成中…" : "换一批"}
+          </button>
+        </div>
       </div>
 
       {error ? <ErrorBanner message={`动态加载失败：${error}`} onRetry={onRetry} /> : null}
@@ -316,7 +406,45 @@ export function DiscoverTab({
                 {moment.content}
               </p>
 
-              {moment.mood_tag ? <span className="se-mood">#{moment.mood_tag}</span> : null}
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                {moment.mood_tag ? <span className="se-mood">#{moment.mood_tag}</span> : null}
+                <button
+                  type="button"
+                  className={`se-translate-btn ${momentTranslations[moment.id] ? "done" : ""}`}
+                  aria-label="翻译这条动态"
+                  aria-expanded={momentTranslations[moment.id]?.open === true}
+                  disabled={translatingMoments[moment.id] === true}
+                  onClick={() => void toggleMomentTranslation(moment)}
+                >
+                  {translatingMoments[moment.id] ? (
+                    <Loader2 size={10} className="animate-spin" />
+                  ) : (
+                    <Languages size={11} />
+                  )}
+                  {translatingMoments[moment.id] ? "翻译中…" : "译"}
+                </button>
+                {momentTranslations[moment.id]?.result.cached ? (
+                  <span className="se-translate-cached">缓存</span>
+                ) : null}
+              </div>
+
+              {momentTranslations[moment.id]?.open ? (
+                <button
+                  type="button"
+                  className="se-translation mt-1.5"
+                  onClick={() => void toggleMomentTranslation(moment)}
+                  aria-label="收起译文"
+                >
+                  <span className="se-translation-head">
+                    <Languages size={10} />
+                    译 · {momentTranslations[moment.id]?.result.target_label || "简体中文"}
+                    <span className="se-translation-collapse">收起</span>
+                  </span>
+                  <span className="se-translation-text">
+                    {momentTranslations[moment.id]?.result.translation}
+                  </span>
+                </button>
+              ) : null}
 
               <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2">
                 <span className="text-[10.5px] text-[color:var(--se-faint)]">

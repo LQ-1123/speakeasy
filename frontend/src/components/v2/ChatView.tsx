@@ -160,6 +160,46 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     pollRef.current = setInterval(tick, SUGGESTION_POLL_MS);
   }, [stopPolling]);
 
+  /** 聊天窗打开期间的轻量消息轮询：补上「服务端稍后才生成的消息」，
+   *  例如好友主动追问、发送超时后才落库的回复、其他端产生的新消息。 */
+  const livePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const livePollInFlightRef = useRef(false);
+
+  const refreshMessagesSilently = useCallback(async () => {
+    if (!mountedRef.current) return;
+    if (document.visibilityState !== "visible") return;
+    if (livePollInFlightRef.current || pollInFlightRef.current) return;
+    livePollInFlightRef.current = true;
+    const node = scrollRef.current;
+    const nearBottom = node ? node.scrollHeight - node.scrollTop - node.clientHeight < 160 : true;
+    try {
+      const list = await api.chatMessages(friendRef.current.id, 30);
+      if (!mountedRef.current) return;
+      setMessages((prev) => mergeMessages(prev, list));
+      // 聊天窗打开时拉到的消息都已展示 → 标已读（含迟到的好友消息）
+      void api.markRead(friendRef.current.id).catch(() => undefined);
+      if (nearBottom) requestAnimationFrame(() => scrollToBottom());
+    } catch {
+      /* 轮询失败静默，等下一次 */
+    } finally {
+      livePollInFlightRef.current = false;
+    }
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    const timer = setInterval(() => void refreshMessagesSilently(), 4000);
+    livePollRef.current = timer;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refreshMessagesSilently();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      livePollRef.current = null;
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refreshMessagesSilently]);
+
   const loadMessages = useCallback(async () => {
     setLoading(true);
     setLoadError(null);

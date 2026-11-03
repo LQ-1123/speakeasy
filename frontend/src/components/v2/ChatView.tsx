@@ -103,6 +103,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollInFlightRef = useRef(false);
   const tempUrlsRef = useRef<string[]>([]);
+  const mountedRef = useRef(true);
   const friendRef = useRef(friend);
   friendRef.current = friend;
 
@@ -138,6 +139,8 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         try {
           const list = await api.chatMessages(friendRef.current.id, 30);
           setMessages((prev) => mergeMessages(prev, list));
+          // 聊天窗打开期间拉到的消息都已展示 → 立即已读，回列表不应再有红点
+          void api.markRead(friendRef.current.id).catch(() => undefined);
           if (list.some((message) => message.sender === "user" && message.suggestion)) {
             stopPolling();
             setSuggestionPending(false);
@@ -169,10 +172,12 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   }, [scrollToBottom]);
 
   useEffect(() => {
+    mountedRef.current = true;
     setTranslations({});
     setTranslatingIds({});
     void loadMessages();
     return () => {
+      mountedRef.current = false;
       stopPolling();
       tempUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       tempUrlsRef.current = [];
@@ -214,6 +219,11 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         return mergeMessages(withoutTemp, incoming);
       });
       revokeTemp(temp.local_audio_url);
+      // 好友回复已直接展示在聊天窗里 → 标记已读，否则退回列表会亮红点。
+      // 若用户在等待期间已经退出聊天，则不标记（回复未看到，应保留未读）。
+      if (mountedRef.current) {
+        void api.markRead(friend.id).catch(() => undefined);
+      }
       if (response.suggestion_pending) {
         setSuggestionPending(true);
         startSuggestionPolling();

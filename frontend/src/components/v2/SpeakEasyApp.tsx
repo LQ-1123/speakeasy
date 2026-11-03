@@ -390,7 +390,15 @@ function AppInner() {
   );
 
   const handleSaveMemories = useCallback(
-    async (patch: { nickname: string; city: string; majorOrJob: string; interests: string[]; weaknesses: string[] }) => {
+    async (patch: {
+      nickname: string;
+      city: string;
+      majorOrJob: string;
+      interests: string[];
+      weaknesses: string[];
+      targetLanguages?: string[];
+      nativeLanguage?: string;
+    }) => {
       const baseFact = memories?.fact_sheet ?? emptyFactSheet();
       const fact: FactSheet = {
         ...baseFact,
@@ -407,13 +415,20 @@ function AppInner() {
         },
       };
       try {
-        const payload = await api.putMemories({ nickname: patch.nickname, fact_sheet: fact });
+        const payload = await api.putMemories({
+          nickname: patch.nickname,
+          fact_sheet: fact,
+          ...(patch.targetLanguages ? { target_languages: patch.targetLanguages } : {}),
+          ...(patch.nativeLanguage ? { native_language: patch.nativeLanguage } : {}),
+        });
         if (!mountedRef.current) return;
         // 后端可能返回 204 / 不完整数据：本地合并兜底
         const merged: MemoryPayload = {
           profile: {
             ...(memories?.profile ?? { nickname: "", native_language: "zh", target_languages: ["en"], fact_sheet: fact }),
             nickname: patch.nickname || payload.profile.nickname,
+            target_languages: patch.targetLanguages ?? memories?.profile.target_languages ?? ["en"],
+            native_language: patch.nativeLanguage ?? memories?.profile.native_language ?? "zh-CN",
             fact_sheet: fact,
           },
           fact_sheet: fact,

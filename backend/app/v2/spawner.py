@@ -625,6 +625,30 @@ class PersonaSpawner:
             "referred_by_friend_id": referred_by_friend_id or None,
             "request_message": self._build_request_message(referred_by_friend_id),
         }
+        # 随机分配 Fish 音色（用户不手选）；任何异常都不影响捏人
+        try:
+            from app.config import get_settings as _gs  # noqa: PLC0415
+            from app.voice import fish_tts as _ft  # noqa: PLC0415
+            from app.voice.tts_config import TTSConfigStore as _TCS  # noqa: PLC0415
+
+            _cfg = _TCS(str(_gs().data_path)).load()
+            if _cfg.provider == "fish" and _cfg.fish_api_key.strip():
+                _gender = ""
+                try:
+                    _gender = str(
+                        (archetype or {}).get("vibe_constraints", {}).get("gender") or ""
+                    )
+                except Exception:  # noqa: BLE001
+                    _gender = ""
+                data["fish_voice_id"] = await _ft.pick_voice_for(
+                    language=str(data.get("reply_language") or "en"),
+                    gender=_gender,
+                    api_key=_cfg.fish_api_key,
+                    base_url=_cfg.fish_base_url,
+                )
+        except Exception as _exc:  # noqa: BLE001
+            log.debug("分配 Fish 音色失败（用默认）: %s", _exc)
+
         friend = self.db.create_friend(data)
         friend["initial_context"] = persona["initial_context"]
         friend["personality_traits"] = list(persona["personality_traits"])

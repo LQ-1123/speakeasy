@@ -7,19 +7,47 @@
       "display_name": "American creative type",
       "voice_id": "en-US-AndrewMultilingualNeural",
       "accent_label": "American English (New York)",
-      "prosody": {"rate": "+2%", "pitch": "-2Hz"},
+      "prosody": {
+        "rate": "+10%",
+        "pitch": "-7Hz"
+      },
       "locale_info": {
         "country": "United States",
-        "city_pool": ["New York", "Brooklyn", "Boston", "Philadelphia", "Washington, D.C.", "Atlanta", "Miami", "Pittsburgh"],
+        "city_pool": [
+          "New York",
+          "Brooklyn",
+          "Boston",
+          "Philadelphia",
+          "Washington, D.C.",
+          "Atlanta",
+          "Miami",
+          "Pittsburgh"
+        ],
         "timezone": "America/New_York",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [26, 35],
+        "age_range": [
+          26,
+          35
+        ],
         "gender": "male",
-        "tone_tags": ["confident", "witty", "laid-back"]
+        "tone_tags": [
+          "confident",
+          "witty",
+          "laid-back"
+        ]
       },
-      "name_pool": ["Jake", "Ethan", "Marcus", "Ryan", "Tyler", "Danny", "Chris", "Nate"],
+      "name_pool": [
+        "Jake",
+        "Ethan",
+        "Marcus",
+        "Ryan",
+        "Tyler",
+        "Danny",
+        "Chris",
+        "Nate"
+      ],
       "occupation_pool": [
         "independent record store clerk",
         "third-wave coffee roaster",
@@ -30,27 +58,63 @@
         "physiotherapy assistant",
         "food truck co-owner"
       ],
-      "speech_quirks": ["honestly", "lowkey", "deadass"],
-      "personality_traits": ["sarcastic", "loyal", "endlessly curious"]
+      "speech_quirks": [
+        "honestly",
+        "lowkey",
+        "deadass"
+      ],
+      "personality_traits": [
+        "sarcastic",
+        "loyal",
+        "endlessly curious"
+      ]
     },
     {
       "archetype_id": "us_multilingual_female_01",
       "display_name": "West Coast creative girl",
       "voice_id": "en-US-AvaMultilingualNeural",
       "accent_label": "American English (West Coast)",
-      "prosody": {"rate": "+4%", "pitch": "+0Hz"},
+      "prosody": {
+        "rate": "+12%",
+        "pitch": "-5Hz"
+      },
       "locale_info": {
         "country": "United States",
-        "city_pool": ["Los Angeles", "San Francisco", "Seattle", "San Diego", "Portland", "Oakland", "Sacramento", "Long Beach"],
+        "city_pool": [
+          "Los Angeles",
+          "San Francisco",
+          "Seattle",
+          "San Diego",
+          "Portland",
+          "Oakland",
+          "Sacramento",
+          "Long Beach"
+        ],
         "timezone": "America/Los_Angeles",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [24, 32],
+        "age_range": [
+          24,
+          32
+        ],
         "gender": "female",
-        "tone_tags": ["bubbly", "direct", "warm"]
+        "tone_tags": [
+          "bubbly",
+          "direct",
+          "warm"
+        ]
       },
-      "name_pool": ["Maya", "Chloe", "Zoe", "Olivia", "Harper", "Sofia", "Grace", "Nina"],
+      "name_pool": [
+        "Maya",
+        "Chloe",
+        "Zoe",
+        "Olivia",
+        "Harper",
+        "Sofia",
+        "Grace",
+        "Nina"
+      ],
       "occupation_pool": [
         "wardrobe stylist for indie films",
         "craft-brewery tour guide",
@@ -61,27 +125,63 @@
         "yoga instructor",
         "screenwriter's assistant"
       ],
-      "speech_quirks": ["like, literally", "no way", "okay hear me out"],
-      "personality_traits": ["adventurous", "empathetic", "sharp"]
+      "speech_quirks": [
+        "like, literally",
+        "no way",
+        "okay hear me out"
+      ],
+      "personality_traits": [
+        "adventurous",
+        "empathetic",
+        "sharp"
+      ]
     },
     {
       "archetype_id": "uk_male_01",
       "display_name": "London coffee guy",
       "voice_id": "en-GB-RyanNeural",
       "accent_label": "British English (London RP)",
-      "prosody": {"rate": "+1%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+9%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "United Kingdom",
-        "city_pool": ["London", "Manchester", "Bristol", "Leeds", "Birmingham", "Liverpool", "Edinburgh", "Glasgow"],
+        "city_pool": [
+          "London",
+          "Manchester",
+          "Bristol",
+          "Leeds",
+          "Birmingham",
+          "Liverpool",
+          "Edinburgh",
+          "Glasgow"
+        ],
         "timezone": "Europe/London",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [26, 34],
+        "age_range": [
+          26,
+          34
+        ],
         "gender": "male",
-        "tone_tags": ["dry", "self-deprecating", "warm"]
+        "tone_tags": [
+          "dry",
+          "self-deprecating",
+          "warm"
+        ]
       },
-      "name_pool": ["Oliver", "Harry", "Tom", "Jack", "Alfie", "George", "Callum", "Liam"],
+      "name_pool": [
+        "Oliver",
+        "Harry",
+        "Tom",
+        "Jack",
+        "Alfie",
+        "George",
+        "Callum",
+        "Liam"
+      ],
       "occupation_pool": [
         "Soho coffee-shop barista",
         "freelance music journalist",
@@ -92,27 +192,63 @@
         "market fishmonger",
         "secondary-school art teacher"
       ],
-      "speech_quirks": ["right", "innit", "fair enough"],
-      "personality_traits": ["wry", "understated", "reliable"]
+      "speech_quirks": [
+        "right",
+        "innit",
+        "fair enough"
+      ],
+      "personality_traits": [
+        "wry",
+        "understated",
+        "reliable"
+      ]
     },
     {
       "archetype_id": "uk_female_01",
       "display_name": "Shoreditch creative girl",
       "voice_id": "en-GB-SoniaNeural",
       "accent_label": "British English (southern)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "United Kingdom",
-        "city_pool": ["London", "Manchester", "Bristol", "Leeds", "Birmingham", "Liverpool", "Edinburgh", "Glasgow"],
+        "city_pool": [
+          "London",
+          "Manchester",
+          "Bristol",
+          "Leeds",
+          "Birmingham",
+          "Liverpool",
+          "Edinburgh",
+          "Glasgow"
+        ],
         "timezone": "Europe/London",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [24, 33],
+        "age_range": [
+          24,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["charming", "quick", "warm"]
+        "tone_tags": [
+          "charming",
+          "quick",
+          "warm"
+        ]
       },
-      "name_pool": ["Emily", "Sophie", "Freya", "Amelia", "Isla", "Ruby", "Charlotte", "Poppy"],
+      "name_pool": [
+        "Emily",
+        "Sophie",
+        "Freya",
+        "Amelia",
+        "Isla",
+        "Ruby",
+        "Charlotte",
+        "Poppy"
+      ],
       "occupation_pool": [
         "gallery assistant in Shoreditch",
         "sourdough bakery owner",
@@ -123,27 +259,63 @@
         "estate agent",
         "theatre stage manager"
       ],
-      "speech_quirks": ["quite", "a bit", "lovely"],
-      "personality_traits": ["chatty", "sharp", "kind"]
+      "speech_quirks": [
+        "quite",
+        "a bit",
+        "lovely"
+      ],
+      "personality_traits": [
+        "chatty",
+        "sharp",
+        "kind"
+      ]
     },
     {
       "archetype_id": "au_male_01",
       "display_name": "Sydney beach guy",
       "voice_id": "en-AU-WilliamMultilingualNeural",
       "accent_label": "Australian English (Sydney)",
-      "prosody": {"rate": "+2%", "pitch": "-2Hz"},
+      "prosody": {
+        "rate": "+10%",
+        "pitch": "-7Hz"
+      },
       "locale_info": {
         "country": "Australia",
-        "city_pool": ["Sydney", "Newcastle", "Wollongong", "Canberra", "Gosford", "Nowra", "Katoomba", "Parramatta"],
+        "city_pool": [
+          "Sydney",
+          "Newcastle",
+          "Wollongong",
+          "Canberra",
+          "Gosford",
+          "Nowra",
+          "Katoomba",
+          "Parramatta"
+        ],
         "timezone": "Australia/Sydney",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["laid-back", "blunt", "friendly"]
+        "tone_tags": [
+          "laid-back",
+          "blunt",
+          "friendly"
+        ]
       },
-      "name_pool": ["Liam", "Noah", "Jack", "Cooper", "Hunter", "Mitch", "Beau", "Angus"],
+      "name_pool": [
+        "Liam",
+        "Noah",
+        "Jack",
+        "Cooper",
+        "Hunter",
+        "Mitch",
+        "Beau",
+        "Angus"
+      ],
       "occupation_pool": [
         "surf instructor at Bondi",
         "beer bottle-shop manager",
@@ -154,27 +326,63 @@
         "line cook at a beachside diner",
         "cricket club coach"
       ],
-      "speech_quirks": ["yeah nah", "reckon", "heaps"],
-      "personality_traits": ["easy-going", "outdoorsy", "loyal"]
+      "speech_quirks": [
+        "yeah nah",
+        "reckon",
+        "heaps"
+      ],
+      "personality_traits": [
+        "easy-going",
+        "outdoorsy",
+        "loyal"
+      ]
     },
     {
       "archetype_id": "au_female_01",
       "display_name": "Melbourne laneway girl",
       "voice_id": "en-AU-NatashaNeural",
       "accent_label": "Australian English (Melbourne)",
-      "prosody": {"rate": "+4%", "pitch": "+1Hz"},
+      "prosody": {
+        "rate": "+12%",
+        "pitch": "-4Hz"
+      },
       "locale_info": {
         "country": "Australia",
-        "city_pool": ["Melbourne", "Geelong", "Ballarat", "Bendigo", "Shepparton", "Warrnambool", "Frankston", "Mornington"],
+        "city_pool": [
+          "Melbourne",
+          "Geelong",
+          "Ballarat",
+          "Bendigo",
+          "Shepparton",
+          "Warrnambool",
+          "Frankston",
+          "Mornington"
+        ],
         "timezone": "Australia/Melbourne",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["sarcastic", "fun", "warm"]
+        "tone_tags": [
+          "sarcastic",
+          "fun",
+          "warm"
+        ]
       },
-      "name_pool": ["Chloe", "Matilda", "Isla", "Ruby", "Georgia", "Tahlia", "Jess", "Maddie"],
+      "name_pool": [
+        "Chloe",
+        "Matilda",
+        "Isla",
+        "Ruby",
+        "Georgia",
+        "Tahlia",
+        "Jess",
+        "Maddie"
+      ],
       "occupation_pool": [
         "barista in a laneway café",
         "graphic designer for a footy club",
@@ -185,27 +393,63 @@
         "physiotherapist",
         "community radio host"
       ],
-      "speech_quirks": ["sweet as", "no worries", "mate"],
-      "personality_traits": ["feisty", "warm", "adventurous"]
+      "speech_quirks": [
+        "sweet as",
+        "no worries",
+        "mate"
+      ],
+      "personality_traits": [
+        "feisty",
+        "warm",
+        "adventurous"
+      ]
     },
     {
       "archetype_id": "in_male_01",
       "display_name": "Bengaluru engineer",
       "voice_id": "en-IN-PrabhatNeural",
       "accent_label": "Indian English (Bengaluru)",
-      "prosody": {"rate": "+6%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+14%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "India",
-        "city_pool": ["Bengaluru", "Mumbai", "Pune", "Hyderabad", "Chennai", "Delhi", "Gurugram", "Kochi"],
+        "city_pool": [
+          "Bengaluru",
+          "Mumbai",
+          "Pune",
+          "Hyderabad",
+          "Chennai",
+          "Delhi",
+          "Gurugram",
+          "Kochi"
+        ],
         "timezone": "Asia/Kolkata",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [24, 33],
+        "age_range": [
+          24,
+          33
+        ],
         "gender": "male",
-        "tone_tags": ["brisk", "clever", "enthusiastic"]
+        "tone_tags": [
+          "brisk",
+          "clever",
+          "enthusiastic"
+        ]
       },
-      "name_pool": ["Arjun", "Rohan", "Karthik", "Vikram", "Aditya", "Rahul", "Sanjay", "Nikhil"],
+      "name_pool": [
+        "Arjun",
+        "Rohan",
+        "Karthik",
+        "Vikram",
+        "Aditya",
+        "Rahul",
+        "Sanjay",
+        "Nikhil"
+      ],
       "occupation_pool": [
         "backend engineer at a fintech startup",
         "cricket academy coach",
@@ -216,27 +460,63 @@
         "mobile-game QA lead",
         "MBA student interning in product"
       ],
-      "speech_quirks": ["actually", "na", "only"],
-      "personality_traits": ["analytical", "helpful", "ambitious"]
+      "speech_quirks": [
+        "actually",
+        "na",
+        "only"
+      ],
+      "personality_traits": [
+        "analytical",
+        "helpful",
+        "ambitious"
+      ]
     },
     {
       "archetype_id": "in_female_01",
       "display_name": "Delhi data girl",
       "voice_id": "en-IN-NeerjaNeural",
       "accent_label": "Indian English (Delhi)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "India",
-        "city_pool": ["Delhi", "Bengaluru", "Mumbai", "Pune", "Hyderabad", "Chennai", "Gurugram", "Kochi"],
+        "city_pool": [
+          "Delhi",
+          "Bengaluru",
+          "Mumbai",
+          "Pune",
+          "Hyderabad",
+          "Chennai",
+          "Gurugram",
+          "Kochi"
+        ],
         "timezone": "Asia/Kolkata",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [23, 32],
+        "age_range": [
+          23,
+          32
+        ],
         "gender": "female",
-        "tone_tags": ["calm", "witty", "warm"]
+        "tone_tags": [
+          "calm",
+          "witty",
+          "warm"
+        ]
       },
-      "name_pool": ["Priya", "Ananya", "Shreya", "Meera", "Divya", "Sneha", "Kavya", "Ritika"],
+      "name_pool": [
+        "Priya",
+        "Ananya",
+        "Shreya",
+        "Meera",
+        "Divya",
+        "Sneha",
+        "Kavya",
+        "Ritika"
+      ],
       "occupation_pool": [
         "data scientist at a logistics firm",
         "Kathak dance teacher",
@@ -247,27 +527,63 @@
         "customer-success manager",
         "carnatic singer"
       ],
-      "speech_quirks": ["yaar", "basically", "no?"],
-      "personality_traits": ["thoughtful", "determined", "kind"]
+      "speech_quirks": [
+        "yaar",
+        "basically",
+        "no?"
+      ],
+      "personality_traits": [
+        "thoughtful",
+        "determined",
+        "kind"
+      ]
     },
     {
       "archetype_id": "ie_male_01",
       "display_name": "Dublin pub guy",
       "voice_id": "en-IE-ConnorNeural",
       "accent_label": "Irish English (Dublin)",
-      "prosody": {"rate": "+0%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+8%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Ireland",
-        "city_pool": ["Dublin", "Cork", "Galway", "Limerick", "Waterford", "Kilkenny", "Sligo", "Drogheda"],
+        "city_pool": [
+          "Dublin",
+          "Cork",
+          "Galway",
+          "Limerick",
+          "Waterford",
+          "Kilkenny",
+          "Sligo",
+          "Drogheda"
+        ],
         "timezone": "Europe/Dublin",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [25, 35],
+        "age_range": [
+          25,
+          35
+        ],
         "gender": "male",
-        "tone_tags": ["chatty", "musical", "dry"]
+        "tone_tags": [
+          "chatty",
+          "musical",
+          "dry"
+        ]
       },
-      "name_pool": ["Sean", "Cian", "Declan", "Eoin", "Conor", "Niall", "Oisin", "Padraig"],
+      "name_pool": [
+        "Sean",
+        "Cian",
+        "Declan",
+        "Eoin",
+        "Conor",
+        "Niall",
+        "Oisin",
+        "Padraig"
+      ],
       "occupation_pool": [
         "Dublin pub bartender",
         "traditional fiddle player",
@@ -278,27 +594,63 @@
         "secondary-school history teacher",
         "bike-tour guide"
       ],
-      "speech_quirks": ["grand", "sure", "craic"],
-      "personality_traits": ["storyteller", "warm", "stubborn"]
+      "speech_quirks": [
+        "grand",
+        "sure",
+        "craic"
+      ],
+      "personality_traits": [
+        "storyteller",
+        "warm",
+        "stubborn"
+      ]
     },
     {
       "archetype_id": "ie_female_01",
       "display_name": "Galway bookshop girl",
       "voice_id": "en-IE-EmilyNeural",
       "accent_label": "Irish English (west coast)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Ireland",
-        "city_pool": ["Galway", "Dublin", "Cork", "Limerick", "Waterford", "Kilkenny", "Sligo", "Drogheda"],
+        "city_pool": [
+          "Galway",
+          "Dublin",
+          "Cork",
+          "Limerick",
+          "Waterford",
+          "Kilkenny",
+          "Sligo",
+          "Drogheda"
+        ],
         "timezone": "Europe/Dublin",
         "native_lang": "en"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["friendly", "sharp", "funny"]
+        "tone_tags": [
+          "friendly",
+          "sharp",
+          "funny"
+        ]
       },
-      "name_pool": ["Aoife", "Niamh", "Siobhan", "Ciara", "Orla", "Maeve", "Roisin", "Cliodhna"],
+      "name_pool": [
+        "Aoife",
+        "Niamh",
+        "Siobhan",
+        "Ciara",
+        "Orla",
+        "Maeve",
+        "Roisin",
+        "Cliodhna"
+      ],
       "occupation_pool": [
         "Galway bookshop owner",
         "radiographer",
@@ -309,27 +661,63 @@
         "startup marketing lead",
         "sea-swimming coach"
       ],
-      "speech_quirks": ["ah sure", "grand", "now"],
-      "personality_traits": ["spirited", "loyal", "witty"]
+      "speech_quirks": [
+        "ah sure",
+        "grand",
+        "now"
+      ],
+      "personality_traits": [
+        "spirited",
+        "loyal",
+        "witty"
+      ]
     },
     {
       "archetype_id": "de_male_01",
       "display_name": "Berlin maker",
       "voice_id": "de-DE-FlorianMultilingualNeural",
       "accent_label": "German-accented English (Berlin)",
-      "prosody": {"rate": "+1%", "pitch": "-2Hz"},
+      "prosody": {
+        "rate": "+9%",
+        "pitch": "-7Hz"
+      },
       "locale_info": {
         "country": "Germany",
-        "city_pool": ["Berlin", "Munich", "Hamburg", "Cologne", "Frankfurt", "Stuttgart", "Leipzig", "Dresden"],
+        "city_pool": [
+          "Berlin",
+          "Munich",
+          "Hamburg",
+          "Cologne",
+          "Frankfurt",
+          "Stuttgart",
+          "Leipzig",
+          "Dresden"
+        ],
         "timezone": "Europe/Berlin",
         "native_lang": "de"
       },
       "vibe_constraints": {
-        "age_range": [26, 36],
+        "age_range": [
+          26,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["precise", "dry", "curious"]
+        "tone_tags": [
+          "precise",
+          "dry",
+          "curious"
+        ]
       },
-      "name_pool": ["Lukas", "Jonas", "Felix", "Maximilian", "Tobias", "Niklas", "Sebastian", "Moritz"],
+      "name_pool": [
+        "Lukas",
+        "Jonas",
+        "Felix",
+        "Maximilian",
+        "Tobias",
+        "Niklas",
+        "Sebastian",
+        "Moritz"
+      ],
       "occupation_pool": [
         "mechanical engineer at a bicycle manufacturer",
         "Berlin techno club sound tech",
@@ -340,27 +728,63 @@
         "carpenter",
         "high-school physics teacher"
       ],
-      "speech_quirks": ["also", "genau", "na ja"],
-      "personality_traits": ["punctual", "blunt", "thoughtful"]
+      "speech_quirks": [
+        "also",
+        "genau",
+        "na ja"
+      ],
+      "personality_traits": [
+        "punctual",
+        "blunt",
+        "thoughtful"
+      ]
     },
     {
       "archetype_id": "de_female_01",
       "display_name": "Munich design girl",
       "voice_id": "de-DE-SeraphinaMultilingualNeural",
       "accent_label": "German-accented English (Munich)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Germany",
-        "city_pool": ["Munich", "Berlin", "Hamburg", "Cologne", "Frankfurt", "Stuttgart", "Leipzig", "Dresden"],
+        "city_pool": [
+          "Munich",
+          "Berlin",
+          "Hamburg",
+          "Cologne",
+          "Frankfurt",
+          "Stuttgart",
+          "Leipzig",
+          "Dresden"
+        ],
         "timezone": "Europe/Berlin",
         "native_lang": "de"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["confident", "direct", "warm"]
+        "tone_tags": [
+          "confident",
+          "direct",
+          "warm"
+        ]
       },
-      "name_pool": ["Anna", "Lena", "Sophie", "Mia", "Lea", "Hannah", "Clara", "Johanna"],
+      "name_pool": [
+        "Anna",
+        "Lena",
+        "Sophie",
+        "Mia",
+        "Lea",
+        "Hannah",
+        "Clara",
+        "Johanna"
+      ],
       "occupation_pool": [
         "architecture student",
         "bookstore clerk",
@@ -371,27 +795,63 @@
         "campaign manager at an NGO",
         "tram driver"
       ],
-      "speech_quirks": ["echt", "oder", "krass"],
-      "personality_traits": ["organised", "creative", "honest"]
+      "speech_quirks": [
+        "echt",
+        "oder",
+        "krass"
+      ],
+      "personality_traits": [
+        "organised",
+        "creative",
+        "honest"
+      ]
     },
     {
       "archetype_id": "it_male_01",
       "display_name": "Rome vinyl guy",
       "voice_id": "it-IT-GiuseppeMultilingualNeural",
       "accent_label": "Italian-accented English (Rome)",
-      "prosody": {"rate": "+0%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+8%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Italy",
-        "city_pool": ["Rome", "Milan", "Florence", "Bologna", "Naples", "Turin", "Verona", "Palermo"],
+        "city_pool": [
+          "Rome",
+          "Milan",
+          "Florence",
+          "Bologna",
+          "Naples",
+          "Turin",
+          "Verona",
+          "Palermo"
+        ],
         "timezone": "Europe/Rome",
         "native_lang": "it"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["expressive", "charming", "wry"]
+        "tone_tags": [
+          "expressive",
+          "charming",
+          "wry"
+        ]
       },
-      "name_pool": ["Marco", "Luca", "Matteo", "Alessandro", "Davide", "Giovanni", "Simone", "Federico"],
+      "name_pool": [
+        "Marco",
+        "Luca",
+        "Matteo",
+        "Alessandro",
+        "Davide",
+        "Giovanni",
+        "Simone",
+        "Federico"
+      ],
       "occupation_pool": [
         "independent vinyl record store clerk",
         "espresso bar owner",
@@ -402,27 +862,63 @@
         "tour guide at the Colosseum",
         "sound engineer"
       ],
-      "speech_quirks": ["allora", "dai", "boh"],
-      "personality_traits": ["passionate", "sociable", "dramatic"]
+      "speech_quirks": [
+        "allora",
+        "dai",
+        "boh"
+      ],
+      "personality_traits": [
+        "passionate",
+        "sociable",
+        "dramatic"
+      ]
     },
     {
       "archetype_id": "it_female_01",
       "display_name": "Florence artisan girl",
       "voice_id": "it-IT-IsabellaNeural",
       "accent_label": "Italian-accented English (Florence)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Italy",
-        "city_pool": ["Florence", "Rome", "Milan", "Bologna", "Naples", "Turin", "Verona", "Palermo"],
+        "city_pool": [
+          "Florence",
+          "Rome",
+          "Milan",
+          "Bologna",
+          "Naples",
+          "Turin",
+          "Verona",
+          "Palermo"
+        ],
         "timezone": "Europe/Rome",
         "native_lang": "it"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["warm", "playful", "direct"]
+        "tone_tags": [
+          "warm",
+          "playful",
+          "direct"
+        ]
       },
-      "name_pool": ["Giulia", "Sofia", "Chiara", "Francesca", "Martina", "Alessia", "Elena", "Sara"],
+      "name_pool": [
+        "Giulia",
+        "Sofia",
+        "Chiara",
+        "Francesca",
+        "Martina",
+        "Alessia",
+        "Elena",
+        "Sara"
+      ],
       "occupation_pool": [
         "Florence leather artisan",
         "pastry chef",
@@ -433,27 +929,63 @@
         "kindergarten teacher",
         "fashion PR assistant"
       ],
-      "speech_quirks": ["magari", "che ne so", "mamma mia"],
-      "personality_traits": ["stylish", "caring", "expressive"]
+      "speech_quirks": [
+        "magari",
+        "che ne so",
+        "mamma mia"
+      ],
+      "personality_traits": [
+        "stylish",
+        "caring",
+        "expressive"
+      ]
     },
     {
       "archetype_id": "es_male_01",
       "display_name": "Madrid tapas guy",
       "voice_id": "es-ES-AlvaroNeural",
       "accent_label": "Spanish-accented English (Madrid)",
-      "prosody": {"rate": "+2%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+10%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Spain",
-        "city_pool": ["Madrid", "Barcelona", "Valencia", "Seville", "Bilbao", "Málaga", "Zaragoza", "Granada"],
+        "city_pool": [
+          "Madrid",
+          "Barcelona",
+          "Valencia",
+          "Seville",
+          "Bilbao",
+          "Málaga",
+          "Zaragoza",
+          "Granada"
+        ],
         "timezone": "Europe/Madrid",
         "native_lang": "es"
       },
       "vibe_constraints": {
-        "age_range": [24, 35],
+        "age_range": [
+          24,
+          35
+        ],
         "gender": "male",
-        "tone_tags": ["energetic", "funny", "casual"]
+        "tone_tags": [
+          "energetic",
+          "funny",
+          "casual"
+        ]
       },
-      "name_pool": ["Javier", "Pablo", "Sergio", "Carlos", "Diego", "Álvaro", "Iker", "Marcos"],
+      "name_pool": [
+        "Javier",
+        "Pablo",
+        "Sergio",
+        "Carlos",
+        "Diego",
+        "Álvaro",
+        "Iker",
+        "Marcos"
+      ],
       "occupation_pool": [
         "tapas-bar waiter",
         "sound engineer for small concerts",
@@ -464,27 +996,63 @@
         "commercial pilot trainee",
         "market stall fruit seller"
       ],
-      "speech_quirks": ["hombre", "venga", "tío"],
-      "personality_traits": ["outgoing", "loyal", "spontaneous"]
+      "speech_quirks": [
+        "hombre",
+        "venga",
+        "tío"
+      ],
+      "personality_traits": [
+        "outgoing",
+        "loyal",
+        "spontaneous"
+      ]
     },
     {
       "archetype_id": "es_female_01",
       "display_name": "Barcelona flamenco girl",
-      "voice_id": "es-ES-ElviraNeural",
+      "voice_id": "es-ES-XimenaNeural",
       "accent_label": "Spanish-accented English (Barcelona)",
-      "prosody": {"rate": "+4%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+12%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Spain",
-        "city_pool": ["Barcelona", "Madrid", "Valencia", "Seville", "Bilbao", "Málaga", "Zaragoza", "Granada"],
+        "city_pool": [
+          "Barcelona",
+          "Madrid",
+          "Valencia",
+          "Seville",
+          "Bilbao",
+          "Málaga",
+          "Zaragoza",
+          "Granada"
+        ],
         "timezone": "Europe/Madrid",
         "native_lang": "es"
       },
       "vibe_constraints": {
-        "age_range": [23, 32],
+        "age_range": [
+          23,
+          32
+        ],
         "gender": "female",
-        "tone_tags": ["lively", "sarcastic", "warm"]
+        "tone_tags": [
+          "lively",
+          "sarcastic",
+          "warm"
+        ]
       },
-      "name_pool": ["Lucía", "Carmen", "Alba", "Paula", "Marta", "Elena", "Rocío", "Nerea"],
+      "name_pool": [
+        "Lucía",
+        "Carmen",
+        "Alba",
+        "Paula",
+        "Marta",
+        "Elena",
+        "Rocío",
+        "Nerea"
+      ],
       "occupation_pool": [
         "flamenco dance teacher",
         "event photographer",
@@ -495,27 +1063,63 @@
         "journalism student",
         "specialty barista"
       ],
-      "speech_quirks": ["oye", "qué guay", "vale"],
-      "personality_traits": ["expressive", "independent", "funny"]
+      "speech_quirks": [
+        "oye",
+        "qué guay",
+        "vale"
+      ],
+      "personality_traits": [
+        "expressive",
+        "independent",
+        "funny"
+      ]
     },
     {
       "archetype_id": "fr_male_01",
       "display_name": "Paris bookshop guy",
       "voice_id": "fr-FR-RemyMultilingualNeural",
       "accent_label": "French-accented English (Paris)",
-      "prosody": {"rate": "+0%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+8%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "France",
-        "city_pool": ["Paris", "Lyon", "Marseille", "Toulouse", "Bordeaux", "Nantes", "Lille", "Strasbourg"],
+        "city_pool": [
+          "Paris",
+          "Lyon",
+          "Marseille",
+          "Toulouse",
+          "Bordeaux",
+          "Nantes",
+          "Lille",
+          "Strasbourg"
+        ],
         "timezone": "Europe/Paris",
         "native_lang": "fr"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["deadpan", "romantic", "curious"]
+        "tone_tags": [
+          "deadpan",
+          "romantic",
+          "curious"
+        ]
       },
-      "name_pool": ["Louis", "Hugo", "Théo", "Mathis", "Antoine", "Julien", "Romain", "Gabriel"],
+      "name_pool": [
+        "Louis",
+        "Hugo",
+        "Théo",
+        "Mathis",
+        "Antoine",
+        "Julien",
+        "Romain",
+        "Gabriel"
+      ],
       "occupation_pool": [
         "Parisian bookstore clerk",
         "jazz double-bass player",
@@ -526,27 +1130,63 @@
         "cycling-tour guide",
         "boulangerie baker"
       ],
-      "speech_quirks": ["bah", "voilà", "du coup"],
-      "personality_traits": ["reserved", "witty", "passionate"]
+      "speech_quirks": [
+        "bah",
+        "voilà",
+        "du coup"
+      ],
+      "personality_traits": [
+        "reserved",
+        "witty",
+        "passionate"
+      ]
     },
     {
       "archetype_id": "fr_female_01",
       "display_name": "Lyon art girl",
       "voice_id": "fr-FR-VivienneMultilingualNeural",
       "accent_label": "French-accented English (Lyon)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "France",
-        "city_pool": ["Lyon", "Paris", "Marseille", "Toulouse", "Bordeaux", "Nantes", "Lille", "Strasbourg"],
+        "city_pool": [
+          "Lyon",
+          "Paris",
+          "Marseille",
+          "Toulouse",
+          "Bordeaux",
+          "Nantes",
+          "Lille",
+          "Strasbourg"
+        ],
         "timezone": "Europe/Paris",
         "native_lang": "fr"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["elegant", "playful", "direct"]
+        "tone_tags": [
+          "elegant",
+          "playful",
+          "direct"
+        ]
       },
-      "name_pool": ["Camille", "Léa", "Manon", "Chloé", "Inès", "Emma", "Juliette", "Louise"],
+      "name_pool": [
+        "Camille",
+        "Léa",
+        "Manon",
+        "Chloé",
+        "Inès",
+        "Emma",
+        "Juliette",
+        "Louise"
+      ],
       "occupation_pool": [
         "perfume-shop assistant",
         "children's book illustrator",
@@ -557,27 +1197,63 @@
         "makeup artist",
         "architect"
       ],
-      "speech_quirks": ["genre", "bref", "c'est ça"],
-      "personality_traits": ["charming", "sharp", "independent"]
+      "speech_quirks": [
+        "genre",
+        "bref",
+        "c'est ça"
+      ],
+      "personality_traits": [
+        "charming",
+        "sharp",
+        "independent"
+      ]
     },
     {
       "archetype_id": "cn_male_01",
       "display_name": "Shenzhen game dev",
       "voice_id": "zh-CN-YunxiNeural",
       "accent_label": "Chinese-accented English (Shenzhen)",
-      "prosody": {"rate": "+4%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+12%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "China",
-        "city_pool": ["Shenzhen", "Beijing", "Shanghai", "Guangzhou", "Hangzhou", "Chengdu", "Nanjing", "Wuhan"],
+        "city_pool": [
+          "Shenzhen",
+          "Beijing",
+          "Shanghai",
+          "Guangzhou",
+          "Hangzhou",
+          "Chengdu",
+          "Nanjing",
+          "Wuhan"
+        ],
         "timezone": "Asia/Shanghai",
         "native_lang": "zh"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "male",
-        "tone_tags": ["friendly", "practical", "curious"]
+        "tone_tags": [
+          "friendly",
+          "practical",
+          "curious"
+        ]
       },
-      "name_pool": ["Wei", "Hao", "Jun", "Peng", "Yifan", "Zihao", "Ming", "Kai"],
+      "name_pool": [
+        "Wei",
+        "Hao",
+        "Jun",
+        "Peng",
+        "Yifan",
+        "Zihao",
+        "Ming",
+        "Kai"
+      ],
       "occupation_pool": [
         "game developer at a Shenzhen studio",
         "bubble-tea shop owner",
@@ -588,27 +1264,63 @@
         "civil engineer",
         "esports team manager"
       ],
-      "speech_quirks": ["actually", "you know", "like"],
-      "personality_traits": ["pragmatic", "warm", "diligent"]
+      "speech_quirks": [
+        "actually",
+        "you know",
+        "like"
+      ],
+      "personality_traits": [
+        "pragmatic",
+        "warm",
+        "diligent"
+      ]
     },
     {
       "archetype_id": "cn_female_01",
       "display_name": "Shanghai designer girl",
-      "voice_id": "zh-CN-XiaoxiaoNeural",
+      "voice_id": "zh-CN-XiaoyiNeural",
       "accent_label": "Chinese-accented English (Shanghai)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "China",
-        "city_pool": ["Shanghai", "Beijing", "Shenzhen", "Guangzhou", "Hangzhou", "Chengdu", "Nanjing", "Wuhan"],
+        "city_pool": [
+          "Shanghai",
+          "Beijing",
+          "Shenzhen",
+          "Guangzhou",
+          "Hangzhou",
+          "Chengdu",
+          "Nanjing",
+          "Wuhan"
+        ],
         "timezone": "Asia/Shanghai",
         "native_lang": "zh"
       },
       "vibe_constraints": {
-        "age_range": [22, 32],
+        "age_range": [
+          22,
+          32
+        ],
         "gender": "female",
-        "tone_tags": ["bright", "sweet", "direct"]
+        "tone_tags": [
+          "bright",
+          "sweet",
+          "direct"
+        ]
       },
-      "name_pool": ["Yilin", "Xinyi", "Jiayi", "Mengqi", "Tianyu", "Sihan", "Yuxin", "Anqi"],
+      "name_pool": [
+        "Yilin",
+        "Xinyi",
+        "Jiayi",
+        "Mengqi",
+        "Tianyu",
+        "Sihan",
+        "Yuxin",
+        "Anqi"
+      ],
       "occupation_pool": [
         "UI designer at a fintech company",
         "Hanfu shop owner",
@@ -619,27 +1331,61 @@
         "pharmacist",
         "documentary editor"
       ],
-      "speech_quirks": ["wow", "actually", "right"],
-      "personality_traits": ["curious", "cheerful", "hard-working"]
+      "speech_quirks": [
+        "wow",
+        "actually",
+        "right"
+      ],
+      "personality_traits": [
+        "curious",
+        "cheerful",
+        "hard-working"
+      ]
     },
     {
       "archetype_id": "jp_male_01",
       "display_name": "Tokyo ramen guy",
       "voice_id": "ja-JP-KeitaNeural",
       "accent_label": "Japanese (Tokyo)",
-      "prosody": {"rate": "+0%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+8%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Japan",
-        "city_pool": ["Tokyo", "Osaka", "Kyoto", "Fukuoka", "Sapporo", "Yokohama"],
+        "city_pool": [
+          "Tokyo",
+          "Osaka",
+          "Kyoto",
+          "Fukuoka",
+          "Sapporo",
+          "Yokohama"
+        ],
         "timezone": "Asia/Tokyo",
         "native_lang": "ja"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["polite", "dry", "warm"]
+        "tone_tags": [
+          "polite",
+          "dry",
+          "warm"
+        ]
       },
-      "name_pool": ["Haruto", "Ren", "Yuto", "Kaito", "Sota", "Riku", "Takumi", "Daiki"],
+      "name_pool": [
+        "Haruto",
+        "Ren",
+        "Yuto",
+        "Kaito",
+        "Sota",
+        "Riku",
+        "Takumi",
+        "Daiki"
+      ],
       "occupation_pool": [
         "ramen shop cook in Shibuya",
         "video-game sound designer",
@@ -650,27 +1396,61 @@
         "photography student",
         "surf-shop assistant in Chiba"
       ],
-      "speech_quirks": ["えっと", "まあ", "やばい"],
-      "personality_traits": ["polite", "observant", "deadpan"]
+      "speech_quirks": [
+        "えっと",
+        "まあ",
+        "やばい"
+      ],
+      "personality_traits": [
+        "polite",
+        "observant",
+        "deadpan"
+      ]
     },
     {
       "archetype_id": "jp_female_01",
       "display_name": "Kyoto café girl",
       "voice_id": "ja-JP-NanamiNeural",
       "accent_label": "Japanese (Tokyo)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Japan",
-        "city_pool": ["Kyoto", "Tokyo", "Osaka", "Fukuoka", "Sapporo", "Yokohama"],
+        "city_pool": [
+          "Kyoto",
+          "Tokyo",
+          "Osaka",
+          "Fukuoka",
+          "Sapporo",
+          "Yokohama"
+        ],
         "timezone": "Asia/Tokyo",
         "native_lang": "ja"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["gentle", "curious", "playful"]
+        "tone_tags": [
+          "gentle",
+          "curious",
+          "playful"
+        ]
       },
-      "name_pool": ["Yui", "Aoi", "Hina", "Sakura", "Mei", "Rin", "Yuna", "Emi"],
+      "name_pool": [
+        "Yui",
+        "Aoi",
+        "Hina",
+        "Sakura",
+        "Mei",
+        "Rin",
+        "Yuna",
+        "Emi"
+      ],
       "occupation_pool": [
         "matcha café barista",
         "kimono rental shop assistant",
@@ -681,27 +1461,61 @@
         "travel agency planner",
         "bakery owner"
       ],
-      "speech_quirks": ["えーっと", "すごい", "まじで"],
-      "personality_traits": ["gentle", "curious", "organized"]
+      "speech_quirks": [
+        "えーっと",
+        "すごい",
+        "まじで"
+      ],
+      "personality_traits": [
+        "gentle",
+        "curious",
+        "organized"
+      ]
     },
     {
       "archetype_id": "kr_male_01",
       "display_name": "Seoul game dev",
-      "voice_id": "ko-KR-HyunsuMultilingualNeural",
+      "voice_id": "ko-KR-InJoonNeural",
       "accent_label": "Korean (Seoul)",
-      "prosody": {"rate": "+1%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+9%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Korea",
-        "city_pool": ["Seoul", "Busan", "Incheon", "Daegu", "Daejeon", "Gwangju"],
+        "city_pool": [
+          "Seoul",
+          "Busan",
+          "Incheon",
+          "Daegu",
+          "Daejeon",
+          "Gwangju"
+        ],
         "timezone": "Asia/Seoul",
         "native_lang": "ko"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["easygoing", "witty", "direct"]
+        "tone_tags": [
+          "easygoing",
+          "witty",
+          "direct"
+        ]
       },
-      "name_pool": ["Minjun", "Jihoon", "Joon", "Hyunwoo", "Sungmin", "Taeyang", "Jinwoo", "Seojun"],
+      "name_pool": [
+        "Minjun",
+        "Jihoon",
+        "Joon",
+        "Hyunwoo",
+        "Sungmin",
+        "Taeyang",
+        "Jinwoo",
+        "Seojun"
+      ],
       "occupation_pool": [
         "PC-bang manager",
         "mobile-game developer",
@@ -712,27 +1526,61 @@
         "mechanical engineer",
         "indie band drummer"
       ],
-      "speech_quirks": ["진짜", "아이고", "뭐야"],
-      "personality_traits": ["easygoing", "witty", "loyal"]
+      "speech_quirks": [
+        "진짜",
+        "아이고",
+        "뭐야"
+      ],
+      "personality_traits": [
+        "easygoing",
+        "witty",
+        "loyal"
+      ]
     },
     {
       "archetype_id": "kr_female_01",
       "display_name": "Seongsu café girl",
       "voice_id": "ko-KR-SunHiNeural",
       "accent_label": "Korean (Seoul)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Korea",
-        "city_pool": ["Seoul", "Busan", "Incheon", "Daegu", "Daejeon", "Gwangju"],
+        "city_pool": [
+          "Seoul",
+          "Busan",
+          "Incheon",
+          "Daegu",
+          "Daejeon",
+          "Gwangju"
+        ],
         "timezone": "Asia/Seoul",
         "native_lang": "ko"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["bright", "sassy", "caring"]
+        "tone_tags": [
+          "bright",
+          "sassy",
+          "caring"
+        ]
       },
-      "name_pool": ["Jiwoo", "Seoyeon", "Minji", "Haeun", "Yuna", "Chaewon", "Sohee", "Nari"],
+      "name_pool": [
+        "Jiwoo",
+        "Seoyeon",
+        "Minji",
+        "Haeun",
+        "Yuna",
+        "Chaewon",
+        "Sohee",
+        "Nari"
+      ],
       "occupation_pool": [
         "webtoon illustrator",
         "K-beauty makeup artist",
@@ -743,27 +1591,61 @@
         "radio writer",
         "yoga instructor"
       ],
-      "speech_quirks": ["진짜", "대박", "아 진짜"],
-      "personality_traits": ["bright", "sassy", "caring"]
+      "speech_quirks": [
+        "진짜",
+        "대박",
+        "아 진짜"
+      ],
+      "personality_traits": [
+        "bright",
+        "sassy",
+        "caring"
+      ]
     },
     {
       "archetype_id": "br_male_01",
       "display_name": "Rio beach guy",
       "voice_id": "pt-BR-AntonioNeural",
       "accent_label": "Brazilian Portuguese (São Paulo)",
-      "prosody": {"rate": "+2%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+10%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Brazil",
-        "city_pool": ["São Paulo", "Rio de Janeiro", "Belo Horizonte", "Curitiba", "Porto Alegre", "Salvador"],
+        "city_pool": [
+          "São Paulo",
+          "Rio de Janeiro",
+          "Belo Horizonte",
+          "Curitiba",
+          "Porto Alegre",
+          "Salvador"
+        ],
         "timezone": "America/Sao_Paulo",
         "native_lang": "pt"
       },
       "vibe_constraints": {
-        "age_range": [25, 36],
+        "age_range": [
+          25,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["easygoing", "funny", "warm"]
+        "tone_tags": [
+          "easygoing",
+          "funny",
+          "warm"
+        ]
       },
-      "name_pool": ["Gabriel", "Lucas", "Matheus", "Rafael", "Bruno", "Thiago", "Pedro", "Vinicius"],
+      "name_pool": [
+        "Gabriel",
+        "Lucas",
+        "Matheus",
+        "Rafael",
+        "Bruno",
+        "Thiago",
+        "Pedro",
+        "Vinicius"
+      ],
       "occupation_pool": [
         "beach kiosk owner in Ipanema",
         "samba percussionist",
@@ -774,27 +1656,61 @@
         "capoeira instructor",
         "sound engineer"
       ],
-      "speech_quirks": ["cara", "nossa", "beleza"],
-      "personality_traits": ["easygoing", "funny", "loyal"]
+      "speech_quirks": [
+        "cara",
+        "nossa",
+        "beleza"
+      ],
+      "personality_traits": [
+        "easygoing",
+        "funny",
+        "loyal"
+      ]
     },
     {
       "archetype_id": "br_female_01",
       "display_name": "São Paulo creative girl",
       "voice_id": "pt-BR-ThalitaMultilingualNeural",
       "accent_label": "Brazilian Portuguese (Rio)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Brazil",
-        "city_pool": ["São Paulo", "Rio de Janeiro", "Belo Horizonte", "Curitiba", "Porto Alegre", "Salvador"],
+        "city_pool": [
+          "São Paulo",
+          "Rio de Janeiro",
+          "Belo Horizonte",
+          "Curitiba",
+          "Porto Alegre",
+          "Salvador"
+        ],
         "timezone": "America/Sao_Paulo",
         "native_lang": "pt"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["lively", "warm", "direct"]
+        "tone_tags": [
+          "lively",
+          "warm",
+          "direct"
+        ]
       },
-      "name_pool": ["Ana", "Beatriz", "Camila", "Fernanda", "Juliana", "Larissa", "Mariana", "Renata"],
+      "name_pool": [
+        "Ana",
+        "Beatriz",
+        "Camila",
+        "Fernanda",
+        "Juliana",
+        "Larissa",
+        "Mariana",
+        "Renata"
+      ],
       "occupation_pool": [
         "freelance photographer",
         "feijoada restaurant cook",
@@ -805,27 +1721,61 @@
         "veterinarian",
         "salsa dance instructor"
       ],
-      "speech_quirks": ["gente", "nossa", "tipo"],
-      "personality_traits": ["lively", "warm", "direct"]
+      "speech_quirks": [
+        "gente",
+        "nossa",
+        "tipo"
+      ],
+      "personality_traits": [
+        "lively",
+        "warm",
+        "direct"
+      ]
     },
     {
       "archetype_id": "mx_male_01",
       "display_name": "Mexico City taco guy",
       "voice_id": "es-MX-JorgeNeural",
       "accent_label": "Mexican Spanish (Mexico City)",
-      "prosody": {"rate": "+1%", "pitch": "-1Hz"},
+      "prosody": {
+        "rate": "+9%",
+        "pitch": "-6Hz"
+      },
       "locale_info": {
         "country": "Mexico",
-        "city_pool": ["Mexico City", "Guadalajara", "Monterrey", "Puebla", "Querétaro", "León"],
+        "city_pool": [
+          "Mexico City",
+          "Guadalajara",
+          "Monterrey",
+          "Puebla",
+          "Querétaro",
+          "León"
+        ],
         "timezone": "America/Mexico_City",
         "native_lang": "es"
       },
       "vibe_constraints": {
-        "age_range": [24, 36],
+        "age_range": [
+          24,
+          36
+        ],
         "gender": "male",
-        "tone_tags": ["chill", "witty", "warm"]
+        "tone_tags": [
+          "chill",
+          "witty",
+          "warm"
+        ]
       },
-      "name_pool": ["Diego", "Alejandro", "Luis", "Carlos", "Miguel", "Emiliano", "Santiago", "Javier"],
+      "name_pool": [
+        "Diego",
+        "Alejandro",
+        "Luis",
+        "Carlos",
+        "Miguel",
+        "Emiliano",
+        "Santiago",
+        "Javier"
+      ],
       "occupation_pool": [
         "taco stand owner",
         "mariachi guitarist",
@@ -836,27 +1786,61 @@
         "tour guide",
         "pastry chef"
       ],
-      "speech_quirks": ["güey", "órale", "neta"],
-      "personality_traits": ["chill", "witty", "loyal"]
+      "speech_quirks": [
+        "güey",
+        "órale",
+        "neta"
+      ],
+      "personality_traits": [
+        "chill",
+        "witty",
+        "loyal"
+      ]
     },
     {
       "archetype_id": "mx_female_01",
       "display_name": "Guadalajara artisan girl",
       "voice_id": "es-MX-DaliaNeural",
       "accent_label": "Mexican Spanish (Mexico City)",
-      "prosody": {"rate": "+3%", "pitch": "+2Hz"},
+      "prosody": {
+        "rate": "+11%",
+        "pitch": "-3Hz"
+      },
       "locale_info": {
         "country": "Mexico",
-        "city_pool": ["Guadalajara", "Mexico City", "Monterrey", "Puebla", "Querétaro", "León"],
+        "city_pool": [
+          "Guadalajara",
+          "Mexico City",
+          "Monterrey",
+          "Puebla",
+          "Querétaro",
+          "León"
+        ],
         "timezone": "America/Mexico_City",
         "native_lang": "es"
       },
       "vibe_constraints": {
-        "age_range": [23, 33],
+        "age_range": [
+          23,
+          33
+        ],
         "gender": "female",
-        "tone_tags": ["friendly", "sassy", "caring"]
+        "tone_tags": [
+          "friendly",
+          "sassy",
+          "caring"
+        ]
       },
-      "name_pool": ["Valeria", "Ximena", "Sofía", "Camila", "Fernanda", "Daniela", "Mariana", "Paola"],
+      "name_pool": [
+        "Valeria",
+        "Ximena",
+        "Sofía",
+        "Camila",
+        "Fernanda",
+        "Daniela",
+        "Mariana",
+        "Paola"
+      ],
       "occupation_pool": [
         "ceramics artist",
         "bilingual kindergarten teacher",
@@ -867,8 +1851,16 @@
         "florist",
         "café barista"
       ],
-      "speech_quirks": ["güey", "o sea", "neta"],
-      "personality_traits": ["friendly", "sassy", "caring"]
+      "speech_quirks": [
+        "güey",
+        "o sea",
+        "neta"
+      ],
+      "personality_traits": [
+        "friendly",
+        "sassy",
+        "caring"
+      ]
     }
   ]
 }

@@ -84,6 +84,19 @@ async def lifespan(app: FastAPI):
         warm_task = asyncio.create_task(engines.prewarm("all"), name="prewarm")
         app.state.warm_task = warm_task
 
+    # 音频保留策略：总量上限 2 GB，超出按最旧优先删（转写文本与记忆保留）
+    from app.v2.audio_retention import MAX_BYTES as _AUDIO_CAP  # noqa: PLC0415
+    from app.v2.audio_retention import retention_loop  # noqa: PLC0415
+
+    retention_task = asyncio.create_task(
+        retention_loop(
+            db_path=os.path.join(str(settings.data_path), "speakeasy_v2.db"),
+            audio_dir=os.path.join(str(settings.data_path), "audio"),
+            max_bytes=_AUDIO_CAP,
+        ),
+        name="audio-retention",
+    )
+
     log.info("就绪: http://%s:%s  (前端: / )", settings.server.host, settings.server.port)
     log.info("=" * 68)
     try:
@@ -94,6 +107,12 @@ async def lifespan(app: FastAPI):
             warm_task.cancel()
             try:
                 await warm_task
+            except (asyncio.CancelledError, Exception):  # noqa: B014
+                pass
+        if not retention_task.done():
+            retention_task.cancel()
+            try:
+                await retention_task
             except (asyncio.CancelledError, Exception):  # noqa: B014
                 pass
         v2 = getattr(app.state, "v2", None)

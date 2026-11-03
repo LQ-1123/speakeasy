@@ -438,6 +438,13 @@ export const api = {
   },
 
   /** 删除好友（后端会级联删除消息/朋友圈并清理音频）。 */
+  changeFriendVoice(friendId: string, archetypeId: string): Promise<{ accent_label: string }> {
+    return request(`/friends/${encodeURIComponent(friendId)}/voice`, (d) => d, {
+      method: "PATCH",
+      body: JSON.stringify({ archetype_id: archetypeId }),
+    }) as Promise<{ accent_label: string }>;
+  },
+
   deleteFriend(id: string): Promise<{ friend_id: string; deleted_audio?: number }> {
     return request(
       `/friends/${encodeURIComponent(id)}`,

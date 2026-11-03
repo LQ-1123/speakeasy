@@ -11,6 +11,8 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+
+import { TTSSettingsSection } from "@/components/v2/TTSSettingsSection";
 import {
   AlertCircle,
   CheckCircle2,
@@ -542,6 +544,8 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
       </header>
 
       <div className="se-settings-body">
+
+          <TTSSettingsSection />
         {/* 概览 */}
         <div className="se-settings-summary">
           <div className="se-settings-summary-item">

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import random
+
 import asyncio
 import json
 import mimetypes
@@ -388,6 +390,54 @@ async def _send_icebreaker(services: Any, friend: dict) -> dict:
     return await services.chat.store_friend_voice(friend, text)
 
 
+def _archetype_rows(services: Any) -> list[dict[str, Any]]:
+    sp = getattr(services, "spawner", None)
+    rows = getattr(sp, "archetypes", None) or []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _pick_onboarding_picks(services: Any) -> tuple[dict[str, Any], ...]:
+    """随机挑两个语言不同的国家；优先照顾自画像里的 target_languages。"""
+    rows = _archetype_rows(services)
+    lang_countries: dict[str, list[str]] = {}
+    for r in rows:
+        li = r.get("locale_info") or {}
+        lang = str(li.get("native_lang") or "").strip()
+        country = str(li.get("country") or "").strip()
+        if lang and country:
+            lang_countries.setdefault(lang, [])
+            if country not in lang_countries[lang]:
+                lang_countries[lang].append(country)
+
+    if not lang_countries:
+        # 兜底：历史行为
+        return ({"nationality": "United Kingdom"}, {"nationality": "Italy"})
+
+    targets: list[str] = []
+    try:
+        profile = services.db.get_profile() or {}
+        for code in profile.get("target_languages") or []:
+            code = str(code or "").strip()
+            if code in lang_countries and code not in targets:
+                targets.append(code)
+    except Exception:  # noqa: BLE001 - 读画像失败不该挡住 onboarding
+        targets = []
+
+    pool = targets if len(targets) >= 1 else list(lang_countries.keys())
+    picked: list[str] = []
+    langs = random.sample(pool, k=min(2, len(pool)))
+    if len(langs) < 2:
+        # 目标语言只有一种 → 补一个别的语言，保持反差
+        rest = [c for c in lang_countries if c not in langs]
+        if rest:
+            langs.append(random.choice(rest))
+    for lang in langs:
+        picked.append({"nationality": random.choice(lang_countries[lang])})
+
+    random.shuffle(picked)
+    return tuple(picked[:2])
+
+
 async def _run_onboarding(services: Any) -> None:
     """PRD §3.2.1：默认 2 位性格反差明显的好友。
 
@@ -395,10 +445,7 @@ async def _run_onboarding(services: Any) -> None:
     第 2 位：带鲜明口音/文化的跨文化朋友（意大利，Multilingual 声线）。
     spawner 的过滤是分级放宽的，池子不够时不会失败。
     """
-    picks = (
-        {"nationality": "United Kingdom"},
-        {"nationality": "Italy"},
-    )
+    picks = _pick_onboarding_picks(services)
     try:
         for pick in picks:
             friend = await services.spawner.spawn(**pick)
@@ -501,6 +548,28 @@ async def list_friends(request: Request, status: str | None = None) -> dict:
     return payload
 
 
+def _weighted_target_language(services: Any) -> str | None:
+    """按自画像目标语言决定偶遇语种：70% 从目标语言里挑，30% 完全随机（惊喜）。"""
+    try:
+        profile = services.db.get_profile() or {}
+        targets = [
+            str(x).strip()
+            for x in (profile.get("target_languages") or [])
+            if str(x or "").strip()
+        ]
+    except Exception:  # noqa: BLE001 - 读画像失败就完全随机
+        targets = []
+    if not targets:
+        return None
+    if random.random() < TARGET_LANG_SKIP_RATE:
+        return None
+    return random.choice(targets)
+
+
+#: 偶遇时「不走目标语言」的概率（保留惊喜感）
+TARGET_LANG_SKIP_RATE = 0.3
+
+
 @router.post("/friends/discover")
 async def discover_friend(request: Request, body: DiscoverBody | None = None) -> dict:
     services = _services(request)
@@ -508,10 +577,17 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
     has_filters = bool(
         (body.nationality or "").strip() or (body.language or "").strip() or (body.gender or "").strip()
     )
+
+    # 用户没显式筛语种 → 用自画像的目标语言做「为主 + 偶发其他」。
+    # 注意仍保持 strict_filters=False，抽不到时 spawner 会放宽而不是报 422。
+    pick_language = body.language
+    if not has_filters:
+        pick_language = _weighted_target_language(services)
+
     try:
         friend = await services.spawner.spawn(
             nationality=body.nationality,
-            language=body.language,
+            language=pick_language,
             gender=body.gender,
             status="active",
             strict_filters=has_filters,
@@ -532,6 +608,178 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
         "friend": await _friend_public(services, friend),
         "message": _message_public(message),
     }
+
+
+class VoiceChangeBody(BaseModel):
+    archetype_id: str = Field(min_length=1, max_length=64)
+
+
+@router.patch("/friends/{friend_id}/voice")
+async def change_friend_voice(request: Request, friend_id: str, body: VoiceChangeBody) -> dict:
+    """更换好友的口音（限定在它当前回复语言的声线里）。
+
+    改的是 voice_id + rate/pitch —— 只改 voice_id 会让语速/音高沿用旧原型，听感不到位。
+    """
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if not friend:
+        raise HTTPException(status_code=404, detail="好友不存在")
+
+    lang = str(friend.get("reply_language") or "en")
+    rows = load_archetypes()
+
+    target = next(
+        (a for a in rows if str(a.get("archetype_id")) == body.archetype_id),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="没有这个声线原型")
+
+    target_lang = str((target.get("locale_info") or {}).get("native_lang") or "")
+    if target_lang != lang:
+        raise HTTPException(
+            status_code=422,
+            detail=f"这个声线是 {target_lang} 的，和好友当前语言 {lang} 不一致",
+        )
+
+    prosody = target.get("prosody") or {}
+    updated = await _thread(
+        services.db.update_friend,
+        friend_id,
+        archetype_id=body.archetype_id,
+        voice_id=str(target.get("voice_id") or ""),
+        voice_rate=str(prosody.get("rate") or "+0%"),
+        voice_pitch=str(prosody.get("pitch") or "+0Hz"),
+    )
+    return {
+        "friend": await _friend_public(services, updated),
+        "accent_label": target.get("accent_label") or "",
+        "voice_id": updated.get("voice_id"),
+    }
+
+
+class TTSConfigBody(BaseModel):
+    provider: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    reference_id: str | None = None
+
+
+def _tts_store(request: Request) -> Any:
+    store = getattr(request.app.state, "tts_config", None)
+    if store is None:
+        from app.config import get_settings  # noqa: PLC0415
+        from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+        store = TTSConfigStore(str(get_settings().data_path))
+        request.app.state.tts_config = store
+    return store
+
+
+@router.get("/settings/tts")
+async def get_tts_settings(request: Request) -> dict:
+    return {"tts": _tts_store(request).load().public()}
+
+
+@router.post("/settings/tts")
+async def set_tts_settings(request: Request, body: TTSConfigBody) -> dict:
+    store = _tts_store(request)
+    patch: dict[str, Any] = {}
+    if body.provider is not None:
+        patch["provider"] = body.provider.strip()
+    if body.api_key:
+        patch["fish_api_key"] = body.api_key.strip()
+    if body.base_url:
+        patch["fish_base_url"] = body.base_url.strip()
+    if body.model:
+        patch["fish_model"] = body.model.strip()
+    if body.reference_id is not None:
+        patch["fish_reference_id"] = body.reference_id.strip()
+    return {"ok": True, "tts": store.save(**patch).public()}
+
+
+@router.post("/settings/tts/reset")
+async def reset_tts_settings(request: Request) -> dict:
+    return {"ok": True, "tts": _tts_store(request).reset().public()}
+
+
+@router.get("/settings/tts/voices")
+async def list_tts_voices(
+    request: Request,
+    q: str = "",
+    language: str = "",
+    page: int = 1,
+) -> dict:
+    """Fish 平台音色（1000+）：支持关键字与语言过滤。
+
+    Fish 的列表接口没有搜索参数，这里取一页（最多 100 条）后在服务端过滤，
+    结果有 10 分钟缓存，切换语言/翻页不会反复打上游。
+    """
+    from app.voice import fish_tts  # noqa: PLC0415
+
+    cfg = _tts_store(request).load()
+    try:
+        rows = await fish_tts.list_models(
+            api_key=cfg.fish_api_key,
+            base_url=cfg.fish_base_url,
+            page_number=max(1, int(page)),
+            page_size=100,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": str(exc), "body": getattr(exc, "body", ""), "voices": []}
+
+    needle = (q or "").strip().lower()
+    lang = (language or "").strip().lower()
+    out = []
+    for v in rows:
+        if lang and lang not in [str(x).lower() for x in (v.get("languages") or [])]:
+            continue
+        if needle and needle not in (v.get("title") or "").lower() and needle not in (
+            v.get("description") or ""
+        ).lower():
+            continue
+        out.append(v)
+    return {"ok": True, "total": rows[0].get("total") if rows else 0, "voices": out[:60]}
+
+
+@router.post("/settings/tts/test")
+async def test_tts_settings(request: Request) -> dict:
+    """用当前配置合成一句。失败时把 Fish 的原始报错一并回传。"""
+    import os  # noqa: PLC0415
+    import uuid  # noqa: PLC0415
+
+    from app.config import get_settings  # noqa: PLC0415
+    from app.voice import fish_tts  # noqa: PLC0415
+
+    cfg = _tts_store(request).load()
+    if cfg.provider != "fish":
+        return {"ok": True, "provider": "edge", "detail": "当前使用 edge，无需测试"}
+
+    test_text = "[excited] Hey! This is your new voice - pretty different, right?"
+    try:
+        audio = await fish_tts.synthesize(
+            test_text,
+            api_key=cfg.fish_api_key,
+            base_url=cfg.fish_base_url,
+            model=cfg.fish_model,
+            reference_id=cfg.fish_reference_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "provider": "fish",
+            "detail": str(exc),
+            "fish_status": getattr(exc, "status", 0),
+            "fish_body": getattr(exc, "body", ""),
+        }
+
+    out_dir = os.path.join(str(get_settings().data_path), "audio")
+    os.makedirs(out_dir, exist_ok=True)
+    name = f"tts_test_{uuid.uuid4().hex[:12]}.wav"
+    with open(os.path.join(out_dir, name), "wb") as f:
+        f.write(audio)
+    return {"ok": True, "provider": "fish", "audio_url": f"/api/v2/audio/{name}", "bytes": len(audio)}
 
 
 @router.get("/friends/{friend_id}")

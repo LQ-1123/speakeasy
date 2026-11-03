@@ -38,10 +38,64 @@ interface NotesTabProps {
     majorOrJob: string;
     interests: string[];
     weaknesses: string[];
+    /** 正在学的语言 */
+    targetLanguages: string[];
+    /** 母语 */
+    nativeLanguage: string;
   }) => Promise<void>;
 }
 
 type Segment = "expressions" | "memories";
+
+/** 可选语言（与后端声线原型的 native_lang 对齐）。 */
+const LANGUAGE_OPTIONS: Array<{ code: string; label: string; flag: string }> = [
+  { code: "en", label: "英语", flag: "🇬🇧" },
+  { code: "ja", label: "日语", flag: "🇯🇵" },
+  { code: "ko", label: "韩语", flag: "🇰🇷" },
+  { code: "fr", label: "法语", flag: "🇫🇷" },
+  { code: "de", label: "德语", flag: "🇩🇪" },
+  { code: "it", label: "意大利语", flag: "🇮🇹" },
+  { code: "es", label: "西班牙语", flag: "🇪🇸" },
+  { code: "pt", label: "葡萄牙语", flag: "🇵🇹" },
+  { code: "zh-CN", label: "中文", flag: "🇨🇳" },
+];
+
+const langText = (code: string) => LANGUAGE_OPTIONS.find((o) => o.code === code)?.label ?? code;
+
+/** 语言 chip 选择器。 */
+function LanguageChips({
+  value,
+  options,
+  onToggle,
+}: {
+  value: string[];
+  options: Array<{ code: string; label: string; flag: string }>;
+  onToggle: (code: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((opt) => {
+        const on = value.includes(opt.code);
+        return (
+          <button
+            key={opt.code}
+            type="button"
+            onClick={() => onToggle(opt.code)}
+            aria-pressed={on}
+            className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+              on
+                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                : "border-[color:var(--line)] text-[color:var(--muted)]"
+            }`}
+          >
+            <span className="mr-1">{opt.flag}</span>
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function ExpressionCard({
   expression,
@@ -119,6 +173,8 @@ export function NotesTab({
   const [majorOrJob, setMajorOrJob] = useState("");
   const [interests, setInterests] = useState<string[]>([]);
   const [weaknesses, setWeaknesses] = useState<string[]>([]);
+  const [targetLanguages, setTargetLanguages] = useState<string[]>(["en"]);
+  const [nativeLanguage, setNativeLanguage] = useState<string>("zh-CN");
 
   const fact = memories?.fact_sheet ?? null;
 
@@ -129,6 +185,12 @@ export function NotesTab({
     setMajorOrJob(memories.fact_sheet.profile.major_or_job);
     setInterests(memories.fact_sheet.interests);
     setWeaknesses(memories.fact_sheet.language_profile.weaknesses);
+    setTargetLanguages(
+      Array.isArray(memories.profile.target_languages) && memories.profile.target_languages.length
+        ? memories.profile.target_languages
+        : ["en"],
+    );
+    setNativeLanguage(memories.profile.native_language || "zh-CN");
     setDirty(false);
   }, [memories]);
 
@@ -160,7 +222,15 @@ export function NotesTab({
   const save = async () => {
     setSaving(true);
     try {
-      await onSaveMemories({ nickname, city, majorOrJob, interests, weaknesses });
+      await onSaveMemories({
+        nickname,
+        city,
+        majorOrJob,
+        interests,
+        weaknesses,
+        targetLanguages,
+        nativeLanguage,
+      });
       setDirty(false);
     } catch (err) {
       showToast(`保存失败：${errorText(err)}`, "error");
@@ -263,6 +333,34 @@ export function NotesTab({
             <div className="flex flex-col gap-2.5 pt-1">
               {/* 昵称/城市/专业 */}
               <div className="se-card px-3.5 py-3">
+        {/* 语言设置：决定「偶遇」优先给什么语种的语伴 */}
+        <p className="mb-1 text-[13px] font-medium">我在学</p>
+        <p className="mb-2 text-[11px] text-[color:var(--muted)]">
+          偶遇会优先抽这些语言的语伴（约 7 成），偶尔给点惊喜。
+        </p>
+        <LanguageChips
+          value={targetLanguages}
+          options={LANGUAGE_OPTIONS.filter((o) => o.code !== "zh-CN")}
+          onToggle={(code) =>
+            setTargetLanguages((prev) =>
+              prev.includes(code)
+                ? prev.length > 1
+                  ? prev.filter((c) => c !== code)
+                  : prev
+                : [...prev, code],
+            )
+          }
+        />
+        <p className="mb-1 mt-3 text-[13px] font-medium">我会说</p>
+        <LanguageChips
+          value={[nativeLanguage]}
+          options={LANGUAGE_OPTIONS.filter((o) => o.code === "zh-CN" || o.code === "en")}
+          onToggle={(code) => setNativeLanguage(code)}
+        />
+        <p className="mb-3 mt-2 text-[11px] text-[color:var(--muted)]">
+          正在学 <b>{targetLanguages.map(langText).join("、") || "未设置"}</b> · 母语{" "}
+          <b>{langText(nativeLanguage)}</b>
+        </p>
                 <div className="flex items-center gap-3">
                   <Avatar name={nickname || "我"} seed="me-speakeasy" size={46} flag={false} />
                   <div className="min-w-0 flex-1">

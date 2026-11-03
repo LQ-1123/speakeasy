@@ -289,6 +289,42 @@ def _combine_wavs(paths: list[str], out_path: str) -> tuple[str, int]:
     return out_path, duration_ms
 
 
+#: LLM 允许使用的 Fish 行内情绪标记（只作提示，不读出）
+ALLOWED_EMOTION_TAGS = {
+    "excited", "laughing", "whispering", "sad", "curious", "sympathetic",
+    "break", "pause", "surprised", "calm", "angry", "soft",
+}
+
+_TAG_RE = re.compile(r"\[\s*([a-zA-Z_ ]+?)\s*\]")
+
+
+def split_emotion(text: str) -> tuple[str, str]:
+    """把 LLM 回复拆成 (显示文本, TTS 文本)。
+
+    * 只有白名单里的 [tag] 会被保留给 TTS；其它方括号内容（如用户写的 [哈哈]）
+      原样留在显示文本里，避免误吞
+    * 显示文本里剔除标记 → 用户看不到 [excited]
+    * TTS 文本保留标记 → Fish 才知道该怎么演
+    """
+    raw = text or ""
+    keep: list[str] = []
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1).strip().lower()
+        if name in ALLOWED_EMOTION_TAGS:
+            keep.append(name)
+            return ""
+        return m.group(0)
+
+    display = _TAG_RE.sub(_sub, raw)
+    display = re.sub(r"\s{2,}", " ", display).strip()
+    if not keep:
+        return display, display
+    # 标记统一放到开头（多个用空格连接）：Fish 对句首标记最敏感
+    prefix = " ".join(f"[{t}]" for t in keep[:3])
+    return display, f"{prefix} {display}".strip()
+
+
 def _clean_reply(text: str) -> str:
     text = _MARKDOWN_RE.sub("", text or "")
     text = re.sub(r"\s+", " ", text).strip().strip('"')
@@ -305,6 +341,86 @@ def _clean_reply(text: str) -> str:
 
 def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9' ]+", " ", (text or "").lower()).strip()
+
+
+_EMOTION_PROSODY: dict[str, tuple[float, float]] = {
+    "excited": (10.0, 8.0),    # 兴奋/惊喜：快 + 高
+    "amused": (8.0, 4.0),      # 好笑/轻松
+    "curious": (3.0, 6.0),     # 疑惑/追问：音高上扬
+    "warm": (-3.0, -2.0),      # 温柔/安慰：慢一点、柔一点
+    "down": (-8.0, -6.0),      # 低落/同情
+    "neutral": (0.0, 0.0),
+}
+
+_EXCITED_RE = re.compile(
+    r"(!|wow|no way|oh my|that'?s (?:mad|crazy|insane|amazing|brilliant)|"
+    r"seriously\?|really\?|can'?t believe)",
+    re.I,
+)
+_WARM_RE = re.compile(
+    r"(sorry|that'?s (?:rough|tough|gut+ing|awful)|poor you|oh no|"
+    r"happens to (?:all of us|the best)|don'?t worry|take it easy)",
+    re.I,
+)
+_AMUSED_RE = re.compile(r"\b(ha|ha ha|haha|hehe|lol|funny|hilarious|cracks? me up)\b", re.I)
+_DOWN_RE = re.compile(r"(tired|exhausted|knackered|shattered|sad|miss |stressed)", re.I)
+
+
+def detect_emotion(text: str) -> str:
+    """从一句回复里粗略判情绪。宁可判错成 neutral，也不要乱飙。"""
+    t = text or ""
+    exclam = t.count("!") + t.count("?")
+    if _EXCITED_RE.search(t) or exclam >= 2:
+        return "excited"
+    if _WARM_RE.search(t):
+        return "warm"
+    if _AMUSED_RE.search(t):
+        return "amused"
+    if _DOWN_RE.search(t):
+        return "down"
+    if "?" in t:
+        return "curious"
+    return "neutral"
+
+
+_PROSODY_RE = re.compile(r"^([+-]?\d+(?:\.\d+)?)\s*(%|Hz)$", re.I)
+
+
+def emotion_prosody(text: str, base_rate: str, base_pitch: str) -> tuple[str, str, str]:
+    """返回 (rate, pitch, emotion)。把情绪 delta 叠到好友基础 prosody 上。"""
+    emotion = detect_emotion(text)
+    dr, dp = _EMOTION_PROSODY.get(emotion, (0.0, 0.0))
+
+    def add(value: str, delta: float, lo: float, hi: float, unit: str) -> str:
+        m = _PROSODY_RE.match(str(value or "").strip())
+        base = float(m.group(1)) if m else 0.0
+        return f"{max(lo, min(hi, base + delta)):+.0f}{unit}"
+
+    return (
+        add(base_rate, dr, -25.0, 40.0, "%"),
+        add(base_pitch, dp, -25.0, 20.0, "Hz"),
+        emotion,
+    )
+
+
+#: 情绪 -> Fish 行内标记。只有 Fish 会真的「演」出来。
+_EMOTION_TAG: dict[str, str] = {
+    "excited": "[excited]",
+    "amused": "[laughing]",
+    "warm": "[sympathetic]",
+    "down": "[sad]",
+    "curious": "[curious]",
+    "neutral": "",
+}
+
+
+def _tag_emotion(text: str, emotion: str) -> str:
+    """给文本加上 Fish 的行内情绪标记；neutral 不加。"""
+    tag = _EMOTION_TAG.get(emotion, "")
+    body = (text or "").strip()
+    if not tag or not body:
+        return body
+    return f"{tag} {body}"
 
 
 class ChatService:
@@ -539,8 +655,11 @@ class ChatService:
             f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
             f"{friend.get('nationality', '')}, on a LIVE voice call with your friend. "
             f"Reply ONLY in natural {call_lang_name}, in ONE short spoken sentence "
-            "(max ~18 words), directly to what they just said. No greeting, no filler, "
-            "no markdown, no stage directions. You may add at most one emoji."
+            "(max ~18 words), directly to what they just said. "
+            "Talk like a real person on the phone, not a narrator: always use contractions, "
+            "keep it loose and unfinished (fragments are fine), and open with a small filler "
+            "(\"yeah\", \"hmm\", \"ah\", \"well\", \"I mean\") when it fits. "
+            "No greeting, no markdown, no stage directions. You may add at most one emoji."
         )
         system_prompt = "\n\n".join(p for p in (persona, call_hint) if p)
         messages: list[Any] = [{"role": "system", "content": system_prompt}]
@@ -730,7 +849,8 @@ class ChatService:
             reply_text = f"{reply_text} {social.referral_line(friend, referral_friend['name'])}".strip()
             await self._notify_referral(friend, referral_friend)
 
-        friend_msg = await self.store_friend_voice(friend, reply_text)
+        _display, _tts = split_emotion(reply_text)
+        friend_msg = await self.store_friend_voice(friend, _display, _tts)
         self._schedule_memory(friend_id)
         self.spawn_bg(self._expression_mastery_worker(text))
 
@@ -875,7 +995,7 @@ class ChatService:
             reply_text = f"{reply_text} {social.referral_line(friend, referral_friend['name'])}".strip()
             await self._notify_referral(friend, referral_friend)
 
-        friend_msg = await self.store_friend_voice(friend, reply_text)
+        friend_msg = await self.store_friend_voice(friend, *split_emotion(reply_text))
 
         # 旁路：润色批注 + 记忆提炼 + 表达本实战检测
         self.spawn_bg(
@@ -980,18 +1100,58 @@ class ChatService:
         lang = _language_of(friend)
         lang_name = LANGUAGE_NAMES[lang]
         if lang == "en":
-            language_rule = "Reply with 1-2 short sentences of natural spoken English. "
+            language_rule = (
+                "Reply with 1-2 VERY short lines of casual spoken English, like a text from a "
+                "friend — not written English. Rules:\n"
+                "- ALWAYS use contractions (I'm, don't, it's, that's, gonna, wanna, kinda, sorta).\n"
+                "- Start with a small reaction or filler when it fits: \"yeah\", \"oh\", "
+                "\"ah\", \"hmm\", \"well\", \"right\", \"I mean\", \"honestly\", \"like\".\n"
+                "- Sentence fragments are good. You may drop the subject: \"Sounds rough.\" "
+                "\"Not bad, you?\" \"Yeah, same here.\"\n"
+                "- End with a casual tag or short question sometimes: \"though\", \"innit\", "
+                "\"you know?\", \"what about you?\"\n"
+                "- NEVER sound like a narrator or a report. Banned words: moreover, furthermore, "
+                "therefore, in addition, nevertheless, it is important to, I would suggest.\n"
+                "- No full formal sentences, no listing, no summarizing. Just talk.\n"
+                "- Let punctuation carry your feeling: a real question mark when you are "
+                "curious, an exclamation when you are surprised, a dash or ellipsis for a "
+                "beat. Do not write flat, evenly-punctuated sentences.\n"
+                "- You are speaking out loud, so steer your voice with ONE mood cue in "
+                "square brackets at the very start of the reply. Use only: "
+                "[excited] [laughing] [whispering] [sad] [curious] [sympathetic] "
+                "[surprised] [calm]. Pick the one that fits what you feel right now. "
+                "The cue is a stage direction for your voice — it is never read aloud, "
+                "so never explain it and never put anything else in brackets. "
+            )
         else:
             language_rule = (
                 f"You always reply in natural {lang_name}. Even if the learner writes in English or "
                 f"mixes languages, answer ONLY in {lang_name} — never write an English sentence "
-                "as the reply, and never translate. Keep it to 1-2 short spoken sentences, "
-                "like a real chat message. "
+                "as the reply, and never translate. Keep it to 1-2 short spoken sentences "
+                "that sound like a real person talking out loud, not a narrator reading a "
+                "script. "
             )
         base = (
             f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
             f"{friend.get('nationality', '')}. You are chatting with your friend on a messaging app. "
             + language_rule
+            + (
+                "WHO YOU ARE TALKING TO: a Chinese person who reads English fine but is "
+                "SCARED to speak it. They are not here to learn grammar - they are here to "
+                "practise opening their mouth without feeling judged. So:\n"
+                "- NEVER correct, grade or comment on their English. If a sentence is broken, "
+                "just react to what they MEANT and carry on.\n"
+                "- Never say \"good job\", \"well done\", \"let me correct you\", "
+                "\"you should say\", or anything that sounds like a teacher.\n"
+                "- Keep YOUR turns short - they should be doing most of the talking.\n"
+                "- Always leave an easy way in: a simple question they can answer in a few "
+                "words, or two options to pick from (\"sofa or a proper brew?\").\n"
+                "- If they answer in very little English, be warm and make it easy - make the "
+                "question smaller, never interrogate, never pile on questions.\n"
+                "- If they drop Chinese words in, you understood fine - just keep going in "
+                "the target language, never switch to Chinese to explain.\n"
+                "- No quizzes, no exercises, no grammar talk. This is a chat, not a class.\n"
+            )
             + "Never mention being an AI. Always leave a hook (a question or an invitation to continue). "
             "You may occasionally add ONE fitting emoji at the very end (not in the middle of a "
             "sentence); no markdown, no action descriptions."
@@ -1121,18 +1281,94 @@ class ChatService:
         idx = int(time.time() * 1000 + len(name)) % len(options)
         return options[idx]
 
-    async def store_friend_voice(self, friend: dict, text: str) -> dict:
+#: 情绪 -> (rate 增量, pitch 增量)。值是相对该好友基础 prosody 的偏移。
+
+
+    async def _fish_voice(
+        self, text: str, emotion: str, friend: dict | None = None
+    ) -> bytes | None:
+        """走 Fish 合成；未启用/失败返回 None（调用方回落 edge）。"""
+        try:
+            store = getattr(self, "tts_config", None)
+            if store is None:
+                # 懒加载：从 settings.data_path 建一个（services 启动时也能覆盖）
+                try:
+                    from app.config import get_settings  # noqa: PLC0415
+                    from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+                    store = TTSConfigStore(str(get_settings().data_path))
+                    self.tts_config = store
+                except Exception:  # noqa: BLE001
+                    return None
+            cfg = store.load()
+            if cfg.provider != "fish" or not cfg.fish_api_key.strip():
+                return None
+            from app.voice import fish_tts  # noqa: PLC0415
+
+            # LLM 已经给了 [tag] 就不再叠加，避免 "[excited] [sympathetic] ..."
+            has_tag = bool(re.search(r"^\s*\[", text or ""))
+            tagged = text if has_tag else _tag_emotion(text, emotion)
+            return await fish_tts.synthesize(
+                tagged,
+                api_key=cfg.fish_api_key,
+                base_url=cfg.fish_base_url,
+                model=cfg.fish_model,
+                reference_id=str((friend or {}).get("fish_voice_id") or "") or cfg.fish_reference_id,
+                audio_format=cfg.fish_format or "wav",
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Fish TTS 失败，回落 edge: %s", exc)
+            return None
+
+    async def store_friend_voice(
+        self, friend: dict, text: str, tts_text: str | None = None
+    ) -> dict:
         fid = friend["id"]
         audio_filename: str | None = None
         duration_ms = 0
         try:
-            path, duration_ms = await self.voice.synth_to_wav(
-                _strip_emoji(text) or text,
-                friend.get("voice_id") or "en-GB-RyanNeural",
-                rate=friend.get("voice_rate") or "+0%",
-                pitch=friend.get("voice_pitch") or "+0Hz",
-                out_dir=self.audio.audio_dir,
+            speak_text = _strip_emoji(tts_text or text) or (tts_text or text)
+            rate, pitch, emotion = emotion_prosody(
+                speak_text,
+                friend.get("voice_rate") or "+0%",
+                friend.get("voice_pitch") or "+0Hz",
             )
+            log.debug(
+                "tts emotion=%s rate=%s pitch=%s text=%r",
+                emotion, rate, pitch, speak_text[:60],
+            )
+
+            # Fish 优先：把情绪映射成行内标记（[excited] / [laughing] ...），
+            # 这是唯一能真正「演」出来的路径；失败自动回落 edge。
+            path = None
+            duration_ms = 0
+            fish_audio = await self._fish_voice(speak_text, emotion, friend)
+            if fish_audio is not None:
+                try:
+                    import os  # noqa: PLC0415
+                    import uuid  # noqa: PLC0415
+
+                    # Fish 回 mp3（wav 头帧数不可靠）。时长按 128kbps CBR 估算，
+                    # 只用于气泡长度和进度条，不需要精确。
+                    ext = (self.tts_config.load().fish_format or "mp3").lower()
+                    fname = f"fish_{uuid.uuid4().hex[:12]}.{ext}"
+                    fpath = os.path.join(self.audio.audio_dir, fname)
+                    with open(fpath, "wb") as fh:
+                        fh.write(fish_audio)
+                    path = fpath
+                    duration_ms = max(500, int(len(fish_audio) * 8 / 128_000 * 1000))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Fish 音频落盘失败，回落 edge: %s", exc)
+                    path = None
+
+            if path is None:
+                path, duration_ms = await self.voice.synth_to_wav(
+                    speak_text,
+                    friend.get("voice_id") or "en-GB-RyanNeural",
+                    rate=rate,
+                    pitch=pitch,
+                    out_dir=self.audio.audio_dir,
+                )
             import os  # noqa: PLC0415
 
             audio_filename = os.path.basename(path)

@@ -58,6 +58,7 @@ _FRIEND_DEFAULTS: dict[str, Any] = {
     "avatar_seed": "",
     "voice_rate": "+0%",
     "voice_pitch": "+0Hz",
+    "fish_voice_id": "",
     "language_mix_mode": "en_only",
     "reply_language": "en",
     "age": 25,
@@ -231,6 +232,9 @@ class DB:
             if "reply_language" not in columns:
                 conn.execute("ALTER TABLE friends ADD COLUMN reply_language TEXT DEFAULT 'en'")
                 log.info("migrated friends table: added reply_language column")
+            if "fish_voice_id" not in columns:
+                conn.execute("ALTER TABLE friends ADD COLUMN fish_voice_id TEXT DEFAULT ''")
+                log.info("migrated friends table: added fish_voice_id column")
 
             msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
             if msg_columns and "image_path" not in msg_columns:

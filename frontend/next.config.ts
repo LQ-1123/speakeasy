@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   trailingSlash: true,
   reactStrictMode: true,
+  // 关闭左下角 dev 指示器：移动端界面截图/演示时避免遮挡
+  devIndicators: false,
 
   // 开发期专用：由 Next 把 /api、/assets 反代到本地 FastAPI，从而免 CORS。
   // 注意 Next 的 rewrite 不支持 WebSocket，所以 /ws 在 dev 下由

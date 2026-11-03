@@ -1,0 +1,568 @@
+"""SpeakEasy 2.0 · SQLite 数据层。
+
+设计
+----
+- 标准库 ``sqlite3``（不引入 aiosqlite），单连接 + :class:`threading.RLock`；
+  API 层用 ``asyncio.to_thread`` 调用这些**同步**方法。
+- 5 张表严格对应 PRD §4：``user_profile`` / ``friends`` / ``messages`` /
+  ``moments`` / ``saved_expressions``。JSON 列读写自动编解码。
+- 时间统一 UTC ISO8601 字符串；展示层再按好友时区转换。
+
+注意
+----
+- 不在此层做业务判断（熟稔度、记忆提炼、朋友圈），只做持久化。
+- 所有方法可被多线程调用；写操作持锁，读也持锁（本地单用户，简单优先）。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Iterable
+
+#: 每张表里需要 JSON 编解码的列
+_JSON_COLUMNS: dict[str, tuple[str, ...]] = {
+    "user_profile": ("target_languages", "fact_sheet"),
+    "friends": ("speech_quirks", "shared_episodes", "open_loops"),
+    "messages": ("suggestion",),
+    "moments": (),
+    "saved_expressions": (),
+}
+
+_DEFAULT_PROFILE: dict[str, Any] = {
+    "nickname": "Traveler",
+    "native_language": "zh-CN",
+    "target_languages": ["en"],
+    "fact_sheet": {
+        "profile": {
+            "nickname": "Traveler",
+            "city": "",
+            "major_or_job": "",
+            "routine": "",
+        },
+        "interests": [],
+        "language_profile": {"target": "en", "weaknesses": []},
+        "recent_events": [],
+    },
+}
+
+_FRIEND_DEFAULTS: dict[str, Any] = {
+    "avatar_seed": "",
+    "voice_rate": "+0%",
+    "voice_pitch": "+0Hz",
+    "language_mix_mode": "en_only",
+    "age": 25,
+    "occupation": "",
+    "personality_prompt": "",
+    "speech_quirks": [],
+    "bio": "",
+    "status": "active",
+    "referred_by_friend_id": None,
+    "request_message": "",
+    "closeness_level": 1,
+    "total_turns": 0,
+    "shared_episodes": [],
+    "open_loops": [],
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _uuid() -> str:
+    return uuid.uuid4().hex
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _json_loads(raw: Any, default: Any) -> Any:
+    if raw is None or raw == "":
+        return default
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+class DB:
+    """SQLite 持久层（同步方法）。"""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
+
+    # ------------------------------------------------------------------ #
+    # 生命周期
+    # ------------------------------------------------------------------ #
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise RuntimeError("DB 尚未 init()")
+        return self._conn
+
+    def init(self) -> None:
+        parent = os.path.dirname(os.path.abspath(self.path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        self._conn = conn
+        with self._lock, conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS user_profile (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    nickname TEXT DEFAULT 'Traveler',
+                    native_language TEXT DEFAULT 'zh-CN',
+                    target_languages JSON DEFAULT '["en"]',
+                    fact_sheet JSON NOT NULL DEFAULT '{}',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS friends (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    avatar_seed TEXT NOT NULL DEFAULT '',
+                    archetype_id TEXT NOT NULL DEFAULT '',
+                    voice_id TEXT NOT NULL DEFAULT '',
+                    voice_rate TEXT DEFAULT '+0%',
+                    voice_pitch TEXT DEFAULT '+0Hz',
+                    nationality TEXT NOT NULL DEFAULT '',
+                    city TEXT NOT NULL DEFAULT '',
+                    timezone TEXT NOT NULL DEFAULT 'UTC',
+                    native_lang TEXT NOT NULL DEFAULT 'en',
+                    language_mix_mode TEXT DEFAULT 'en_only',
+                    age INTEGER DEFAULT 25,
+                    occupation TEXT DEFAULT '',
+                    personality_prompt TEXT NOT NULL DEFAULT '',
+                    speech_quirks JSON DEFAULT '[]',
+                    bio TEXT DEFAULT '',
+                    status TEXT DEFAULT 'active',
+                    referred_by_friend_id TEXT,
+                    request_message TEXT DEFAULT '',
+                    closeness_level INTEGER DEFAULT 1,
+                    total_turns INTEGER DEFAULT 0,
+                    shared_episodes JSON DEFAULT '[]',
+                    open_loops JSON DEFAULT '[]',
+                    last_interaction_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS messages (
+                    id TEXT PRIMARY KEY,
+                    friend_id TEXT NOT NULL REFERENCES friends(id) ON DELETE CASCADE,
+                    sender TEXT NOT NULL,
+                    msg_type TEXT DEFAULT 'voice',
+                    transcript TEXT NOT NULL DEFAULT '',
+                    audio_path TEXT,
+                    duration_ms INTEGER DEFAULT 0,
+                    suggestion JSON DEFAULT NULL,
+                    context TEXT,
+                    is_read BOOLEAN DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_messages_friend_time
+                    ON messages(friend_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS moments (
+                    id TEXT PRIMARY KEY,
+                    friend_id TEXT NOT NULL REFERENCES friends(id) ON DELETE CASCADE,
+                    content TEXT NOT NULL,
+                    mood_tag TEXT,
+                    local_time_str TEXT,
+                    feed_date TEXT,
+                    is_replied BOOLEAN DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_moments_date ON moments(feed_date);
+
+                CREATE TABLE IF NOT EXISTS saved_expressions (
+                    id TEXT PRIMARY KEY,
+                    original_text TEXT,
+                    better_expression TEXT NOT NULL,
+                    explanation TEXT,
+                    source_friend_id TEXT,
+                    mastery_count INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'learning',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            row = conn.execute("SELECT id FROM user_profile WHERE id=1").fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO user_profile (id, nickname, native_language, target_languages, fact_sheet, updated_at)"
+                    " VALUES (1, ?, ?, ?, ?, ?)",
+                    (
+                        _DEFAULT_PROFILE["nickname"],
+                        _DEFAULT_PROFILE["native_language"],
+                        _json_dumps(_DEFAULT_PROFILE["target_languages"]),
+                        _json_dumps(_DEFAULT_PROFILE["fact_sheet"]),
+                        _now_iso(),
+                    ),
+                )
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    # ------------------------------------------------------------------ #
+    # 内部工具
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row | None, table: str) -> dict | None:
+        if row is None:
+            return None
+        data = dict(row)
+        for col in _JSON_COLUMNS.get(table, ()):
+            default = [] if col in ("speech_quirks", "shared_episodes", "open_loops", "target_languages") else {}
+            if col == "suggestion":
+                default = None
+            data[col] = _json_loads(data.get(col), default)
+        return data
+
+    def _fetch_one(self, table: str, where: str, params: Iterable[Any]) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(f"SELECT * FROM {table} WHERE {where} LIMIT 1", tuple(params)).fetchone()
+        return self._row_to_dict(row, table)
+
+    def _fetch_all(self, table: str, sql: str, params: Iterable[Any] = ()) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(sql, tuple(params)).fetchall()
+        return [d for d in (self._row_to_dict(r, table) for r in rows) if d is not None]
+
+    # ------------------------------------------------------------------ #
+    # 用户画像
+    # ------------------------------------------------------------------ #
+    def get_profile(self) -> dict:
+        data = self._fetch_one("user_profile", "id=1", ())
+        if data is None:
+            data = dict(_DEFAULT_PROFILE)
+            data["fact_sheet"] = json.loads(_json_dumps(_DEFAULT_PROFILE["fact_sheet"]))
+            data["target_languages"] = list(_DEFAULT_PROFILE["target_languages"])
+            data["id"] = 1
+        return data
+
+    def update_profile(self, **fields: Any) -> dict:
+        allowed = {"nickname", "native_language", "target_languages", "fact_sheet"}
+        payload = {k: v for k, v in fields.items() if k in allowed}
+        if "target_languages" in payload:
+            payload["target_languages"] = _json_dumps(payload["target_languages"])
+        if "fact_sheet" in payload:
+            payload["fact_sheet"] = _json_dumps(payload["fact_sheet"])
+        payload["updated_at"] = _now_iso()
+        sets = ", ".join(f"{k}=?" for k in payload)
+        with self._lock, self.conn:
+            self.conn.execute(f"UPDATE user_profile SET {sets} WHERE id=1", tuple(payload.values()))
+        return self.get_profile()
+
+    def set_fact_sheet(self, fact: dict) -> dict:
+        return self.update_profile(fact_sheet=fact)
+
+    # ------------------------------------------------------------------ #
+    # 好友
+    # ------------------------------------------------------------------ #
+    def list_friends(self, status: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM friends"
+        params: tuple[Any, ...] = ()
+        if status:
+            sql += " WHERE status=?"
+            params = (status,)
+        sql += " ORDER BY (last_interaction_at IS NULL), last_interaction_at DESC, created_at DESC"
+        return self._fetch_all("friends", sql, params)
+
+    def get_friend(self, fid: str) -> dict | None:
+        if not fid:
+            return None
+        return self._fetch_one("friends", "id=?", (fid,))
+
+    def create_friend(self, data: dict) -> dict:
+        payload = dict(_FRIEND_DEFAULTS)
+        payload.update({k: v for k, v in data.items() if v is not None})
+        payload["id"] = data.get("id") or _uuid()
+        payload.setdefault("created_at", _now_iso())
+        if not payload.get("avatar_seed"):
+            payload["avatar_seed"] = f"{payload.get('name', 'friend')[:2].lower()}-{payload['id'][:4]}"
+        cols = list(payload)
+        for col in ("speech_quirks", "shared_episodes", "open_loops"):
+            if col in cols:
+                payload[col] = _json_dumps(payload[col])
+        placeholders = ", ".join("?" for _ in cols)
+        with self._lock, self.conn:
+            self.conn.execute(
+                f"INSERT INTO friends ({', '.join(cols)}) VALUES ({placeholders})",
+                tuple(payload[c] for c in cols),
+            )
+        created = self.get_friend(payload["id"])
+        assert created is not None
+        return created
+
+    def update_friend(self, fid: str, **fields: Any) -> dict:
+        allowed = {
+            "name", "avatar_seed", "archetype_id", "voice_id", "voice_rate", "voice_pitch",
+            "nationality", "city", "timezone", "native_lang", "language_mix_mode", "age",
+            "occupation", "personality_prompt", "speech_quirks", "bio", "status",
+            "referred_by_friend_id", "request_message", "closeness_level", "total_turns",
+            "shared_episodes", "open_loops", "last_interaction_at",
+        }
+        payload = {k: v for k, v in fields.items() if k in allowed}
+        if not payload:
+            return self.get_friend(fid) or {}
+        for col in ("speech_quirks", "shared_episodes", "open_loops"):
+            if col in payload:
+                payload[col] = _json_dumps(payload[col])
+        sets = ", ".join(f"{k}=?" for k in payload)
+        with self._lock, self.conn:
+            self.conn.execute(f"UPDATE friends SET {sets} WHERE id=?", (*payload.values(), fid))
+        friend = self.get_friend(fid)
+        if friend is None:
+            raise KeyError(f"friend not found: {fid}")
+        return friend
+
+    def delete_friend(self, fid: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("DELETE FROM friends WHERE id=?", (fid,))
+
+    def used_archetype_ids(self) -> set[str]:
+        with self._lock:
+            rows = self.conn.execute("SELECT archetype_id FROM friends").fetchall()
+        return {str(r[0]) for r in rows if r[0]}
+
+    def touch_friend(self, fid: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("UPDATE friends SET last_interaction_at=? WHERE id=?", (_now_iso(), fid))
+
+    def add_turns(self, fid: str, n: int = 1) -> dict:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE friends SET total_turns=COALESCE(total_turns,0)+? WHERE id=?", (int(n), fid)
+            )
+        friend = self.get_friend(fid)
+        if friend is None:
+            raise KeyError(f"friend not found: {fid}")
+        return friend
+
+    # ------------------------------------------------------------------ #
+    # 消息
+    # ------------------------------------------------------------------ #
+    def add_message(
+        self,
+        friend_id: str,
+        sender: str,
+        transcript: str,
+        *,
+        msg_type: str = "voice",
+        audio_path: str | None = None,
+        duration_ms: int = 0,
+        suggestion: dict | None = None,
+        is_read: bool = True,
+        context: str | None = None,
+        created_at: str | None = None,
+    ) -> dict:
+        mid = _uuid()
+        row = {
+            "id": mid,
+            "friend_id": friend_id,
+            "sender": sender,
+            "msg_type": msg_type,
+            "transcript": transcript or "",
+            "audio_path": audio_path,
+            "duration_ms": int(duration_ms or 0),
+            "suggestion": _json_dumps(suggestion) if suggestion is not None else None,
+            "context": context,
+            "is_read": bool(is_read),
+            "created_at": created_at or _now_iso(),
+        }
+        cols = list(row)
+        with self._lock, self.conn:
+            self.conn.execute(
+                f"INSERT INTO messages ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+                tuple(row[c] for c in cols),
+            )
+        msg = self.get_message(mid)
+        assert msg is not None
+        return msg
+
+    def get_message(self, mid: str) -> dict | None:
+        return self._fetch_one("messages", "id=?", (mid,))
+
+    def update_message(self, mid: str, **fields: Any) -> dict:
+        allowed = {"transcript", "audio_path", "duration_ms", "suggestion", "is_read", "context", "msg_type"}
+        payload = {k: v for k, v in fields.items() if k in allowed}
+        if "suggestion" in payload and payload["suggestion"] is not None:
+            payload["suggestion"] = _json_dumps(payload["suggestion"])
+        if "is_read" in payload:
+            payload["is_read"] = bool(payload["is_read"])
+        if payload:
+            sets = ", ".join(f"{k}=?" for k in payload)
+            with self._lock, self.conn:
+                self.conn.execute(f"UPDATE messages SET {sets} WHERE id=?", (*payload.values(), mid))
+        msg = self.get_message(mid)
+        if msg is None:
+            raise KeyError(f"message not found: {mid}")
+        return msg
+
+    def list_messages(self, friend_id: str, *, limit: int = 30, before: str | None = None) -> list[dict]:
+        limit = max(1, min(int(limit), 200))
+        sql = "SELECT * FROM messages WHERE friend_id=?"
+        params: list[Any] = [friend_id]
+        if before:
+            sql += " AND created_at < ?"
+            params.append(before)
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        params.append(limit)
+        rows = self._fetch_all("messages", sql, params)
+        rows.reverse()
+        return rows
+
+    def recent_messages(self, friend_id: str, limit: int = 10) -> list[dict]:
+        return self.list_messages(friend_id, limit=limit)
+
+    def count_turns(self, friend_id: str) -> int:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE friend_id=? AND sender='user'", (friend_id,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def count_messages(self, friend_id: str) -> int:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE friend_id=?", (friend_id,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def last_message(self, friend_id: str) -> dict | None:
+        rows = self.list_messages(friend_id, limit=1)
+        return rows[-1] if rows else None
+
+    def unread_count(self, friend_id: str) -> int:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE friend_id=? AND sender='friend' AND is_read=0",
+                (friend_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def mark_read(self, friend_id: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE messages SET is_read=1 WHERE friend_id=? AND sender='friend'", (friend_id,)
+            )
+
+    # ------------------------------------------------------------------ #
+    # 朋友圈
+    # ------------------------------------------------------------------ #
+    def add_moment(
+        self,
+        friend_id: str,
+        content: str,
+        mood_tag: str = "",
+        local_time_str: str = "",
+        feed_date: str = "",
+    ) -> dict:
+        mid = _uuid()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO moments (id, friend_id, content, mood_tag, local_time_str, feed_date, is_replied, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                (mid, friend_id, content, mood_tag, local_time_str, feed_date, _now_iso()),
+            )
+        moment = self.get_moment(mid)
+        assert moment is not None
+        return moment
+
+    def list_moments(self, limit: int = 30) -> list[dict]:
+        return self._fetch_all(
+            "moments",
+            "SELECT * FROM moments ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        )
+
+    def get_moment(self, mid: str) -> dict | None:
+        return self._fetch_one("moments", "id=?", (mid,))
+
+    def mark_moment_replied(self, mid: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("UPDATE moments SET is_replied=1 WHERE id=?", (mid,))
+
+    def moments_exist_for_date(self, feed_date: str) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM moments WHERE feed_date=?", (feed_date,)
+            ).fetchone()
+        return bool(row and row[0])
+
+    # ------------------------------------------------------------------ #
+    # 表达本
+    # ------------------------------------------------------------------ #
+    def add_expression(
+        self,
+        original_text: str,
+        better_expression: str,
+        explanation: str | None = None,
+        source_friend_id: str | None = None,
+    ) -> dict:
+        eid = _uuid()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO saved_expressions"
+                " (id, original_text, better_expression, explanation, source_friend_id, mastery_count, status, created_at)"
+                " VALUES (?, ?, ?, ?, ?, 0, 'learning', ?)",
+                (eid, original_text or "", better_expression, explanation, source_friend_id, _now_iso()),
+            )
+        expr = self.get_expression(eid)
+        assert expr is not None
+        return expr
+
+    def list_expressions(self, status: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM saved_expressions"
+        params: tuple[Any, ...] = ()
+        if status:
+            sql += " WHERE status=?"
+            params = (status,)
+        sql += " ORDER BY created_at DESC"
+        return self._fetch_all("saved_expressions", sql, params)
+
+    def get_expression(self, eid: str) -> dict | None:
+        return self._fetch_one("saved_expressions", "id=?", (eid,))
+
+    def update_expression(self, eid: str, **fields: Any) -> dict:
+        allowed = {"original_text", "better_expression", "explanation", "mastery_count", "status"}
+        payload = {k: v for k, v in fields.items() if k in allowed}
+        if payload:
+            sets = ", ".join(f"{k}=?" for k in payload)
+            with self._lock, self.conn:
+                self.conn.execute(f"UPDATE saved_expressions SET {sets} WHERE id=?", (*payload.values(), eid))
+        expr = self.get_expression(eid)
+        if expr is None:
+            raise KeyError(f"expression not found: {eid}")
+        return expr
+
+    def delete_expression(self, eid: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("DELETE FROM saved_expressions WHERE id=?", (eid,))
+
+    def pick_review_expressions(self, n: int = 2) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM saved_expressions WHERE status='learning'"
+                " ORDER BY mastery_count ASC, created_at ASC LIMIT ?",
+                (max(0, int(n)),),
+            ).fetchall()
+        return [d for d in (self._row_to_dict(r, "saved_expressions") for r in rows) if d is not None]

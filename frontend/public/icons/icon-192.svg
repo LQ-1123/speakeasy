@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="SpeakEasy">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#37be76"/>
+      <stop offset="1" stop-color="#087648"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#g)"/>
+  <path d="M156 300 Q156 236 256 236 Q356 236 356 300 Q356 356 256 356 L196 356 L206 330 Q156 330 156 300 Z" fill="#ffffff" opacity="0"/>
+  <rect x="150" y="196" width="212" height="152" rx="42" fill="#ffffff"/>
+  <path d="M196 336 L196 390 L246 340 Z" fill="#ffffff"/>
+  <circle cx="206" cy="272" r="18" fill="#07c160"/>
+  <circle cx="256" cy="272" r="18" fill="#07c160"/>
+  <circle cx="306" cy="272" r="18" fill="#07c160"/>
+</svg>

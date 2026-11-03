@@ -591,12 +591,23 @@ class EdgeTTSEngine:
         self._cache_put(key, pcm)
         return pcm
 
-    async def synthesize_voice(self, text: str, voice: str) -> np.ndarray:
-        """用**指定声线字符串**合成（口音市场试听用，不经过角色映射）。
+    async def synthesize_voice(
+        self,
+        text: str,
+        voice: str,
+        *,
+        rate: str = "+0%",
+        pitch: str = "+0Hz",
+    ) -> np.ndarray:
+        """用**指定声线字符串**合成（口音市场试听 / V2 好友声线个性化）。
 
-        带缓存：同一句 + 同一声线重复试听时立刻返回。
+        带缓存：同一句 + 同一声线 + 同一韵律参数重复请求时立刻返回。
+
+        ``rate`` / ``pitch`` 是 **V2 新增的关键字参数**（默认值 = 1.0 行为），
+        SpeakEasy 2.0 用它给每个好友原型做声线个性化；1.0 的调用方
+        ``synthesize_voice(text, voice)`` 语义完全不变。
         """
-        key = self._cache_key(text, f"__voice__{voice}")
+        key = self._cache_key(text, f"__voice__{voice}__{rate}__{pitch}")
         cached = self._cache_get(key)
         if cached is not None:
             return cached
@@ -604,7 +615,7 @@ class EdgeTTSEngine:
         last_err: Exception | None = None
         for candidate in (voice, *_voice_fallbacks(voice)):
             try:
-                mp3 = await self._stream_mp3(text, candidate, rate="+0%", pitch="+0Hz")
+                mp3 = await self._stream_mp3(text, candidate, rate=rate, pitch=pitch)
                 if not mp3:
                     raise EdgeDecodeError("空音频")
                 pcm = await asyncio.to_thread(_decode_mp3, mp3, self.sample_rate)

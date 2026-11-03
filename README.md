@@ -1,5 +1,16 @@
 # SpeakEasy · 英语口语对练
 
+> ## 🆕 SpeakEasy 2.0：移动端拟真跨国语伴（PWA）
+> 1.0 的实时语音能力之上，新增 **SQLite 持久层 + 随机捏人 + 双层长期记忆 + 熟稔度社交 + 朋友圈 + 移动端三 Tab IM**。
+> 按微信式**异步语音条**练口语：捏一个外国朋友、听他当地时间的语音、顺手把表达改地道。
+>
+> - 运行/验收：**[docs/V2_GUIDE.md](docs/V2_GUIDE.md)** · 接口：**[docs/V2_API.md](docs/V2_API.md)**
+> - 启动：`HF_HOME="$PWD/.cache/hf" .venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8000` → <http://127.0.0.1:8000>
+> - 前端：`cd frontend && npm install && npm run build:backend`；PWA 可"添加到主屏幕"
+> - 不填 LLM Key 也能完整演示（规则引擎 + edge-tts + 本地 STT）；填 Key 后自动切真实模型
+>
+> 下面 1.0 的实时语音 / 本地克隆 / GPU 说明仍然有效（`/classic` 页面与 `/ws` 通道保留）。
+
 > 本地语音栈（Silero-VAD + faster-whisper + CosyVoice2 / F5-TTS）+ 云端 LLM 的实时多口音英语对话练习。
 
 不是又一个"AI 聊天框"。SpeakEasy 要解决的是**哑巴英语**的核心困境：

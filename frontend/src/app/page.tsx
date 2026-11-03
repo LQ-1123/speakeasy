@@ -1,25 +1,14 @@
 "use client";
 
 /**
- * 主界面：微信风格聊天（接真实引擎）。
+ * SpeakEasy 2.0 主界面：移动端三 Tab 单页（消息 / 动态·偶遇 / 表达本·画像）。
  *
- * 旧的分栏界面保留在 /classic，随时可对比或回退。
+ * 深链：`/?tab=chats|discover|notes`、`/?tab=chats&friend=<id>`。
+ * 1.0 的旧界面保留在 `/classic`，不再从新界面链接过去，避免误触。
  */
 
-import Link from "next/link";
-
-import { WeChatApp } from "@/components/WeChatApp";
+import { SpeakEasyApp } from "@/components/v2/SpeakEasyApp";
 
 export default function Page() {
-  return (
-    <div className="relative">
-      <WeChatApp />
-      <Link
-        href="/classic/"
-        className="fixed bottom-3 left-3 z-[60] rounded-[4px] px-2 py-1 text-[10.5px] text-[#9a9a9a] transition-colors hover:bg-black/[0.05] hover:text-[#5a5a5a]"
-      >
-        ← 经典界面
-      </Link>
-    </div>
-  );
+  return <SpeakEasyApp />;
 }

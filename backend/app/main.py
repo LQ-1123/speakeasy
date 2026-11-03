@@ -25,6 +25,7 @@ from app.engines import build_engines, gpu_info
 from app.logging_utils import configure_logging, get_logger
 from app.routers import http_api, ws
 from app.routers import llm_config_api
+from app.v2.router import router as v2_router
 from app.routers import voice_api
 from app.routers import market_api
 from app.routers import conversations_api
@@ -56,6 +57,11 @@ async def lifespan(app: FastAPI):
     engines = build_engines(settings)
     app.state.engines = engines
     app.state.version = VERSION
+
+    # SpeakEasy 2.0：SQLite + 记忆/社交/朋友圈服务（惰性加载，不阻塞启动）
+    from app.v2.services import build_services  # noqa: PLC0415
+
+    app.state.v2 = build_services(engines, settings.data_path)
 
     # 会话存储（WS 连接共享）
     from app.session import SessionStore
@@ -90,6 +96,12 @@ async def lifespan(app: FastAPI):
                 await warm_task
             except (asyncio.CancelledError, Exception):  # noqa: B014
                 pass
+        v2 = getattr(app.state, "v2", None)
+        if v2 is not None:
+            try:
+                await v2.aclose()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("v2 关闭失败: %s", exc)
         await engines.aclose()
         log.info("已关闭")
 
@@ -119,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(market_api.router)
     app.include_router(translate_api.router)
     app.include_router(conversations_api.router)
+    app.include_router(v2_router)
 
     # 对话持久化存储
     from app.conversations import ConversationStore  # noqa: PLC0415

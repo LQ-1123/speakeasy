@@ -1,0 +1,56 @@
+# =============================================================================
+# SpeakEasy · 后端依赖
+# =============================================================================
+# 重要：本文件**不包含 torch**。PyTorch 必须按 CUDA 版本单独安装，
+# 见 docs/SETUP_GPU.md。原因：pip 默认源给的 torch 是 CPU-only 或不对的 CUDA 版本，
+# 装上会导致 `torch.cuda.is_available() == False`，且重装要下载 2.5GB。
+#
+# 推荐安装顺序（Windows + RTX 5080 / Blackwell sm_120）：
+#   1) py -3.11 -m venv .venv
+#   2) .venv\Scripts\activate
+#   3) pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+#   4) pip install -r backend/requirements.txt
+#
+# RTX 5080 是 Blackwell 架构（compute capability 12.0），
+# **必须** CUDA 12.8+ 的 torch（>= 2.7）。CUDA 12.1/12.4 的轮子不含 sm_120 kernel，
+# 装了也跑不起来（会报 "no kernel image is available for execution on the device"）。
+# =============================================================================
+
+# ---- Web 框架 ----
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32
+websockets>=13.0
+python-multipart>=0.0.12
+
+# ---- 配置与模型 ----
+pydantic>=2.9,<3.0
+pydantic-settings>=2.6
+python-dotenv>=1.0
+
+# ---- 数值与音频（torch 之外的纯 Python 依赖）----
+numpy>=1.26,<3.0
+soundfile>=0.12          # wav/flac 读写（可选，缺失时走标准库 wave）
+scipy>=1.13              # 仅用于 resample 的 polyphase（可选，缺失时走纯 numpy 实现）
+
+# ---- VAD ----
+# silero-vad 官方包；也可用 torch.hub 拉取。缺失时降级为能量 VAD。
+silero-vad>=5.1
+
+# ---- STT ----
+faster-whisper>=1.1.0
+ctranslate2>=4.5.0
+onnxruntime>=1.19        # silero-vad 的 onnx 路径 / faster-whisper 的依赖
+
+# ---- LLM ----
+openai>=1.55,<2.0
+httpx>=0.27
+
+# ---- 工具 ----
+rich>=13.9
+tqdm>=4.66
+tenacity>=9.0
+
+# ---- 开发/测试 ----
+pytest>=8.3
+pytest-asyncio>=0.24
+httpx>=0.27              # 也用于 TestClient

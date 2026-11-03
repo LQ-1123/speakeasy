@@ -1,0 +1,27 @@
+{
+  "name": "speakeasy-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SpeakEasy — English speaking practice workbench (Next.js 15 + TypeScript + Tailwind v4)",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "build:backend": "next build && node scripts/copy-out.mjs",
+    "typecheck": "tsc --noEmit",
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});require('fs').rmSync('out',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "lucide-react": "^0.577.0",
+    "next": "15.5.28",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.18.6",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

@@ -2006,3 +2006,7 @@ body:has(.se-app) {
 .se-suggestion-pill > span {
   min-width: 0;
 }
+
+.se-menu button.danger {
+  color: var(--se-danger);
+}

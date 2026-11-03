@@ -42,7 +42,8 @@
 | `POST /api/v2/friends/discover` | body `{"nationality":"Japan","language":"ja","gender":"female"}`（都可选）→ `{"friend": Friend, "message": Message}`；新好友自动发第一条破冰语音条。**筛选严格生效**：不支持的组合返回 422 + 当前支持的国家/语种列表，不再静默换人。 |
 | `GET /api/v2/friends/{id}` | 好友详情 + `memory`（episodes/open_loops）+ `request_message`。 |
 | `POST /api/v2/friends/{id}/accept` | 通过好友申请（pending_request → active），返回 `{"friend":..., "message":...}`，并发第一条语音。 |
-| `POST /api/v2/friends/{id}/decline` | 忽略申请。 |
+| `POST /api/v2/friends/{id}/decline` | 忽略申请（内部即删除该 pending 好友）。 |
+| `DELETE /api/v2/friends/{id}` | **删除好友**：级联删除聊天记录/朋友圈/音频文件，返回 `{"ok":true,"friend_id","name","deleted_audio"}`；不存在返回 404。 |
 | `GET /api/v2/friends/{id}/messages?limit=30&before=<iso>` | 历史消息（升序）。 |
 | `POST /api/v2/friends/{id}/read` | 清未读。 |
 

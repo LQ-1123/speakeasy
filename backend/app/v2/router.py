@@ -538,6 +538,38 @@ async def decline_friend(request: Request, friend_id: str) -> dict:
     return {"ok": True}
 
 
+@router.delete("/friends/{friend_id}")
+async def delete_friend(request: Request, friend_id: str) -> dict:
+    """删除好友：级联删除聊天记录/朋友圈，并清理对应音频文件。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    audio_names = await _thread(services.db.friend_audio_paths, friend_id)
+    await _thread(services.db.delete_friend, friend_id)
+    services.followup_inflight.discard(friend_id)
+    removed = 0
+    for name in audio_names:
+        try:
+            path = services.audio.path_for(name)
+            if os.path.isfile(path):
+                os.remove(path)
+                removed += 1
+        except (OSError, ValueError) as exc:  # noqa: BLE001 - 清理失败不影响删除
+            log.debug("删除好友音频失败 %s: %s", name, exc)
+    log.info(
+        "删除好友: %s (%s/%s) | 音频清理 %d/%d",
+        friend.get("name"), friend.get("city"), friend.get("nationality"),
+        removed, len(audio_names),
+    )
+    return {
+        "ok": True,
+        "friend_id": friend_id,
+        "name": friend.get("name"),
+        "deleted_audio": removed,
+    }
+
+
 @router.get("/friends/{friend_id}/messages")
 async def friend_messages(
     request: Request, friend_id: str, limit: int = 30, before: str | None = None

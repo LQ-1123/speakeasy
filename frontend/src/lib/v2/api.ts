@@ -366,6 +366,21 @@ export const api = {
     return request(`/expressions/${encodeURIComponent(id)}`, () => undefined, { method: "DELETE" });
   },
 
+  /** 删除好友（后端会级联删除消息/朋友圈并清理音频）。 */
+  deleteFriend(id: string): Promise<{ friend_id: string; deleted_audio?: number }> {
+    return request(
+      `/friends/${encodeURIComponent(id)}`,
+      (raw) => {
+        const data = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+        return {
+          friend_id: typeof data.friend_id === "string" ? data.friend_id : id,
+          deleted_audio: typeof data.deleted_audio === "number" ? data.deleted_audio : undefined,
+        };
+      },
+      { method: "DELETE" },
+    );
+  },
+
   memories(): Promise<MemoryPayload> {
     return request("/memories", parseMemoryPayload);
   },

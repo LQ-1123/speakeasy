@@ -214,6 +214,51 @@ async def test_discover_unsupported_language_returns_422(client):
     assert "ar" in detail or "不支持" in detail or "支持" in detail
 
 
+async def test_delete_friend_cascades_messages_and_audio(client):
+    http, services = client
+    friend = await _make_friend(services)
+    # 再造一条用户语音，保证有用户音频文件
+    files = {"audio": ("voice.wav", _wav_bytes(0.3), "audio/wav")}
+    http.post(f"/api/v2/chat/{friend['id']}/voice", files=files)
+
+    msgs = http.get(f"/api/v2/friends/{friend['id']}/messages", params={"limit": 50}).json()["messages"]
+    audio_urls = [m["audio_url"] for m in msgs if m.get("audio_url")]
+    assert audio_urls, "应存在好友/用户语音文件"
+
+    # 一个被该好友推荐的好友：删除后推荐关系应被清空
+    referred = await services.spawner.spawn(
+        referred_by_friend_id=friend["id"], status="pending_request"
+    )
+
+    r = http.delete(f"/api/v2/friends/{friend['id']}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["friend_id"] == friend["id"]
+    assert body["deleted_audio"] >= 1
+
+    assert http.get(f"/api/v2/friends/{friend['id']}").status_code == 404
+    assert http.get(f"/api/v2/friends/{friend['id']}/messages").status_code == 404
+    for url in audio_urls:
+        assert http.get(url).status_code == 404, url
+    assert services.db.get_friend(friend["id"]) is None
+    assert services.db.get_friend(referred["id"])["referred_by_friend_id"] is None
+
+    # 重复删除 → 404
+    assert http.delete(f"/api/v2/friends/{friend['id']}").status_code == 404
+
+
+async def test_delete_pending_request_friend(client):
+    http, services = client
+    friend = await _make_friend(services)
+    pending = await services.spawner.spawn(
+        referred_by_friend_id=friend["id"], status="pending_request"
+    )
+    assert http.delete(f"/api/v2/friends/{pending['id']}").status_code == 200
+    assert http.get(f"/api/v2/friends/{pending['id']}").status_code == 404
+    assert services.db.get_friend(friend["id"]) is not None
+
+
 async def test_decline_pending(client):
     http, services = client
     friend = await _make_friend(services)

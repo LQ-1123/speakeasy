@@ -348,8 +348,21 @@ class DB:
         return friend
 
     def delete_friend(self, fid: str) -> None:
+        """删除好友；messages/moments 由外键级联删除；清掉指向它的推荐关系。"""
         with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE friends SET referred_by_friend_id=NULL WHERE referred_by_friend_id=?", (fid,)
+            )
             self.conn.execute("DELETE FROM friends WHERE id=?", (fid,))
+
+    def friend_audio_paths(self, fid: str) -> list[str]:
+        """该好友所有消息的音频文件名（删除好友时顺带清理磁盘文件）。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT audio_path FROM messages WHERE friend_id=? AND audio_path IS NOT NULL AND audio_path<>''",
+                (fid,),
+            ).fetchall()
+        return [str(r[0]) for r in rows if r[0]]
 
     def used_archetype_ids(self) -> set[str]:
         with self._lock:

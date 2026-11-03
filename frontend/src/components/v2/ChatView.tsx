@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   Phone,
   RefreshCw,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -37,6 +38,8 @@ interface ChatViewProps {
   friend: Friend;
   onBack: () => void;
   onFriendRefresh?: (friend: Friend) => void;
+  /** 好友被删除后通知父级（关闭单聊并刷新列表）。 */
+  onDeleted?: (friend: Friend) => void;
 }
 
 const SUGGESTION_POLL_MS = 2500;
@@ -71,7 +74,7 @@ function TextBubble({ message, friend, mine }: { message: Message; friend: Frien
   );
 }
 
-export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
+export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatViewProps) {
   const { showToast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +83,7 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
   const [suggestionPending, setSuggestionPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -261,6 +265,24 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
 
   const friendStateTone = local.period === "night" || local.period === "late_night";
 
+  const handleDeleteFriend = async () => {
+    if (deleting) return;
+    const ok = window.confirm(
+      `确定删除好友「${friend.name}」？\n聊天记录、朋友圈和对应语音会一起删除，且不可恢复。`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await api.deleteFriend(friend.id);
+      showToast("已删除好友", "success");
+      onDeleted?.(friend);
+    } catch (err) {
+      showToast(`删除失败：${errorText(err)}`, "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="se-chat">
       <header className="se-chat-header">
@@ -322,6 +344,17 @@ export function ChatView({ friend, onBack, onFriendRefresh }: ChatViewProps) {
                 }}
               >
                 <RefreshCw size={14} /> 标记已读
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={deleting}
+                onClick={() => {
+                  setMenuOpen(false);
+                  void handleDeleteFriend();
+                }}
+              >
+                <Trash2 size={14} /> {deleting ? "删除中…" : "删除好友"}
               </button>
             </div>
           </>

@@ -391,6 +391,16 @@ function AppInner() {
     void loadBootstrap(true);
   }, [loadBootstrap]);
 
+  const handleFriendDeleted = useCallback(
+    (friend: Friend) => {
+      setActiveFriend(null);
+      setFriends((prev) => prev.filter((item) => item.id !== friend.id));
+      setRequests((prev) => prev.filter((item) => item.id !== friend.id));
+      void loadBootstrap(true);
+    },
+    [loadBootstrap],
+  );
+
   const handleAccept = useCallback(
     async (friend: Friend) => {
       setAcceptingId(friend.id);
@@ -502,6 +512,7 @@ function AppInner() {
         <ChatView
           friend={activeFriend}
           onBack={handleBackFromChat}
+          onDeleted={handleFriendDeleted}
           onFriendRefresh={(updated) => {
             setActiveFriend(updated);
             setFriends((prev) => upsertFriend(prev, updated));

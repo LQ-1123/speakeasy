@@ -278,7 +278,8 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
   };
 
   const buildLlmInput = (): LlmSaveInput => {
-    const input: LlmSaveInput = { verify: true };
+    // 保存立即落盘并生效；网络验证交给「测试连接」按钮，避免保存被云端阻塞
+    const input: LlmSaveInput = { verify: false };
     if (llmBaseUrl.trim()) input.base_url = llmBaseUrl.trim();
     if (llmModel.trim()) input.model = llmModel.trim();
     if (llmKey.trim()) input.api_key = llmKey.trim();
@@ -326,7 +327,7 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
           text: result.message || "已保存并生效",
           detail: verified
             ? `${Math.round(verified.latency_ms)} ms${verified.model_reply ? ` · 模型回复：${verified.model_reply}` : ""}`
-            : undefined,
+            : "已即时生效（未做网络验证）；可点「测试连接」验证连通性，云端可能较慢。",
         });
         showToast("LLM 配置已保存并生效", "success");
       } else {
@@ -447,7 +448,8 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
     setSttBusy("save");
     setSttFeedback(null);
     try {
-      const result = await saveSttSettings(buildSttInput(true));
+      // 立即保存并热生效；真实网络验证交给「测试连接」（SiliconFlow 免费模型可能排队很久）
+      const result = await saveSttSettings(buildSttInput(false));
       applySttPayload(result.config, result.health, result.presets);
       const verified = result.verified;
       if (verified && !verified.ok) {
@@ -461,10 +463,10 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
       } else {
         setSttFeedback({
           tone: "ok",
-          text: "STT 配置已保存并热生效",
+          text: "STT 配置已保存并热生效（即时）",
           detail: verified
             ? `${Math.round(verified.latency_ms)} ms${verified.text ? ` · 识别结果：${verified.text}` : ""}`
-            : undefined,
+            : "未做网络验证；可点「测试连接」验证 SiliconFlow，免费模型可能排队（较慢）。",
         });
         showToast("STT 配置已保存并生效", "success");
       }
@@ -635,7 +637,7 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
                   disabled={llmBusy !== null}
                 >
                   {llmBusy === "test" ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                  测试连接
+                  {llmBusy === "test" ? "测试中…" : "测试连接"}
                 </button>
                 <button
                   type="button"
@@ -644,7 +646,7 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
                   disabled={llmBusy !== null}
                 >
                   {llmBusy === "save" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  保存并启用
+                  {llmBusy === "save" ? "保存中…" : "保存并启用"}
                 </button>
               </div>
 
@@ -660,7 +662,8 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
 
               <p className="se-setting-footnote">
                 <KeyRound size={11} />
-                密钥只保存在本机 data/llm_config.json，接口永不回传明文。
+                密钥只保存在本机 data/llm_config.json，接口永不回传明文；保存即时生效，
+                「测试连接」会真实请求模型服务。
               </p>
             </>
           ) : null}
@@ -785,7 +788,7 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
                   disabled={sttBusy !== null || sttUnavailable}
                 >
                   {sttBusy === "test" ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                  测试连接
+                  {sttBusy === "test" ? "测试中…（可能较慢）" : "测试连接"}
                 </button>
                 <button
                   type="button"
@@ -794,7 +797,7 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
                   disabled={sttBusy !== null || sttUnavailable}
                 >
                   {sttBusy === "save" ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  保存
+                  {sttBusy === "save" ? "保存中…" : "保存"}
                 </button>
               </div>
 
@@ -862,7 +865,8 @@ export function SettingsPanel({ onClose, onChanged }: SettingsPanelProps) {
 
               <p className="se-setting-footnote">
                 <KeyRound size={11} />
-                密钥只写入本机 data/stt_config.json（0600），云端失败会自动回退本地。
+                密钥只写入本机 data/stt_config.json（0600），云端失败会自动回退本地；保存即时生效，
+                「测试连接」会真实请求 SiliconFlow（免费模型可能排队，最长约 30 秒）。
               </p>
             </>
           ) : null}

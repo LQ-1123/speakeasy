@@ -84,7 +84,9 @@ fields:
 { "ok": true, "config": {...}, "health": {...},
   "verified": {"ok": true, "message": "连接成功，SenseVoiceSmall 正常响应", "latency_ms": 820.5, "text": ""} }
 ```
-- `verify=true` 时真的发一次 0.5s 静音/提示音转写请求；失败 `ok` 仍为 true（配置已保存），`verified.ok=false`。
+- `verify=true` 时真的发一次 0.5s 提示音转写请求；失败 `ok` 仍为 true（配置已保存），`verified.ok=false`。
+- **前端行为（推荐）**：保存时传 `verify=false`，**立即保存并热生效**；网络验证交给「测试连接」按钮单独触发。
+  （原因：SiliconFlow 免费模型可能排队，实测一次 0.5s 音频验证可能耗时 15–30 秒，不能阻塞保存。）
 
 ### `POST /api/v2/settings/stt/test`
 只测不存，字段缺省用当前配置：`{provider?, base_url?, api_key?, model?, language?, timeout_s?}`

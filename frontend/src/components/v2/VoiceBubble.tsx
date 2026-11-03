@@ -27,6 +27,8 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+  const retriedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const bars = waveformBars(message.id || message.created_at, message.duration_ms > 8000 ? 22 : 16);
 
@@ -59,6 +61,52 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
     stopRaf();
   };
 
+  /** 直接加载失败时（Safari/WAV MIME、Range、瞬时 404）用 fetch+blob 重试一次。 */
+  const retryWithBlob = async () => {
+    if (retriedRef.current) {
+      setPlaying(false);
+      setLoading(false);
+      showToast("音频加载失败：可点「文」查看原文，或刷新页面后重试", "error");
+      return;
+    }
+    retriedRef.current = true;
+    setPlaying(false);
+    setLoading(true);
+    try {
+      if (!src) throw new Error("没有音频地址");
+      const resp = await fetch(src, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      if (blob.size < 44) throw new Error("音频数据异常");
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = URL.createObjectURL(blob);
+      const retry = new Audio(blobUrlRef.current);
+      retry.preload = "auto";
+      retry.onended = () => {
+        setPlaying(false);
+        setProgress(0);
+        stopRaf();
+      };
+      retry.onerror = () => {
+        setPlaying(false);
+        setLoading(false);
+        showToast("音频加载失败：可点「文」查看原文，或刷新页面后重试", "error");
+      };
+      audioRef.current = retry;
+      retry.playbackRate = rate;
+      await retry.play();
+      setPlaying(true);
+      setLoading(false);
+      stopRaf();
+      rafRef.current = requestAnimationFrame(tick);
+    } catch (err) {
+      setLoading(false);
+      setPlaying(false);
+      const detail = err instanceof Error ? err.message : "网络或格式问题";
+      showToast(`音频加载失败（${detail}）：可点「文」查看原文`, "error");
+    }
+  };
+
   const toggle = async () => {
     if (playing) {
       stop();
@@ -78,9 +126,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
         stopRaf();
       };
       audio.onerror = () => {
-        setPlaying(false);
-        setLoading(false);
-        showToast("音频加载失败（后端可能尚未生成）", "error");
+        void retryWithBlob();
       };
       audioRef.current = audio;
     }
@@ -93,9 +139,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
       stopRaf();
       rafRef.current = requestAnimationFrame(tick);
     } catch {
-      setLoading(false);
-      setPlaying(false);
-      showToast("无法播放语音", "error");
+      void retryWithBlob();
     }
   };
 
@@ -108,6 +152,10 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
         audio.src = "";
       }
       audioRef.current = null;
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
     };
   }, []);
 

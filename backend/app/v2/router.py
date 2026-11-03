@@ -816,8 +816,18 @@ async def get_audio(request: Request, filename: str) -> FileResponse:
     except ValueError:
         raise HTTPException(status_code=404, detail="音频不存在") from None
     if not os.path.isfile(path):
+        log.warning("音频文件不存在: %s", filename)
         raise HTTPException(status_code=404, detail="音频不存在")
-    media_type = mimetypes.guess_type(path)[0] or "audio/wav"
+    # 显式声明标准 MIME：Safari 对 audio/x-wav 兼容性不佳，统一用 audio/wav
+    ext = os.path.splitext(path)[1].lower()
+    media_type = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/opus",
+    }.get(ext) or (mimetypes.guess_type(path)[0] or "application/octet-stream")
     return FileResponse(path, media_type=media_type)
 
 
@@ -833,7 +843,7 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"合成失败: {exc}") from exc
-    return FileResponse(path, media_type="audio/wav")
+    return FileResponse(path, media_type="audio/wav", filename=os.path.basename(path))
 
 
 @router.get("/archetypes")

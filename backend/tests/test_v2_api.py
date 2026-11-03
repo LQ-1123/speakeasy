@@ -328,7 +328,7 @@ async def test_audio_and_tts_sample(client):
     assert audio_url
     audio = http.get(audio_url)
     assert audio.status_code == 200
-    assert audio.headers["content-type"].startswith("audio/")
+    assert audio.headers["content-type"].startswith("audio/wav")  # Safari 兼容：不用 audio/x-wav
 
     sample = http.get("/api/v2/tts/sample", params={"text": "Hello there", "voice": "en-GB-RyanNeural"})
     assert sample.status_code == 200

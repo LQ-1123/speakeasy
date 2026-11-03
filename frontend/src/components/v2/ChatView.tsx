@@ -455,7 +455,21 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
             </span>
           </div>
           <p className="mt-0.5 truncate text-[10.5px] text-[color:var(--se-dim)]">
-            {local.time} · {local.activity || (friendStateTone ? "那边是深夜" : "在线")} · {closenessLabel(friend.closeness_level)}
+            {sending ? (
+              <span className="se-header-typing" aria-live="polite">
+                对方正在说话
+                <span className="se-typing-dots" aria-hidden>
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+            ) : (
+              <>
+                {local.time} · {local.activity || (friendStateTone ? "那边是深夜" : "在线")} ·{" "}
+                {closenessLabel(friend.closeness_level)}
+              </>
+            )}
           </p>
         </div>
         <button
@@ -701,12 +715,6 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         </div>
       ) : null}
 
-      {sending ? (
-        <div className="pointer-events-none absolute right-3 top-[64px] z-20 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white">
-          <Loader2 size={11} className="animate-spin" />
-          对方正在说话…
-        </div>
-      ) : null}
     </div>
   );
 }

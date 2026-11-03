@@ -2114,3 +2114,15 @@ body:has(.se-app) {
 .se-menu button:disabled {
   opacity: 0.55;
 }
+
+/* 聊天标题栏里的「对方正在说话」状态（微信式，避免悬浮徽标挡住内容） */
+.se-header-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 500;
+  color: var(--se-green-ink);
+}
+.se-header-typing .se-typing-dots i {
+  background: var(--se-green-ink);
+}

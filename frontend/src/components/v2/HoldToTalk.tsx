@@ -151,10 +151,10 @@ export function HoldToTalk({
           <span>松手 发送</span>
           <span className="tabular-nums opacity-80">{durationLabel(elapsedMs)}</span>
         </>
-      ) : starting || sending ? (
+      ) : starting ? (
         <>
           <Loader2 size={compact ? 14 : 17} className="animate-spin" />
-          <span>{sending ? "对方正在说话…" : "准备中…"}</span>
+          <span>准备中…</span>
         </>
       ) : (
         <>

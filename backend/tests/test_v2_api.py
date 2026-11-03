@@ -527,14 +527,13 @@ async def test_call_stream_turn_events_and_persistence(client):
     assert done["total_turns"] >= 1
 
 
-async def test_call_warmup_returns_filler(client):
+async def test_call_warmup_only_prewarms(client):
     http, services = client
     friend = await _make_friend(services)
     r = http.get(f"/api/v2/chat/{friend['id']}/call/warmup")
     assert r.status_code == 200, r.text
-    data = r.json()
-    assert data["filler_url"].startswith("/api/v2/audio/")
-    assert data["text"]
+    assert r.json()["ok"] is True
+    assert "filler_url" not in r.json()
 
 
 async def test_friend_replying_status_and_list_flag(client):

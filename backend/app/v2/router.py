@@ -644,29 +644,14 @@ async def read_messages(request: Request, friend_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # 聊天（异步语音条）
 # --------------------------------------------------------------------------- #
-_CALL_FILLERS: dict[str, str] = {
-    "zh": "嗯嗯，我在听。",
-    "en": "Mm-hmm, I'm listening.",
-    "ja": "うんうん、聞いてるよ。",
-    "ko": "응응, 듣고 있어.",
-    "pt": "Hum, estou ouvindo.",
-    "es": "Mmm, te escucho.",
-    "de": "Mhm, ich höre zu.",
-    "fr": "Hum, je t'écoute.",
-    "it": "Mmm, ti ascolto.",
-}
-
-
 @router.get("/chat/{friend_id}/call/warmup")
 async def call_warmup(request: Request, friend_id: str) -> dict:
-    """通话接通时预生成一句「嗯嗯/我在听」占位语音，用来填住 STT+LLM 的思考间隙。"""
+    """通话接通预热：后台加载本地 STT 模型 + 预热 LLM 连接（不生成任何占位语音）。"""
     services = _services(request)
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
     lang = str(friend.get("reply_language") or "en").strip().lower()
-    text = _CALL_FILLERS.get(lang) or _CALL_FILLERS["en"]
-    # 后台预热本地 STT 模型，避免第一轮调用才知道模型没加载
     stt_engine = getattr(services.engines, "stt", None)
     prewarm = getattr(stt_engine, "prewarm", None)
     if callable(prewarm):
@@ -691,22 +676,7 @@ async def call_warmup(request: Request, friend_id: str) -> dict:
             log.debug("通话 LLM 预热失败: %s", exc)
 
     services.spawn_bg(_warm_llm())
-    try:
-        path, duration_ms = await services.voice.synth_to_wav(
-            text,
-            friend.get("voice_id") or "en-GB-RyanNeural",
-            rate=friend.get("voice_rate") or "+0%",
-            pitch=friend.get("voice_pitch") or "+0Hz",
-            out_dir=services.audio.audio_dir,
-        )
-    except Exception as exc:  # noqa: BLE001 - 预生成失败不影响通话
-        log.warning("通话占位语音生成失败（%s: %s）", type(exc).__name__, exc)
-        return {"filler_url": None, "text": text}
-    return {
-        "filler_url": f"/api/v2/audio/{os.path.basename(path)}",
-        "text": text,
-        "duration_ms": int(duration_ms or 0),
-    }
+    return {"ok": True}
 
 
 @router.post("/chat/{friend_id}/call/turn")

@@ -1,13 +1,12 @@
 "use client";
 
 /**
- * 语音通话（免提 VAD + 流式回复 + 占位 filler）。
+ * 语音通话（免提 VAD + 流式回复）。
  *
  * 一轮对话：
- * 1) VAD 自动断句 → 立即播放 warmup 预生成的 filler（「嗯嗯，我在听」）；
- * 2) 同时 POST /call/turn（NDJSON 流）：transcript → 更新我的字幕；sentence 逐句入队播放、
- *    好友字幕渐进增长；done → 更新轮数并在队列播完后恢复监听；
- * 3) filler 播完仍无首句时显示「对方正在思考…」；
+ * 1) VAD 自动断句 → 显示「对方正在思考…」，POST /call/turn（NDJSON 流）；
+ * 2) transcript 更新我的字幕；sentence 逐句入队播放、好友字幕渐进增长；
+ * 3) done → 更新轮数，队列播完后恢复监听；
  * 4) 流式失败/浏览器不支持 → 回退 api.sendVoice（toast 一次「已切换普通模式」）；
  * 5) 结束/卸载：abort 流、停止音频、清队列、回收资源。
  */
@@ -93,12 +92,8 @@ export function CallView({ friend, onClose }: CallViewProps) {
   const busyRef = useRef(false);
 
   /* -------- 播放与流式状态 -------- */
-  const fillerUrlRef = useRef("");
-  const preloadedFillerRef = useRef<HTMLAudioElement | null>(null);
-  const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
   const sentenceAudioRef = useRef<HTMLAudioElement | null>(null);
   const queueRef = useRef<QueuedSentence[]>([]);
-  const fillerPlayingRef = useRef(false);
   const sentencePlayingRef = useRef(false);
   const doneReceivedRef = useRef(false);
   const doneInfoRef = useRef<{ total_turns: number; friend_message: Message | null } | null>(null);
@@ -127,48 +122,16 @@ export function CallView({ friend, onClose }: CallViewProps) {
   const local = localStateOf(friend);
   const langMeta = replyLanguageMeta(friend);
 
-  /* ------------------------------ 预加载 filler ------------------------------ */
+  /* ------------------------------ 通话预热（STT / LLM） ------------------------------ */
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await callWarmup(friend.id);
-        if (cancelled || !result.filler_url) return;
-        fillerUrlRef.current = result.filler_url;
-        const audio = new Audio(result.filler_url);
-        audio.preload = "auto";
-        audio.load();
-        preloadedFillerRef.current = audio;
-      } catch {
-        /* 失败静默：没有 filler 直接进「思考」状态 */
-      }
-    })();
-    return () => {
-      cancelled = true;
-      const preloaded = preloadedFillerRef.current;
-      if (preloaded) {
-        preloaded.onended = null;
-        preloaded.onerror = null;
-        preloaded.pause();
-      }
-      preloadedFillerRef.current = null;
-    };
+    // 只预热后端 STT/LLM，不生成也不播放任何占位语音
+    void callWarmup(friend.id).catch(() => undefined);
   }, [friend.id]);
 
   /* ------------------------------ 音频清理 / 播放队列 ------------------------------ */
 
   const stopAllAudio = useCallback(() => {
-    const filler = fillerAudioRef.current;
-    if (filler) {
-      filler.onended = null;
-      filler.onerror = null;
-      filler.pause();
-      filler.src = "";
-    }
-    fillerAudioRef.current = null;
-    fillerPlayingRef.current = false;
-
     const sentence = sentenceAudioRef.current;
     if (sentence) {
       sentence.onended = null;
@@ -208,7 +171,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
 
   const maybeFinishTurn = useCallback(() => {
     if (!turnActiveRef.current) return;
-    if (fillerPlayingRef.current || sentencePlayingRef.current || queueRef.current.length > 0) return;
+    if (sentencePlayingRef.current || queueRef.current.length > 0) return;
     if (!doneReceivedRef.current) {
       setSpeaking(false);
       setThinking(true);
@@ -221,7 +184,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
 
   const playNextSentence = () => {
     if (!mountedRef.current || endingRef.current || !turnActiveRef.current) return;
-    if (sentencePlayingRef.current || fillerPlayingRef.current) return;
+    if (sentencePlayingRef.current) return;
     const next = queueRef.current.shift();
     if (!next) {
       maybeFinishTurn();
@@ -258,34 +221,6 @@ export function CallView({ friend, onClose }: CallViewProps) {
     });
   };
   playNextRef.current = playNextSentence;
-
-  /** 播放占位 filler（warmup 预生成），同时继续等流式首句。 */
-  const startFiller = useCallback(() => {
-    const url = fillerUrlRef.current;
-    if (!url) {
-      setThinking(true);
-      return;
-    }
-    const audio = new Audio(url);
-    fillerAudioRef.current = audio;
-    fillerPlayingRef.current = true;
-    setThinking(false);
-    setSpeaking(true);
-    markTiming("filler_start");
-    audio.muted = muted;
-    audio.volume = speakerOn ? 1 : 0.35;
-
-    const onFillerDone = () => {
-      if (fillerAudioRef.current !== audio) return;
-      fillerPlayingRef.current = false;
-      fillerAudioRef.current = null;
-      setSpeaking(false);
-      playNextRef.current();
-    };
-    audio.onended = onFillerDone;
-    audio.onerror = onFillerDone;
-    void audio.play().catch(onFillerDone);
-  }, [markTiming, muted, speakerOn]);
 
   /* ------------------------------ 失败回退普通接口 ------------------------------ */
 
@@ -423,11 +358,10 @@ export function CallView({ friend, onClose }: CallViewProps) {
       setLastUserText("");
       setLastFriendText("");
 
-      // 先把 filler 播起来（填住 STT + 首句生成的间隙），同时开始流式请求
-      startFiller();
+      setThinking(true);
       await runStreamTurn(blob, durationMs, filename);
     },
-    [markTiming, runStreamTurn, startFiller],
+    [markTiming, runStreamTurn],
   );
 
   /* ------------------------------ 免提 VAD ------------------------------ */
@@ -500,7 +434,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
   /** 重播最近一段回复（不参与轮次计数，失败静默 toast）。 */
   const replayLast = () => {
     if (speaking || thinking || waiting) return;
-    const playing = sentenceAudioRef.current ?? fillerAudioRef.current;
+    const playing = sentenceAudioRef.current;
     if (playing) {
       try {
         playing.currentTime = 0;

@@ -666,9 +666,7 @@ export function translateBatch(input: {
 /* ================================================================== */
 
 export interface CallWarmupResult {
-  filler_url: string;
-  text: string;
-  duration_ms: number;
+  ok: boolean;
 }
 
 export function callWarmup(friendId: string): Promise<CallWarmupResult> {
@@ -676,11 +674,7 @@ export function callWarmup(friendId: string): Promise<CallWarmupResult> {
     `/chat/${encodeURIComponent(friendId)}/call/warmup`,
     (raw) => {
       const r = isRecord(raw) ? raw : {};
-      return {
-        filler_url: str(r.filler_url),
-        text: str(r.text),
-        duration_ms: num(r.duration_ms),
-      };
+      return { ok: r.ok === true };
     },
     { timeoutMs: 15000 },
   );

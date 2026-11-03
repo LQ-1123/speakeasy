@@ -555,3 +555,31 @@ async def test_friend_replying_status_and_list_flag(client):
         services.chat.clear_replying(friend["id"])
     status = http.get(f"/api/v2/friends/{friend['id']}/status").json()
     assert status["replying"] is False and status["started_at"] is None
+
+
+async def test_call_summary_not_replayed_into_chat_context(client):
+    http, services = client
+    friend = await _make_friend(services)
+    services.db.add_message(
+        friend["id"], "friend", "📞 语音通话 00:26 · 9 轮对话", msg_type="call_summary"
+    )
+
+    captured: list[list[dict]] = []
+
+    class CaptureLLM:
+        uses_mock = False
+
+        async def stream_chat(self, messages, **kwargs):
+            captured.append(messages)
+            yield "Sure, tell me more."
+
+    old_llm = services.chat.engines.llm
+    services.chat.engines = SimpleNamespace(llm=CaptureLLM(), stt=services.engines.stt)
+    try:
+        await services.chat.handle_text(friend["id"], "Do you have any pets?")
+    finally:
+        services.chat.engines = old_llm
+    assert captured, "LLM 应被调用"
+    joined = str(captured[0])
+    assert "语音通话" not in joined
+    assert "Do you have any pets?" in joined

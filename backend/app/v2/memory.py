@@ -1052,6 +1052,8 @@ class MemoryManager:
         for msg in recent or ():
             if not isinstance(msg, dict):
                 continue
+            if msg.get("msg_type") == "call_summary":
+                continue
             speaker = "Them" if (msg.get("sender") or "") == "user" else "You"
             text = _clip(_as_str(msg.get("transcript")), 240)
             if text:

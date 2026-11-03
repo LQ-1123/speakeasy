@@ -775,6 +775,9 @@ class ChatService:
             {"role": "system", "content": self._system_prompt(friend, review_exprs)}
         ]
         for item in history[-10:]:
+            # 通话摘要只是系统记录，不能当对话内容喂给模型（否则会被复读进回复）
+            if item.get("msg_type") == "call_summary":
+                continue
             role = "user" if item.get("sender") == "user" else "assistant"
             content = (item.get("transcript") or "").strip()
             if content:
@@ -1021,6 +1024,9 @@ class ChatService:
             {"role": "system", "content": self._system_prompt(friend, review_exprs)}
         ]
         for item in history[-10:]:
+            # 通话摘要只是系统记录，不能当对话内容喂给模型（否则会被复读进回复）
+            if item.get("msg_type") == "call_summary":
+                continue
             role = "user" if item.get("sender") == "user" else "assistant"
             content = (item.get("transcript") or "").strip()
             if content:

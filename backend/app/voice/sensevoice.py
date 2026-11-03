@@ -106,10 +106,15 @@ def _http_error_message(response: httpx.Response) -> str:
     """把 HTTP 错误映射成可读中文（含状态码与响应片段）。"""
     status = int(response.status_code)
     snippet = _body_snippet(response)
-    if status in (401, 403):
-        base = f"API Key 无效或无权限（HTTP {status}）"
+    if status == 402:
+        # SiliconFlow 官方错误码表：402 = 账户欠费/余额不足（即使模型标注"免费"，账户欠费时也会被拦）
+        base = "硅基流动账户余额不足/欠费（HTTP 402），请到控制台充值后再试，或切换到本地 Whisper"
+    elif status == 401:
+        base = "API Key 无效或无权限（HTTP 401）"
+    elif status == 403:
+        base = "硅基流动权限不足（HTTP 403），常见原因是账户未完成实名认证"
     elif status == 429:
-        base = f"请求过于频繁 / 额度不足（HTTP {status}）"
+        base = "请求过于频繁（HTTP 429），请稍后重试"
     elif status >= 500:
         base = f"硅基流动服务端错误（HTTP {status}）"
     elif status == 404:

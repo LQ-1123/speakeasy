@@ -158,6 +158,28 @@ async def test_transcribe_401_raises_readable_error() -> None:
     assert ei.value.status_code == 401
 
 
+@pytest.mark.parametrize(
+    ("status", "needle"),
+    [
+        (402, "余额不足"),
+        (403, "实名认证"),
+    ],
+)
+async def test_transcribe_balance_and_permission_messages(status: int, needle: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status,
+            json={"code": 30001, "message": "Sorry, your account balance is insufficient"},
+        )
+
+    with pytest.raises(SenseVoiceError) as ei:
+        await _client(handler).transcribe(_pcm16())
+    message = str(ei.value)
+    assert str(status) in message
+    assert needle in message
+    assert ei.value.status_code == status
+
+
 async def test_transcribe_500_raises_readable_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="upstream exploded")

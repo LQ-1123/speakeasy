@@ -141,3 +141,16 @@ def cloud_health(self) -> dict                 # 见上 health 结构 + backend 
 - ✅ 真实 SiliconFlow 请求验证：假 Key → `HTTP 401 {"code":30014,"message":"Token is invalid."}`，UI 中文提示；
   语音条随后回退本地 faster-whisper 并正确转写。
 - ⏳ 真实 Key 下的转写效果需用户填入自己的 SiliconFlow Key 验证（本机未持有可用 Key）。
+
+## 7. 常见报错对照（SiliconFlow 官方错误码）
+
+| HTTP | 含义 | 处理 |
+|---|---|---|
+| 401 | API Key 无效/没带 Bearer | 重新粘贴 Key |
+| **402 / code 30001** | **账户欠费/余额不足**（即使模型价格页标注"免费"，账户欠费或免费额度受限时仍会被拦） | 控制台完成实名认证 + 充值少量余额后重试；期间可在「个人设置」切「本地 Whisper」 |
+| 403 | 权限不足，常见原因：未完成实名认证 | 控制台完成实名认证 |
+| 429 | 触发 Rate Limits（免费模型有固定限额） | 稍等重试，或切本地 |
+| 503/504 | 服务负载 | 稍后重试 |
+
+**本项目的降级行为**：云端任何 4xx/5xx/超时都不会中断聊天——`STTEngine` 记下 `cloud_health.last_error`
+后自动回退本地 faster-whisper；设置页 health 会显示最近错误与请求数。

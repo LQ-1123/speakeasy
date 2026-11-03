@@ -128,6 +128,10 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     stopPolling();
     const deadline = Date.now() + SUGGESTION_TIMEOUT_MS;
     const tick = () => {
+      if (!mountedRef.current) {
+        stopPolling();
+        return;
+      }
       if (Date.now() > deadline) {
         stopPolling();
         setSuggestionPending(false);
@@ -211,6 +215,11 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     requestAnimationFrame(() => scrollToBottom(true));
     try {
       const response = await request();
+      if (!mountedRef.current) {
+        // 用户等待期间已离开聊天：不更新 UI、不标已读（回复算未读）、不启动轮询
+        revokeTemp(temp.local_audio_url);
+        return;
+      }
       setMessages((prev) => {
         const withoutTemp = prev.filter((message) => message.id !== temp.id);
         const incoming: Message[] = [];

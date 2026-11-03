@@ -33,7 +33,7 @@ const STATUS_TEXT: Record<CallPhase, string> = {
   connecting: "正在接通…",
   listening: "我在听…",
   recording: "正在聆听…",
-  processing: "正在发送…",
+  processing: "对方正在思考…",
   speaking: "对方正在说话…",
   muted: "已静音",
 };
@@ -41,8 +41,8 @@ const STATUS_TEXT: Record<CallPhase, string> = {
 const ORB_HINT: Record<CallPhase, string> = {
   connecting: "正在接通对方…",
   listening: "直接说话即可，我在听",
-  recording: "说完停顿一下，我会自动发送",
-  processing: "正在发送语音，稍等…",
+  recording: "说完停顿一下，我会自动接上",
+  processing: "对方正在组织语言，稍等…",
   speaking: "对方正在说话，稍后会自动继续听",
   muted: "已静音，点麦克风或静音键恢复",
 };
@@ -155,7 +155,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
       } catch (err) {
         if (!mountedRef.current) return;
         setWaiting(false);
-        showToast(`发送失败：${apiErrorText(err)}`, "error");
+        showToast(`这轮语音没传过去，请再说一次：${apiErrorText(err)}`, "error");
       } finally {
         busyRef.current = false;
       }

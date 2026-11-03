@@ -7,7 +7,7 @@
  * 每个调用都带超时；失败抛 `ApiError`，由 UI 转成中文提示 + 空态。
  */
 
-import { asStringArray, isRecord, str } from "@/lib/guards";
+import { asStringArray, isRecord, num, str } from "@/lib/guards";
 import {
   parseBootstrap,
   parseChatTurn,
@@ -648,4 +648,153 @@ export function translateBatch(input: {
     body: JSON.stringify(input),
     timeoutMs: 90000,
   });
+}
+
+
+/* ================================================================== */
+/* 通话流式接口：warmup filler / NDJSON turn                             */
+/* ================================================================== */
+
+export interface CallWarmupResult {
+  filler_url: string;
+  text: string;
+  duration_ms: number;
+}
+
+export function callWarmup(friendId: string): Promise<CallWarmupResult> {
+  return request(
+    `/chat/${encodeURIComponent(friendId)}/call/warmup`,
+    (raw) => {
+      const r = isRecord(raw) ? raw : {};
+      return {
+        filler_url: str(r.filler_url),
+        text: str(r.text),
+        duration_ms: num(r.duration_ms),
+      };
+    },
+    { timeoutMs: 15000 },
+  );
+}
+
+export type CallTurnEvent =
+  | { type: "transcript"; text: string; stt?: unknown }
+  | { type: "sentence"; index: number; text: string; audio_url: string }
+  | {
+      type: "done";
+      user_message: Message | null;
+      friend_message: Message | null;
+      closeness_level: number;
+      total_turns: number;
+      reply_language: string;
+    }
+  | { type: "error"; message: string };
+
+export interface StreamCallTurnOptions {
+  signal?: AbortSignal;
+  onEvent: (event: CallTurnEvent) => void;
+}
+
+function parseCallTurnEvent(line: string): CallTurnEvent | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!isRecord(raw)) return null;
+  const type = str(raw.type);
+  if (type === "transcript") return { type: "transcript", text: str(raw.text), stt: raw.stt };
+  if (type === "sentence") {
+    return {
+      type: "sentence",
+      index: num(raw.index),
+      text: str(raw.text),
+      audio_url: str(raw.audio_url),
+    };
+  }
+  if (type === "done") {
+    return {
+      type: "done",
+      user_message: parseMessage(raw.user_message),
+      friend_message: parseMessage(raw.friend_message),
+      closeness_level: num(raw.closeness_level),
+      total_turns: num(raw.total_turns),
+      reply_language: str(raw.reply_language),
+    };
+  }
+  if (type === "error") return { type: "error", message: str(raw.message) || "通话流式响应失败" };
+  return null;
+}
+
+/**
+ * 通话轮次流式接口：multipart 上传音频，逐行解析 NDJSON 事件。
+ * 失败（网络/非 2xx/流异常）抛 ApiError，由调用方回退普通 /voice 接口。
+ */
+export async function streamCallTurn(
+  friendId: string,
+  blob: Blob,
+  durationMs: number,
+  filename: string,
+  options: StreamCallTurnOptions,
+): Promise<void> {
+  if (typeof ReadableStream === "undefined" || typeof TextDecoder === "undefined") {
+    throw new ApiError("当前浏览器不支持流式读取", 0);
+  }
+  const form = new FormData();
+  form.append("audio", blob, filename);
+  form.append("duration_ms", String(Math.max(0, Math.round(durationMs))));
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/chat/${encodeURIComponent(friendId)}/call/turn`, {
+      method: "POST",
+      body: form,
+      signal: options.signal,
+      headers: { Accept: "application/x-ndjson" },
+      cache: "no-store",
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiError("无法连接通话流式接口", 0);
+  }
+  if (!res.ok) throw new ApiError(await detailOf(res), res.status);
+  if (!res.body || typeof res.body.getReader !== "function") {
+    throw new ApiError("通话流式响应不可读", 0);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const emitLine = (line: string) => {
+    const event = parseCallTurnEvent(line);
+    if (event) options.onEvent(event);
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) emitLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+    buffer += decoder.decode();
+    const rest = buffer.trim();
+    if (rest) {
+      for (const line of rest.split("\n")) {
+        if (line.trim()) emitLine(line.trim());
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
+  }
 }

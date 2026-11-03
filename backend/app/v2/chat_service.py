@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
+import wave
 import zlib
 from typing import Any
 
@@ -228,6 +230,65 @@ def _strip_emoji(text: str) -> str:
     return " ".join(cleaned.split()).strip()
 
 
+_SENT_END_RE = re.compile(r"[。！？!?…]+|\.(?=\s|$)")
+
+
+def _split_ready_sentences(
+    buffer: str, *, min_chars: int = 8, max_chars: int = 90
+) -> tuple[list[str], str]:
+    """从流式 token 缓冲里切出「已完整」的句子（用于边生成边 TTS）。"""
+    ready: list[str] = []
+    rest = buffer
+    while True:
+        match = _SENT_END_RE.search(rest)
+        if match is None:
+            break
+        end = match.end()
+        sentence = rest[:end].strip()
+        if sentence:
+            ready.append(sentence)
+        rest = rest[end:].lstrip()
+    # 缓冲区过长仍没有标点：主动按逗号/空格切一段，避免一直等不到 TTS
+    while len(rest) > max_chars:
+        cut = rest.rfind(",", 0, max_chars)
+        if cut < min_chars:
+            cut = rest.rfind(" ", 0, max_chars)
+        if cut < min_chars:
+            cut = max_chars
+        piece = rest[:cut].strip()
+        if piece:
+            ready.append(piece)
+        rest = rest[cut:].lstrip()
+    return ready, rest
+
+
+def _combine_wavs(paths: list[str], out_path: str) -> tuple[str, int]:
+    """把多句 wav 拼成一条（给聊天记录回放/持久化用）。"""
+    if not paths:
+        raise ValueError("没有音频可拼接")
+    if len(paths) == 1:
+        with wave.open(paths[0], "rb") as src:
+            frames = src.readframes(src.getnframes())
+            params = src.getparams()
+        with wave.open(out_path, "wb") as dst:
+            dst.setparams(params)
+            dst.writeframes(frames)
+        return out_path, int(len(frames) / max(1, params.framerate * params.sampwidth) * 1000)
+    params = None
+    frames = bytearray()
+    for path in paths:
+        with wave.open(path, "rb") as src:
+            if params is None:
+                params = src.getparams()
+            frames += src.readframes(src.getnframes())
+    assert params is not None
+    with wave.open(out_path, "wb") as dst:
+        dst.setparams(params)
+        dst.writeframes(bytes(frames))
+    duration_ms = int(len(frames) / max(1, params.framerate * params.sampwidth) * 1000)
+    return out_path, duration_ms
+
+
 def _clean_reply(text: str) -> str:
     text = _MARKDOWN_RE.sub("", text or "")
     text = re.sub(r"\s+", " ", text).strip().strip('"')
@@ -333,6 +394,224 @@ class ChatService:
             friend, text, msg_type="text", context=context,
             stt_meta={"backend": "text", "latency_ms": 0.0},
         )
+
+    # ------------------------------------------------------------------ #
+    # 语音通话（流式：边生成边按句 TTS）
+    # ------------------------------------------------------------------ #
+    async def _synth_sentence(self, text: str, friend: dict) -> dict | None:
+        """为一句话合成 TTS，返回 {path,url,duration_ms}；失败返回 None。"""
+        clean = _strip_emoji(text)
+        if not clean or self.voice is None or self.audio is None:
+            return None
+        try:
+            path, duration_ms = await self.voice.synth_to_wav(
+                clean,
+                friend.get("voice_id") or "en-GB-RyanNeural",
+                rate=friend.get("voice_rate") or "+0%",
+                pitch=friend.get("voice_pitch") or "+0Hz",
+                out_dir=self.audio.audio_dir,
+            )
+        except Exception as exc:  # noqa: BLE001 - 单句 TTS 失败不阻断通话
+            log.warning("通话单句 TTS 失败（%s: %s）", type(exc).__name__, exc)
+            return None
+        return {
+            "path": path,
+            "url": f"/api/v2/audio/{os.path.basename(path)}",
+            "duration_ms": int(duration_ms or 0),
+        }
+
+    async def handle_call_turn_stream(
+        self,
+        friend_id: str,
+        audio_bytes: bytes,
+        filename: str,
+        duration_ms: int = 0,
+    ):
+        """通话回合流式生成器：STT → LLM 流式 → 按句 TTS → done。
+
+        事件（NDJSON）：
+        - {"type":"transcript","text":...,"stt":{...}}
+        - {"type":"sentence","index":0,"text":"...","audio_url":"/api/v2/audio/x.wav"}
+        - {"type":"done","user_message":...,"friend_message":...,
+           "closeness_level":...,"total_turns":...,"reply_language":...}
+        - {"type":"error","message":"..."}
+        """
+        friend = await asyncio.to_thread(self.db.get_friend, friend_id)
+        if friend is None:
+            yield {"type": "error", "message": "好友不存在"}
+            return
+        if self.audio is None:
+            yield {"type": "error", "message": "音频服务未初始化"}
+            return
+
+        try:
+            decoded = await asyncio.to_thread(
+                self.audio.decode_upload, audio_bytes, filename
+            )
+        except ValueError as exc:
+            yield {"type": "error", "message": str(exc)}
+            return
+
+        lang = _language_of(friend)
+        stt_language = None if lang == "en" else lang
+        transcript, stt_meta = await self._transcribe(
+            decoded["pcm16"], language=stt_language, prefer_local=True
+        )
+        if not transcript:
+            transcript = "（语音没有识别清楚，可以再说一次吗？）"
+        yield {"type": "transcript", "text": transcript, "stt": stt_meta}
+
+        history = await asyncio.to_thread(self.db.recent_messages, friend_id, 10)
+        user_msg = await asyncio.to_thread(
+            self.db.add_message,
+            friend_id,
+            "user",
+            transcript,
+            msg_type="voice",
+            audio_path=decoded["audio_filename"],
+            duration_ms=int(decoded["duration_ms"] or duration_ms or 0),
+            is_read=True,
+        )
+        friend = await asyncio.to_thread(self.db.add_turns, friend_id, 1)
+        total_turns = await asyncio.to_thread(self.db.count_turns, friend_id)
+        level = social.closeness_level(total_turns)
+        friend = await asyncio.to_thread(
+            self.db.update_friend,
+            friend_id,
+            closeness_level=level,
+            total_turns=total_turns,
+            last_interaction_at=_now_iso(),
+        )
+        # 通话专用紧凑 prompt：不拼长记忆/表达本，减少 TTFT 与 token 数
+        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())[:700]
+        call_lang = _language_of(friend)
+        call_lang_name = LANGUAGE_NAMES[call_lang]
+        call_hint = (
+            f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
+            f"{friend.get('nationality', '')}, on a LIVE voice call with your friend. "
+            f"Reply ONLY in natural {call_lang_name}, in ONE short spoken sentence "
+            "(max ~18 words), directly to what they just said. No greeting, no filler, "
+            "no markdown, no stage directions. You may add at most one emoji."
+        )
+        system_prompt = "\n\n".join(p for p in (persona, call_hint) if p)
+        messages: list[Any] = [{"role": "system", "content": system_prompt}]
+        for item in history[-4:]:
+            # 通话历史里不要把「通话摘要」当对话内容喂回模型（否则可能被模仿/复读）
+            if item.get("msg_type") == "call_summary":
+                continue
+            role = "user" if item.get("sender") == "user" else "assistant"
+            content = (item.get("transcript") or "").strip()
+            if content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": transcript})
+
+        full_text = ""
+        buffer = ""
+        audio_paths: list[str] = []
+        fallback_used = False
+
+        async def synth_and_event(sentence: str) -> dict | None:
+            event = await self._synth_sentence(sentence, friend)
+            if event is None:
+                return None
+            audio_paths.append(event["path"])
+            return {
+                "type": "sentence",
+                "index": len(audio_paths) - 1,
+                "text": sentence,
+                "audio_url": event["url"],
+            }
+
+        try:
+            async for delta in self.engines.llm.stream_chat(
+                messages, temperature=0.65, max_tokens=70
+            ):
+                if not delta:
+                    continue
+                full_text += delta
+                buffer += delta
+                ready, buffer = _split_ready_sentences(buffer, min_chars=1, max_chars=90)
+                for sentence in ready:
+                    if not audio_paths and not _matches_language(sentence, lang):
+                        # 第一句语言跑偏：整轮改用目标语言模板，避免用户先听到错语言
+                        fallback_used = True
+                        full_text = self._mock_reply(friend, transcript)
+                        event = await synth_and_event(full_text)
+                        if event:
+                            yield event
+                        break
+                    event = await synth_and_event(sentence)
+                    if event:
+                        yield event
+                if fallback_used:
+                    break
+                # 首段音频还没出来时，遇到逗号/分号就先 TTS 一个短 clause，
+                # 让用户更早听到声音（剩余部分继续正常按句合成）。
+                if not audio_paths and not fallback_used:
+                    clause_match = re.search(r"[,;:，；：]", buffer)
+                    if clause_match is not None and clause_match.start() >= 18:
+                        clause = buffer[: clause_match.end()].strip()
+                        if clause and _matches_language(clause, lang):
+                            event = await synth_and_event(clause)
+                            if event:
+                                yield event
+                                buffer = buffer[clause_match.end():].lstrip()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 生成失败降级
+            log.warning("通话流式生成失败（%s: %s），用模板兜底", type(exc).__name__, exc)
+
+        if not fallback_used and buffer.strip():
+            event = await synth_and_event(buffer.strip())
+            if event:
+                yield event
+
+        if not audio_paths:
+            # 完全没有可用音频：用目标语言模板保证通话能继续
+            full_text = self._mock_reply(friend, transcript)
+            event = await synth_and_event(full_text)
+            if event:
+                yield event
+
+        if not full_text.strip():
+            full_text = self._mock_reply(friend, transcript)
+
+        # 拼成一条 wav 供聊天记录回放 + 落库
+        audio_name = ""
+        reply_duration = 0
+        if audio_paths:
+            combined_name = f"call_{int(time.time() * 1000)}_{friend_id[:6]}.wav"
+            combined_path = os.path.join(self.audio.audio_dir, combined_name)
+            try:
+                await asyncio.to_thread(_combine_wavs, audio_paths, combined_path)
+                audio_name = combined_name
+                with wave.open(combined_path, "rb") as wf:
+                    reply_duration = int(wf.getnframes() / wf.getframerate() * 1000)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("通话音频拼接失败（%s），回退首句音频", exc)
+                audio_name = os.path.basename(audio_paths[0])
+                reply_duration = 0
+
+        friend_msg = await asyncio.to_thread(
+            self.db.add_message,
+            friend_id,
+            "friend",
+            _clean_reply(full_text),
+            msg_type="voice",
+            audio_path=audio_name or None,
+            duration_ms=reply_duration,
+            is_read=True,
+        )
+        self._schedule_memory(friend_id)
+        yield {
+            "type": "done",
+            "user_message": user_msg,
+            "friend_message": friend_msg,
+            "closeness_level": level,
+            "total_turns": total_turns,
+            "reply_language": self._reply_language(friend),
+            "stt": stt_meta,
+        }
 
     # ------------------------------------------------------------------ #
     # 图片多模态回合
@@ -562,7 +841,7 @@ class ChatService:
     # STT / LLM / TTS
     # ------------------------------------------------------------------ #
     async def _transcribe(
-        self, pcm16: bytes, *, language: str | None = None
+        self, pcm16: bytes, *, language: str | None = None, prefer_local: bool = False
     ) -> tuple[str, dict[str, Any]]:
         """返回 (文本, STT 元信息)，元信息用于前端展示/排查（backend、latency）。
 
@@ -570,9 +849,11 @@ class ChatService:
         """
         try:
             try:
+                result = await self.engines.stt.transcribe(
+                    pcm16, 16000, language=language, prefer_local=prefer_local
+                )
+            except TypeError:  # 兼容不支持 language/prefer_local 参数的旧 STT 实现
                 result = await self.engines.stt.transcribe(pcm16, 16000, language=language)
-            except TypeError:  # 兼容不支持 language 参数的旧 STT 实现
-                result = await self.engines.stt.transcribe(pcm16, 16000)
             text = (getattr(result, "text", "") or "").strip()
             meta = {
                 "backend": getattr(result, "backend", "unknown"),

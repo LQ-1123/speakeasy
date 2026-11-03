@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import mimetypes
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.llm import runtime_config as llm_runtime
@@ -622,6 +623,110 @@ async def read_messages(request: Request, friend_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # 聊天（异步语音条）
 # --------------------------------------------------------------------------- #
+_CALL_FILLERS: dict[str, str] = {
+    "zh": "嗯嗯，我在听。",
+    "en": "Mm-hmm, I'm listening.",
+    "ja": "うんうん、聞いてるよ。",
+    "ko": "응응, 듣고 있어.",
+    "pt": "Hum, estou ouvindo.",
+    "es": "Mmm, te escucho.",
+    "de": "Mhm, ich höre zu.",
+    "fr": "Hum, je t'écoute.",
+    "it": "Mmm, ti ascolto.",
+}
+
+
+@router.get("/chat/{friend_id}/call/warmup")
+async def call_warmup(request: Request, friend_id: str) -> dict:
+    """通话接通时预生成一句「嗯嗯/我在听」占位语音，用来填住 STT+LLM 的思考间隙。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    lang = str(friend.get("reply_language") or "en").strip().lower()
+    text = _CALL_FILLERS.get(lang) or _CALL_FILLERS["en"]
+    # 后台预热本地 STT 模型，避免第一轮调用才知道模型没加载
+    stt_engine = getattr(services.engines, "stt", None)
+    prewarm = getattr(stt_engine, "prewarm", None)
+    if callable(prewarm):
+        try:
+            services.spawn_bg(prewarm(language=lang))
+        except TypeError:
+            services.spawn_bg(prewarm())
+        except Exception:  # noqa: BLE001 - 预热失败不影响通话
+            pass
+
+    async def _warm_llm() -> None:
+        """通话开始时用 1 token 预热 LLM 连接/冷启动，降低首轮 TTFT。"""
+        llm = services.engines.llm
+        if getattr(llm, "uses_mock", False):
+            return
+        try:
+            async for _ in llm.stream_chat(
+                [{"role": "user", "content": "Hi"}], max_tokens=1, temperature=0.0
+            ):
+                break
+        except Exception as exc:  # noqa: BLE001 - 预热失败不影响通话
+            log.debug("通话 LLM 预热失败: %s", exc)
+
+    services.spawn_bg(_warm_llm())
+    try:
+        path, duration_ms = await services.voice.synth_to_wav(
+            text,
+            friend.get("voice_id") or "en-GB-RyanNeural",
+            rate=friend.get("voice_rate") or "+0%",
+            pitch=friend.get("voice_pitch") or "+0Hz",
+            out_dir=services.audio.audio_dir,
+        )
+    except Exception as exc:  # noqa: BLE001 - 预生成失败不影响通话
+        log.warning("通话占位语音生成失败（%s: %s）", type(exc).__name__, exc)
+        return {"filler_url": None, "text": text}
+    return {
+        "filler_url": f"/api/v2/audio/{os.path.basename(path)}",
+        "text": text,
+        "duration_ms": int(duration_ms or 0),
+    }
+
+
+@router.post("/chat/{friend_id}/call/turn")
+async def call_turn_stream(
+    request: Request,
+    friend_id: str,
+    audio: UploadFile = File(...),
+    duration_ms: int = Form(0),
+) -> StreamingResponse:
+    """通话回合：NDJSON 流式返回 STT 转写 + 逐句语音，降低首字延迟。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    data = await audio.read()
+    filename = audio.filename or "call.webm"
+
+    async def gen():
+        try:
+            async for event in services.chat.handle_call_turn_stream(
+                friend_id, data, filename, duration_ms
+            ):
+                if event.get("type") == "done":
+                    event["user_message"] = _message_public(event.get("user_message"))
+                    event["friend_message"] = _message_public(event.get("friend_message"))
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 流内错误转事件，避免连接直接断
+            log.exception("通话流式回合失败: %s", exc)
+            yield json.dumps(
+                {"type": "error", "message": f"通话生成失败：{exc}"}, ensure_ascii=False
+            ) + "\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/chat/{friend_id}/call/summary")
 async def save_call_summary(
     request: Request, friend_id: str, body: CallSummaryIn

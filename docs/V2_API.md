@@ -71,6 +71,8 @@
 
 | `POST /api/v2/chat/{id}/image` | multipart `image`（JPG/PNG/WebP/GIF，≤8MB）+ `text`（caption 可空）→ 多模态 LLM 结合图片回复（语音条）。`user_message.msg_type="image"`，带 `image_url=/api/v2/media/xxx`。 |
 | `POST /api/v2/chat/{id}/call/summary` | JSON `{duration_s, turns}` → 落一条 `msg_type="call_summary"` 消息（如「📞 语音通话 01:23 · 4 轮对话」）。 |
+| `GET /api/v2/chat/{id}/call/warmup` | 通话接通预热：预生成「嗯嗯，我在听」占位语音（`filler_url`）并后台预热本地 STT/LLM 连接。 |
+| `POST /api/v2/chat/{id}/call/turn` | 通话流式回合（multipart `audio` + `duration_ms`）：`application/x-ndjson` 逐行返回 `transcript` → `sentence`（逐句 `audio_url`）→ `done`；本地 STT 优先、逐句 TTS，首声延迟显著降低。 |
 
 ## 3. 朋友圈
 

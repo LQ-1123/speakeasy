@@ -138,7 +138,7 @@ export function useHandsFreeVad({
         void Promise.resolve(
           onUtteranceRef.current({ blob, durationMs, filename: filenameFor(mime) }),
         ).catch((err: unknown) => {
-          onErrorRef.current?.(err instanceof Error ? err.message : "语音发送失败");
+          onErrorRef.current?.(err instanceof Error ? err.message : "语音没有送达，请再说一次");
         });
       };
       try {

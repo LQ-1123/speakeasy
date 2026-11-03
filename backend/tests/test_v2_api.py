@@ -42,9 +42,13 @@ class FakeSTT:
 
     def __init__(self) -> None:
         self.last_language: str | None = "unset"
+        self.last_prefer_local: bool | None = None
 
-    async def transcribe(self, pcm16: bytes, sample_rate: int = 16000, *, language=None):
+    async def transcribe(
+        self, pcm16: bytes, sample_rate: int = 16000, *, language=None, prefer_local=False
+    ):
         self.last_language = language
+        self.last_prefer_local = prefer_local
         return SimpleNamespace(text="Hi, I really like indie games and coffee.", language="en",
                                latency_ms=1.0, backend="mock")
 
@@ -494,3 +498,40 @@ async def test_user_moment_photo_and_call_summary(client):
     msg = r.json()["message"]
     assert msg["msg_type"] == "call_summary"
     assert "01:23" in msg["transcript"] and "4 轮" in msg["transcript"]
+
+
+# --------------------------------------------------------------------------- #
+# 通话流式回合 / warmup
+# --------------------------------------------------------------------------- #
+async def test_call_stream_turn_events_and_persistence(client):
+    http, services = client
+    friend = await _make_friend(services)
+    events = [
+        event
+        async for event in services.chat.handle_call_turn_stream(
+            friend["id"], _wav_bytes(0.6), "call.wav", 600
+        )
+    ]
+    kinds = [e["type"] for e in events]
+    assert "transcript" in kinds
+    assert "sentence" in kinds
+    assert kinds[-1] == "done"
+    assert services.engines.stt.last_prefer_local is True  # 通话走本地 STT
+    transcript_event = next(e for e in events if e["type"] == "transcript")
+    assert transcript_event["text"].startswith("Hi, I really like")
+    sentence_events = [e for e in events if e["type"] == "sentence"]
+    assert all(e["audio_url"].startswith("/api/v2/audio/") for e in sentence_events)
+    done = events[-1]
+    assert done["friend_message"]["audio_path"]
+    assert done["friend_message"]["msg_type"] == "voice"
+    assert done["total_turns"] >= 1
+
+
+async def test_call_warmup_returns_filler(client):
+    http, services = client
+    friend = await _make_friend(services)
+    r = http.get(f"/api/v2/chat/{friend['id']}/call/warmup")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["filler_url"].startswith("/api/v2/audio/")
+    assert data["text"]

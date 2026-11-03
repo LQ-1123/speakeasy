@@ -409,8 +409,8 @@ class STTEngine:
     # ------------------------------------------------------------------ #
     # 生命周期
     # ------------------------------------------------------------------ #
-    async def prewarm(self) -> None:
-        """懒加载模型（线程池里做）。失败时按契约降级，**不抛**。"""
+    async def prewarm(self, language: str | None = None) -> None:
+        """懒加载模型（线程池里做）。非英语时预加载多语言模型。失败不抛。"""
         if self._closed:
             log.debug("STT prewarm() 在已关闭的引擎上调用，忽略")
             return
@@ -418,7 +418,11 @@ class STTEngine:
             log.info("STT backend=mock，无需加载模型")
             return
         try:
-            await self._ensure_model()
+            lang = str(language or "").strip().lower()
+            if lang and lang not in ("en", "english", "auto"):
+                await self._ensure_multilingual_model()
+            else:
+                await self._ensure_model()
         except Exception as exc:  # pragma: no cover - _ensure_model 内部已兜底
             log.warning("STT 预热失败: %s", exc)
 
@@ -585,6 +589,7 @@ class STTEngine:
         sample_rate: int = SR_IN,
         *,
         language: str | None = None,
+        prefer_local: bool = False,
     ) -> Transcript:
         """把 PCM16 语音转成文本。
 
@@ -618,11 +623,12 @@ class STTEngine:
             sr = SR_IN
         duration = array_duration_s(audio, sr)
 
-        # 云端优先：成功直接返回（backend="sensevoice-siliconflow"）；
+        # 云端优先（延迟敏感的通话场景可 prefer_local 跳过云端，避免网络抖动）；
         # 失败只记 health，继续本地 faster-whisper → mock，绝不抛给上层。
-        cloud_transcript = await self._try_cloud(audio, duration)
-        if cloud_transcript is not None:
-            return cloud_transcript
+        if not prefer_local:
+            cloud_transcript = await self._try_cloud(audio, duration)
+            if cloud_transcript is not None:
+                return cloud_transcript
 
         use_multilingual = bool(
             requested_language and requested_language.lower() not in ("en", "auto", "english")

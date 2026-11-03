@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "_comment": "Zero-shot 口音克隆参考音频索引。用 `python scripts/record_reference.py --persona <id>` 录制后本文件会自动更新。文件缺失时 TTS 会降级到内置 tone 后端，链路不受影响。详见 assets/ref_audio/README.md",
+  "voices": {
+    "oliver": {
+      "file": "oliver_rp.wav",
+      "ref_text": "Right then, that's a flat white for you, and a pastry on the side. Cheers, guv, that's spot on.",
+      "accent": "British RP",
+      "duration_s": null,
+      "sample_rate": 16000,
+      "source": "self-recorded",
+      "speed": 1.0,
+      "notes": "需要自己录制：python scripts/record_reference.py --persona oliver"
+    },
+    "raj": {
+      "file": "raj_indian.wav",
+      "ref_text": "Actually, one small thing only — can we do it by this Friday itself? Then we can prepone the release, yes.",
+      "accent": "Indian English",
+      "duration_s": null,
+      "sample_rate": 16000,
+      "source": "self-recorded",
+      "speed": 1.05,
+      "notes": "需要自己录制：python scripts/record_reference.py --persona raj"
+    },
+    "marco": {
+      "file": "marco_italian.wav",
+      "ref_text": "Ah, listen — the colour, it is too much, no? But the shape, the shape is beautiful. Dai, let's try again.",
+      "accent": "Italian English",
+      "duration_s": null,
+      "sample_rate": 16000,
+      "source": "self-recorded",
+      "speed": 0.98,
+      "notes": "需要自己录制：python scripts/record_reference.py --persona marco"
+    },
+    "emily": {
+      "file": "emily_us.wav",
+      "ref_text": "Okay, so tell me a little about yourself, and why this role, why now.",
+      "accent": "American English",
+      "duration_s": null,
+      "sample_rate": 16000,
+      "source": "self-recorded",
+      "speed": 1.02,
+      "notes": "需要自己录制：python scripts/record_reference.py --persona emily"
+    },
+    "priya": {
+      "file": "priya_sg.wav",
+      "ref_text": "Can, can. But ah, this one must confirm with the regional team first, okay?",
+      "accent": "Singapore English",
+      "duration_s": null,
+      "sample_rate": 16000,
+      "source": "self-recorded",
+      "speed": 1.06,
+      "notes": "需要自己录制：python scripts/record_reference.py --persona priya"
+    }
+  }
+}

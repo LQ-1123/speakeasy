@@ -1,0 +1,46 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 配置与密钥
+.env
+!.env.example
+
+# 模型权重（体积巨大，不入库）
+pretrained_models/
+third_party/
+models/
+*.pt
+*.safetensors
+*.onnx
+*.bin
+
+# 用户录制的参考音频（涉及声音权，不入库）
+assets/ref_audio/*.wav
+assets/ref_audio/*.mp3
+assets/ref_audio/*.flac
+
+# 前端
+node_modules/
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# 运行时
+data/*
+!data/.gitkeep
+*.log
+.DS_Store
+Thumbs.db
+
+# 口音验收用的原始人声样本（涉及声音权，不入库）
+试听对比/
+
+
+# v2 local model cache
+.cache/

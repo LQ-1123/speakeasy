@@ -1,0 +1,65 @@
+# =============================================================================
+# 可选语音后端依赖（按需安装，不要一次全装）
+# =============================================================================
+# 说明：
+#   - 核心后端（backend/requirements.txt）已包含 VAD + STT。
+#   - 本文件只放 **TTS 克隆引擎**，二选一即可。
+#   - 两个都很大（含 torch 生态、几十个包），且都和特定 torch/torchaudio 版本绑定。
+#   - 没装也不会崩：TTSEngine 会自动降级到内置 `tone` 后端（可听但不自然），
+#     用于在没有模型时跑通端到端链路与延迟测试。
+#
+# 安装前先确保：pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 方案 A：CosyVoice 2（阿里，0.5B，中文/英文 zero-shot 克隆效果好）
+# 推荐给 16GB 显存：0.5B 模型 FP16 约占 3-4GB，可与其他进程共存。
+# 官方仓库未发布到 PyPI，必须 clone：
+#   git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git third_party/CosyVoice
+#   (国内可用 https://gitee.com/mirrors_FunAudioLLM/CosyVoice 或 hf-mirror)
+# 模型权重：
+#   python scripts/download_models.py --tts cosyvoice2
+# 然后安装其依赖（官方仓库自带 requirements.txt）：
+#   pip install -r third_party/CosyVoice/requirements.txt
+# 注意：官方 requirements 会装 x-transformers / WeTextProcessing / pynini 等，
+#       pynini 在 Windows 上**编译困难**，见 docs/SETUP_GPU.md 的 Windows 说明。
+# ---------------------------------------------------------------------------
+# matcha-tts
+# conformer
+# diffusers
+# hydra-core
+# HyperPyYAML
+# inflect
+# librosa
+# onnxruntime-gpu
+# openai-whisper
+# wetext
+# pyworld
+# x-transformers
+
+# ---------------------------------------------------------------------------
+# 方案 B：F5-TTS（纯 Flow Matching，Windows 友好，无需 pynini/WeTextProcessing）
+# **Windows 用户首选**。体积小于 CosyVoice 的依赖链，代码更简洁。
+#   git clone https://github.com/SWivid/F5-TTS.git third_party/F5-TTS
+#   pip install -e third_party/F5-TTS
+# 模型权重（首次运行自动从 HF 下载，或预下载）：
+#   python scripts/download_models.py --tts f5tts
+# ---------------------------------------------------------------------------
+# f5-tts
+# vocos
+# bitsandbytes
+# accelerate
+# transformers
+# torchdiffeq
+# ema-pytorch
+# x-transformers
+# g2p-en
+# jieba
+
+# ---------------------------------------------------------------------------
+# 音频 I/O 增强（可选）
+# ---------------------------------------------------------------------------
+# soundfile 已在主 requirements；如用 mp3 参考音频，需要系统 ffmpeg：
+#   winget install Gyan.FFmpeg
+# 或下载 https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+# 解压后把 bin 目录加进 PATH。

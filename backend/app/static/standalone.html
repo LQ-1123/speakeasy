@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SpeakEasy · 零依赖测试页</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151d;
+    --line: #232833;
+    --text: #e7ecf3;
+    --muted: #8b95a7;
+    --accent: #f5a524;
+    --green: #3ddc97;
+    --red: #f4687a;
+    --blue: #5aa9ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 18px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #12151d, #0e1118);
+    flex-shrink: 0;
+  }
+  .brand { font-weight: 650; letter-spacing: .04em; font-size: 15px; }
+  .brand span { color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4a5162; display: inline-block; transition: .25s; }
+  .dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .dot.wait { background: var(--accent); animation: pulse 1s infinite; }
+  .dot.err { background: var(--red); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .status { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .spacer { flex: 1; }
+  .metric {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px;
+  }
+  .metric b { color: var(--accent); font-weight: 600; }
+
+  main { flex: 1; display: grid; grid-template-columns: 220px 1fr 300px; min-height: 0; }
+  @media (max-width: 1100px) { main { grid-template-columns: 180px 1fr; } .right { display: none; } }
+
+  .col { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .col:last-child { border-right: none; }
+  .col-head {
+    padding: 10px 14px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+
+  /* ---- 角色列表 ---- */
+  .personas { overflow-y: auto; padding: 8px; }
+  .persona {
+    padding: 9px 11px; border-radius: 7px; cursor: pointer; margin-bottom: 4px;
+    border: 1px solid transparent; transition: .15s;
+  }
+  .persona:hover { background: #171b25; }
+  .persona.active { background: #1b2130; border-color: var(--accent); }
+  .persona .pname { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .persona .pmeta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .modes { padding: 8px; border-top: 1px solid var(--line); }
+  .mode {
+    display: inline-block; font-size: 11px; padding: 4px 9px; border-radius: 20px;
+    border: 1px solid var(--line); color: var(--muted); cursor: pointer; margin: 2px 3px 2px 0;
+  }
+  .mode.active { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- 对话 ---- */
+  .chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 78%; padding: 9px 13px; border-radius: 12px; font-size: 14px; line-height: 1.55; }
+  .msg.user { align-self: flex-end; background: #1e2a3d; border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: #171b25; border-bottom-left-radius: 4px; }
+  .msg .t { font-size: 10px; color: var(--muted); margin-bottom: 3px; font-family: var(--mono); }
+  .msg.system { align-self: center; background: none; color: var(--muted); font-size: 12px; font-style: italic; }
+  .msg.speaking { box-shadow: inset 0 0 0 1px var(--accent); }
+
+  /* ---- 底部控制 ---- */
+  .controls { border-top: 1px solid var(--line); padding: 12px 16px; flex-shrink: 0; background: #0e1118; }
+  canvas { width: 100%; display: block; }
+  #waveUp { height: 60px; }
+  #waveDown { height: 34px; margin-top: 4px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  button {
+    background: #1b2130; color: var(--text); border: 1px solid var(--line);
+    padding: 8px 16px; border-radius: 7px; font-size: 13px; cursor: pointer; transition: .15s;
+    font-family: inherit;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #1a1205; border-color: var(--accent); font-weight: 600; }
+  button.rec { background: var(--red); color: #fff; border-color: var(--red); }
+  button.ghost { background: none; }
+  input[type=text] {
+    flex: 1; background: #12151d; border: 1px solid var(--line); color: var(--text);
+    padding: 8px 12px; border-radius: 7px; font-size: 13px; font-family: inherit; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+
+  /* ---- 建议 ---- */
+  .right { overflow-y: auto; }
+  .sugg {
+    margin: 8px 10px; padding: 10px 12px; border-radius: 8px;
+    background: #12151d; border-left: 2px solid var(--green); font-size: 12.5px;
+    animation: slideIn .25s ease;
+  }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(8px); } }
+  .sugg .orig { color: var(--red); text-decoration: line-through; text-decoration-thickness: 1px; opacity: .8; }
+  .sugg .better { color: var(--green); font-weight: 600; margin: 5px 0; display: block; }
+  .sugg .why { color: var(--muted); line-height: 1.5; }
+  .sugg .reg {
+    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    background: #1b2130; color: var(--blue); margin-top: 6px; font-family: var(--mono);
+  }
+  .empty { color: var(--muted); font-size: 12px; padding: 16px; text-align: center; line-height: 1.7; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--red); color: #fff; padding: 9px 18px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: .25s; pointer-events: none; z-index: 99;
+  }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--green); color: #04220f; }
+  .banner {
+    background: #1e2a3d; border: 1px solid var(--blue); color: #cfe3ff;
+    padding: 8px 14px; font-size: 12px; display: none;
+  }
+  .banner.show { display: block; }
+
+  /* ---- LLM 设置面板 ---- */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.66); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; z-index: 200; padding: 20px;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    width: min(640px, 100%); max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,.6);
+  }
+  .modal-head {
+    display: flex; align-items: center; gap: 10px; padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .modal-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+  .modal-head .x {
+    margin-left: auto; background: none; border: none; color: var(--muted);
+    font-size: 22px; cursor: pointer; padding: 0 6px; line-height: 1;
+  }
+  .modal-head .x:hover { color: var(--text); }
+  .modal-body { padding: 18px 20px; }
+  .modal-foot {
+    padding: 14px 20px; border-top: 1px solid var(--line);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .field input, .field select {
+    width: 100%; background: #0d1017; border: 1px solid var(--line); color: var(--text);
+    padding: 9px 12px; border-radius: 7px; font-size: 13px; font-family: var(--mono); outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+  .field .hint code { background: #1b2130; padding: 1px 4px; border-radius: 3px; }
+  .keyrow { display: flex; gap: 8px; }
+  .keyrow input { flex: 1; }
+  .status-box {
+    padding: 10px 12px; border-radius: 7px; font-size: 12.5px; line-height: 1.55;
+    margin-bottom: 14px; display: none; white-space: pre-wrap; word-break: break-word;
+  }
+  .status-box.show { display: block; }
+  .status-box.ok { background: rgba(61,220,151,.12); border: 1px solid var(--green); color: #a9f5cd; }
+  .status-box.err { background: rgba(244,104,122,.12); border: 1px solid var(--red); color: #ffc4cc; }
+  .status-box.info { background: rgba(90,169,255,.10); border: 1px solid var(--blue); color: #cfe3ff; }
+  .badge-set {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: rgba(61,220,151,.16); color: var(--green); margin-left: 6px;
+  }
+  .badge-unset {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: rgba(244,104,122,.16); color: var(--red); margin-left: 6px;
+  }
+  .gear { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 6px; padding: 4px 9px; font-size: 12px; }
+  .gear:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="connDot"></span>
+  <div class="brand">Speak<span>Easy</span></div>
+  <div class="status" id="statusText">未连接</div>
+  <div class="spacer"></div>
+  <div class="metric">首音 <b id="mFirst">—</b> ms</div>
+  <div class="metric">STT <b id="mStt">—</b> ms</div>
+  <div class="metric">TTFT <b id="mTtft">—</b> ms</div>
+  <div class="metric">丢帧 <b id="mDrops">0</b></div>
+  <button class="gear" id="btnSettings" title="LLM 设置">⚙ 模型设置</button>
+</header>
+
+<div class="banner" id="banner"></div>
+
+<!-- LLM 设置面板 -->
+<div class="modal-mask" id="llmMask">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>文本模型设置</h2>
+      <button class="x" id="llmClose">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="status-box" id="llmStatus"></div>
+
+      <div class="field">
+        <label>快速预设</label>
+        <select id="llmPreset">
+          <option value="">— 选择供应商（自动填 base_url 与模型名）—</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Base URL（OpenAI 兼容端点）</label>
+        <input type="text" id="llmBaseUrl" placeholder="https://api.deepseek.com/v1" spellcheck="false" />
+        <div class="hint">
+          必须包含 <code>/v1</code>（或供应商要求的版本路径）。例：<code>https://api.deepseek.com/v1</code>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>API Key <span id="llmKeyBadge"></span></label>
+        <div class="keyrow">
+          <input type="password" id="llmApiKey" placeholder="粘贴密钥（留空则不修改已保存的）" spellcheck="false" autocomplete="off" />
+          <button id="llmClearKey" title="清除已保存的密钥">清除</button>
+        </div>
+        <div class="hint">
+          只保存在本机 <code>data/llm_config.json</code>，接口永不回传明文。本地 Ollama 可留空。
+        </div>
+      </div>
+
+      <div class="field">
+        <label>模型名</label>
+        <input type="text" id="llmModel" placeholder="deepseek-chat" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <label>温度（可选，0=稳定 / 1=灵活）</label>
+        <input type="number" id="llmTemp" min="0" max="2" step="0.05" placeholder="默认 0.85" />
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button id="llmTest">测试连接</button>
+      <button class="primary" id="llmSave">保存并启用</button>
+      <button class="ghost" id="llmReset" title="删除运行时配置，回到 .env">还原 .env</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="col">
+    <div class="col-head">对话伙伴</div>
+    <div class="personas" id="personaList"></div>
+    <div class="modes" id="modeList"></div>
+  </div>
+
+  <div class="col">
+    <div class="col-head" id="chatTitle">对话</div>
+    <div class="chat" id="chat"></div>
+    <div class="controls">
+      <canvas id="waveUp"></canvas>
+      <canvas id="waveDown"></canvas>
+      <div class="row">
+        <button id="btnConnect" class="primary">连接</button>
+        <button id="btnRec" disabled>🎤 按住说话</button>
+        <button id="btnStop" class="ghost" disabled>停止</button>
+        <button id="btnInterrupt" class="ghost" disabled>打断</button>
+      </div>
+      <div class="row">
+        <input type="text" id="textInput" placeholder="没麦克风？直接打字测试（英文）…" disabled />
+        <button id="btnSend" disabled>发送</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col right">
+    <div class="col-head">地道润色建议</div>
+    <div id="suggestions"><div class="empty">对话后这里会出现<br>针对你句子的地道表达建议</div></div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+// ============================ 常量 ============================
+const IN_SR = 16000;      // 上行采样率（协议硬约束）
+const OUT_SR = 24000;     // 下行采样率（后端 TTS 输出）
+const FRAME_MS = 20;      // 每帧时长
+const FRAME_SAMPLES = IN_SR * FRAME_MS / 1000;   // 320
+
+const FALLBACK_PERSONAS = [
+  { id: "oliver", name: "Oliver", title: "伦敦独立咖啡师", accent_short: "British RP", flag: "🇬🇧", difficulty: "easy", city: "London" },
+  { id: "raj",    name: "Raj",    title: "班加罗尔软件工程师", accent_short: "Indian English", flag: "🇮🇳", difficulty: "medium", city: "Bengaluru" },
+  { id: "marco",  name: "Marco",  title: "罗马平面设计师", accent_short: "Italian English", flag: "🇮🇹", difficulty: "hard", city: "Rome" },
+  { id: "emily",  name: "Emily",  title: "纽约招聘官", accent_short: "American English", flag: "🇺🇸", difficulty: "medium", city: "New York" },
+  { id: "priya",  name: "Priya",  title: "新加坡产品经理", accent_short: "Singapore English", flag: "🇸🇬", difficulty: "hard", city: "Singapore" },
+];
+const FALLBACK_MODES = [
+  { id: "free", name: "自由闲聊" },
+  { id: "task", name: "任务达成" },
+  { id: "drill", name: "表达特训" },
+];
+
+// ============================ 状态 ============================
+const S = {
+  ws: null,
+  connected: false,
+  personaId: "oliver",
+  modeId: "free",
+  sessionId: null,
+  recording: false,
+  // 播放
+  playCtx: null,
+  playHead: 0,
+  nextSeq: 0,
+  dropped: 0,
+  activeSources: new Set(),
+  speaking: false,
+  // 当前 assistant 正在积累的文本
+  currentTurn: null,
+  // 录音
+  recCtx: null,
+  recStream: null,
+  recNode: null,
+  recAnalyser: null,
+  playAnalyser: null,
+};
+
+// ============================ DOM ============================
+const $ = (id) => document.getElementById(id);
+const el = {
+  connDot: $("connDot"), statusText: $("statusText"),
+  personaList: $("personaList"), modeList: $("modeList"),
+  chat: $("chat"), chatTitle: $("chatTitle"),
+  suggestions: $("suggestions"),
+  btnConnect: $("btnConnect"), btnRec: $("btnRec"), btnStop: $("btnStop"),
+  btnInterrupt: $("btnInterrupt"), btnSend: $("btnSend"), textInput: $("textInput"),
+  waveUp: $("waveUp"), waveDown: $("waveDown"),
+  mFirst: $("mFirst"), mStt: $("mStt"), mTtft: $("mTtft"), mDrops: $("mDrops"),
+  toast: $("toast"), banner: $("banner"),
+};
+
+// ============================ 工具 ============================
+function toast(msg, ms = 2600) {
+  el.toast.textContent = msg;
+  el.toast.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.toast.classList.remove("show"), ms);
+}
+
+function setStatus(text, state) {
+  el.statusText.textContent = text;
+  el.connDot.className = "dot" + (state === "on" ? " on" : state === "wait" ? " wait" : state === "err" ? " err" : "");
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToB64(bytes) {
+  let bin = "";
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+
+/** Int16 LE bytes → Float32Array (-1..1) */
+function pcm16ToFloat32(bytes) {
+  // 保证 2 字节对齐
+  const n = bytes.byteLength >> 1;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, n * 2);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = dv.getInt16(i * 2, true) / 32768;
+  return out;
+}
+
+// ============================ 波形 ============================
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  cv.width = Math.max(1, Math.floor(rect.width * dpr));
+  cv.height = Math.max(1, Math.floor(rect.height * dpr));
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+const waveUpState = { peaks: new Float32Array(0) };
+const waveDownState = { peaks: new Float32Array(0) };
+const MAX_BARS = 120;
+
+function drawWave(cv, peaks, color, idle) {
+  const { ctx, w, h } = setupCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const mid = h / 2;
+  // 中线
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+
+  const n = peaks.length;
+  if (n === 0) return;
+  const barW = Math.max(1.5, w / MAX_BARS - 2);
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color);
+  grad.addColorStop(0.5, color);
+  grad.addColorStop(1, color);
+  ctx.fillStyle = grad;
+
+  for (let i = 0; i < n; i++) {
+    const x = (i / MAX_BARS) * w;
+    const a = Math.max(0.012, peaks[i]);
+    const hh = Math.max(1, a * mid * 1.9);
+    ctx.globalAlpha = idle ? 0.25 : 0.9;
+    ctx.fillRect(x, mid - hh, barW, hh * 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function pushPeak(state, v) {
+  const p = state.peaks;
+  const next = new Float32Array(Math.min(MAX_BARS, p.length + 1));
+  const off = Math.max(0, p.length + 1 - MAX_BARS);
+  next.set(p.subarray(off));
+  next[next.length - 1] = v;
+  state.peaks = next;
+}
+
+function rmsOf(buf) {
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) { const v = buf[i]; s += v * v; }
+  return Math.sqrt(s / buf.length);
+}
+
+// ============================ WebSocket ============================
+function wsURL() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/ws`;
+}
+
+function connect() {
+  if (S.ws) { try { S.ws.close(); } catch (_) {} }
+  setStatus("连接中…", "wait");
+  el.btnConnect.disabled = true;
+
+  let ws;
+  try { ws = new WebSocket(wsURL()); }
+  catch (e) { toast("无法创建 WebSocket: " + e.message); setStatus("错误", "err"); el.btnConnect.disabled = false; return; }
+  ws.binaryType = "arraybuffer";
+  S.ws = ws;
+
+  ws.onopen = () => {
+    S.connected = true;
+    setStatus("已连接 · 握手中", "wait");
+    ws.send(JSON.stringify({
+      type: "hello",
+      persona_id: S.personaId,
+      input_sample_rate: IN_SR,
+      mode: S.modeId,
+      client: "standalone",
+      protocol_version: 1,
+    }));
+  };
+
+  ws.onmessage = async (ev) => {
+    if (typeof ev.data !== "string") return;   // 服务端只发 JSON
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (_) { return; }
+    await handleServer(msg);
+  };
+
+  ws.onerror = () => {
+    setStatus("连接错误（后端是否在 " + location.host + " 运行？）", "err");
+  };
+
+  ws.onclose = (ev) => {
+    S.connected = false;
+    S.recording = false;
+    stopRecorder();
+    setStatus(`已断开 (${ev.code})`, ev.code === 1000 ? "" : "err");
+    el.btnConnect.disabled = false;
+    el.btnRec.disabled = true; el.btnStop.disabled = true;
+    el.btnInterrupt.disabled = true; el.btnSend.disabled = true;
+    el.textInput.disabled = true;
+  };
+}
+
+function send(obj) {
+  if (!S.connected || !S.ws || S.ws.readyState !== WebSocket.OPEN) return false;
+  S.ws.send(JSON.stringify(obj));
+  return true;
+}
+
+// ============================ 服务端消息 ============================
+async function handleServer(msg) {
+  switch (msg.type) {
+    case "ready": {
+      S.sessionId = msg.session_id;
+      S.personaId = msg.persona_id || S.personaId;
+      S.modeId = msg.mode || S.modeId;
+      setStatus("就绪", "on");
+      el.btnRec.disabled = false;
+      el.textInput.disabled = false;
+      el.btnSend.disabled = false;
+      el.btnInterrupt.disabled = false;
+      el.btnConnect.disabled = false;
+
+      renderPersonas(msg.personas || FALLBACK_PERSONAS);
+      renderModes(msg.modes || FALLBACK_MODES);
+      await initAudio();
+
+      const eng = msg.engines || {};
+      const llm = eng.llm || {};
+      const bits = [
+        `STT: ${eng.stt || "?"}`,
+        `TTS: ${eng.tts || "?"}`,
+        `LLM: ${llm.model || "?"}${llm.configured ? "" : "（未配置，走内置模拟）"}`,
+      ];
+      el.chatTitle.textContent = "对话 · " + bits.join("  |  ");
+      addSystem("已连接。说话的简短英文就会自动送进模型。没麦克风就直接打字。");
+
+      if (!llm.configured) {
+        el.banner.textContent = "⚠️ 未检测到 LLM API Key：回复由本地规则引擎生成，链路与延迟是真实的，内容仅供演示。在 .env 填 LLM_API_KEY 后重启即可接真模型。";
+        el.banner.classList.add("show");
+      }
+      break;
+    }
+    case "vad":
+      if (msg.state === "speech_start") setStatus("你在说话…", "on");
+      else setStatus("识别中…", "wait");
+      break;
+
+    case "user_text":
+      setStatus("就绪", "on");
+      if (msg.text) addMsg("user", msg.text);
+      if (msg.latency && msg.latency.stt_ms != null) el.mStt.textContent = Math.round(msg.latency.stt_ms);
+      break;
+
+    case "assistant_delta": {
+      // 流式拼接当前 assistant 气泡
+      if (!S.currentTurn || S.currentTurn.id !== msg.turn_id) {
+        S.currentTurn = { id: msg.turn_id, el: addMsg("assistant", "", true) };
+      }
+      const node = S.currentTurn.el.querySelector(".body");
+      node.dataset.raw = (node.dataset.raw || "") + msg.text;
+      node.textContent = node.dataset.raw;
+      scrollChat();
+      break;
+    }
+    case "assistant_sentence":
+      break;
+
+    case "audio":
+      await enqueueAudio(msg);
+      break;
+
+    case "turn_audio_end":
+      break;
+
+    case "assistant_done":
+      if (msg.metrics) {
+        if (msg.metrics.first_audio_ms != null) el.mFirst.textContent = Math.round(msg.metrics.first_audio_ms);
+        if (msg.metrics.llm_ttft_ms != null) el.mTtft.textContent = Math.round(msg.metrics.llm_ttft_ms);
+        if (msg.metrics.stt_ms != null) el.mStt.textContent = Math.round(msg.metrics.stt_ms);
+      }
+      setStatus("就绪", "on");
+      break;
+
+    case "suggestion":
+      (msg.items || []).forEach(addSuggestion);
+      break;
+
+    case "mode_changed":
+      S.modeId = msg.mode; renderModes(null, msg.mode);
+      break;
+    case "persona_changed":
+      S.personaId = msg.persona_id; renderPersonas(null, msg.persona_id);
+      break;
+
+    case "error":
+      setStatus("错误", "err");
+      if (msg.code === "unsupported_sample_rate" || msg.fatal) {
+        toast(msg.message || msg.code);
+        return;
+      }
+      toast(`${msg.code}: ${msg.message || ""}`);
+      break;
+
+    case "pong":
+      break;
+
+    default:
+      console.debug("unhandled msg", msg);
+  }
+}
+
+// ============================ 渲染 ============================
+function renderPersonas(list, activeId) {
+  const data = list || null;
+  if (data) renderPersonas._cache = data;
+  const personas = data || renderPersonas._cache || FALLBACK_PERSONAS;
+  const active = activeId || S.personaId;
+  el.personaList.innerHTML = "";
+  personas.forEach((p) => {
+    const d = document.createElement("div");
+    d.className = "persona" + (p.id === active ? " active" : "");
+    const diffColor = { easy: "var(--green)", medium: "var(--accent)", hard: "var(--red)" }[p.difficulty] || "var(--muted)";
+    d.innerHTML =
+      `<div class="pname">${p.flag || "🌍"} ${escapeHtml(p.name)}
+         <span style="margin-left:auto;width:6px;height:6px;border-radius:50%;background:${diffColor}"></span></div>
+       <div class="pmeta">${escapeHtml(p.title || "")}</div>
+       <div class="pmeta" style="color:var(--blue)">${escapeHtml(p.accent_short || "")}</div>`;
+    d.onclick = () => {
+      S.personaId = p.id;
+      renderPersonas(null, p.id);
+      send({ type: "set_persona", persona_id: p.id });
+      addSystem(`切换到 ${p.flag || ""} ${p.name}（${p.accent_short || ""}）`);
+    };
+    el.personaList.appendChild(d);
+  });
+}
+
+function renderModes(list, activeId) {
+  if (list) renderModes._cache = list;
+  const modes = list || renderModes._cache || FALLBACK_MODES;
+  const active = activeId || S.modeId;
+  el.modeList.innerHTML = "";
+  modes.forEach((m) => {
+    const d = document.createElement("span");
+    d.className = "mode" + (m.id === active ? " active" : "");
+    d.textContent = m.name;
+    d.title = m.description || "";
+    d.onclick = () => {
+      S.modeId = m.id;
+      renderModes(null, m.id);
+      send({ type: "set_mode", mode: m.id });
+    };
+    el.modeList.appendChild(d);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function addMsg(role, text, streaming) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  const t = document.createElement("div");
+  t.className = "t";
+  t.textContent = (role === "user" ? "你" : "对话伙伴") + " · " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  const body = document.createElement("div");
+  body.className = "body";
+  body.dataset.raw = text || "";
+  body.textContent = text || "";
+  d.appendChild(t); d.appendChild(body);
+  el.chat.appendChild(d);
+  scrollChat();
+  return d;
+}
+
+function addSystem(text) {
+  const d = document.createElement("div");
+  d.className = "msg system";
+  d.textContent = text;
+  el.chat.appendChild(d);
+  scrollChat();
+}
+
+function scrollChat() { el.chat.scrollTop = el.chat.scrollHeight; }
+
+function addSuggestion(item) {
+  const empty = el.suggestions.querySelector(".empty");
+  if (empty) empty.remove();
+  const d = document.createElement("div");
+  d.className = "sugg";
+  d.innerHTML =
+    `<div class="orig">${escapeHtml(item.original || "")}</div>
+     <span class="better">${escapeHtml(item.better || "")}</span>
+     <div class="why">${escapeHtml(item.why || "")}</div>
+     ${item.register ? `<span class="reg">${escapeHtml(item.register)}</span>` : ""}`;
+  el.suggestions.appendChild(d);
+  el.suggestions.scrollTop = el.suggestions.scrollHeight;
+}
+
+// ============================ 音频：录制 ============================
+const WORKLET_CODE = `
+class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buf = new Float32Array(${FRAME_SAMPLES});
+    this.i = 0;
+    this.inRate = sampleRate;
+    this.ratio = this.inRate / ${IN_SR};
+  }
+  resampleTo16k(input) {
+    // 线性插值重采样（浏览器 AudioContext 若不是 16k 时兜底）
+    if (Math.abs(this.ratio - 1) < 1e-6) return input;
+    const outLen = Math.floor(input.length / this.ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const src = i * this.ratio;
+      const i0 = Math.floor(src), i1 = Math.min(input.length - 1, i0 + 1);
+      const f = src - i0;
+      out[i] = input[i0] * (1 - f) + input[i1] * f;
+    }
+    return out;
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    const data = this.resampleTo16k(ch);
+    for (let k = 0; k < data.length; k++) {
+      this.buf[this.i++] = data[k];
+      if (this.i >= this.buf.length) {
+        const pcm = new Int16Array(this.buf.length);
+        for (let j = 0; j < this.buf.length; j++) {
+          const s = Math.max(-1, Math.min(1, this.buf[j]));
+          pcm[j] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        this.port.postMessage(pcm.buffer, [pcm.buffer]);
+        this.buf = new Float32Array(${FRAME_SAMPLES});
+        this.i = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("pcm-processor", PCMProcessor);
+`;
+
+async function initAudio() {
+  if (S.playCtx) return;
+  try {
+    S.playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUT_SR });
+    if (S.playCtx.state === "suspended") await S.playCtx.resume();
+    S.playHead = S.playCtx.currentTime;
+    S.playAnalyser = S.playCtx.createAnalyser();
+    S.playAnalyser.fftSize = 1024;
+    S.playAnalyser.connect(S.playCtx.destination);
+  } catch (e) {
+    console.error("播放 AudioContext 初始化失败", e);
+    toast("音频初始化失败: " + e.message);
+  }
+  requestAnimationFrame(loopWave);
+}
+
+async function startRecording() {
+  if (S.recording) return;
+  if (!S.connected) { toast("请先连接后端"); return; }
+  await initAudio();
+
+  try {
+    S.recStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (e) {
+    toast("无法获取麦克风: " + e.message + "（可用下方文字输入）");
+    return;
+  }
+
+  // 优先 16k，不支持则用默认采样率 + worklet 内重采样
+  let ctx;
+  try { ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: IN_SR }); }
+  catch (_) { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+  S.recCtx = ctx;
+  if (ctx.state === "suspended") await ctx.resume();
+
+  const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+  await ctx.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  const src = ctx.createMediaStreamSource(S.recStream);
+  const node = new AudioWorkletNode(ctx, "pcm-processor");
+  S.recNode = node;
+
+  node.port.onmessage = (ev) => {
+    if (!S.recording) return;
+    if (!S.connected || !S.ws || S.ws.readyState !== WebSocket.OPEN) return;
+    S.ws.send(ev.data);            // 二进制帧：PCM16LE @16kHz
+  };
+
+  // 波形分析
+  const an = ctx.createAnalyser();
+  an.fftSize = 1024;
+  src.connect(an);
+  S.recAnalyser = an;
+
+  // 不把麦克风接到 destination（避免回声）；但要保证节点被拉起来
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  node.connect(mute);
+  mute.connect(ctx.destination);
+  src.connect(node);
+
+  S.recording = true;
+  el.btnRec.classList.add("rec");
+  el.btnRec.textContent = "● 录音中（松开发送）";
+  el.btnStop.disabled = false;
+  setStatus("录音中…", "on");
+}
+
+function stopRecorder() {
+  try { if (S.recNode) { S.recNode.port.onmessage = null; S.recNode.disconnect(); } } catch (_) {}
+  try { if (S.recStream) S.recStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  try { if (S.recCtx && S.recCtx.state !== "closed") S.recCtx.close(); } catch (_) {}
+  S.recNode = null; S.recStream = null; S.recCtx = null; S.recAnalyser = null;
+}
+
+function endRecording() {
+  if (!S.recording) return;
+  S.recording = false;
+  el.btnRec.classList.remove("rec");
+  el.btnRec.textContent = "🎤 按住说话";
+  el.btnStop.disabled = true;
+  stopRecorder();
+  send({ type: "audio_end" });
+  setStatus("识别中…", "wait");
+}
+
+// ============================ 音频：播放 ============================
+async function enqueueAudio(msg) {
+  if (!S.playCtx) await initAudio();
+  if (!S.playCtx) return;
+  const ctx = S.playCtx;
+
+  // 丢帧检测
+  if (msg.seq != null) {
+    if (msg.seq > S.nextSeq) {
+      S.dropped += msg.seq - S.nextSeq;
+      el.mDrops.textContent = S.dropped;
+    }
+    S.nextSeq = Math.max(S.nextSeq, msg.seq + 1);
+  }
+
+  if (!msg.data) return;
+  let bytes;
+  try { bytes = b64ToBytes(msg.data); } catch (e) { return; }
+  const f32 = pcm16ToFloat32(bytes);
+  if (f32.length === 0) return;
+
+  const sr = msg.sample_rate || OUT_SR;
+  const buf = ctx.createBuffer(1, f32.length, sr);
+  buf.copyToChannel(f32, 0);
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(S.playAnalyser);
+
+  const now = ctx.currentTime;
+  if (S.playHead < now + 0.05) S.playHead = now + 0.08;   // 80ms jitter buffer
+  src.start(S.playHead);
+  S.playHead += buf.duration;
+
+  S.activeSources.add(src);
+  src.onended = () => S.activeSources.delete(src);
+}
+
+function stopPlayback() {
+  for (const s of S.activeSources) { try { s.stop(); } catch (_) {} }
+  S.activeSources.clear();
+  if (S.playCtx) S.playHead = S.playCtx.currentTime;
+  S.nextSeq = 0;
+}
+
+function interrupt() {
+  stopPlayback();
+  send({ type: "interrupt" });
+  setStatus("已打断", "");
+}
+
+// ============================ 波形循环 ============================
+let lastFrame = 0;
+function loopWave(ts) {
+  requestAnimationFrame(loopWave);
+  if (ts - lastFrame < 45) return;    // ~22fps
+  lastFrame = ts;
+
+  // 上行
+  if (S.recAnalyser && S.recording) {
+    const n = S.recAnalyser.fftSize;
+    const arr = new Uint8Array(n);
+    S.recAnalyser.getByteTimeDomainData(arr);
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const v = Math.abs((arr[i] - 128) / 128);
+      if (v > peak) peak = v;
+    }
+    pushPeak(waveUpState, peak);
+    drawWave(el.waveUp, waveUpState.peaks, "#f5a524", false);
+  } else {
+    // 衰减
+    pushPeak(waveUpState, waveUpState.peaks.length ? waveUpState.peaks[waveUpState.peaks.length - 1] * 0.82 : 0);
+    drawWave(el.waveUp, waveUpState.peaks, "#f5a524", true);
+  }
+
+  // 下行
+  if (S.playAnalyser && S.activeSources.size > 0) {
+    const n = S.playAnalyser.fftSize;
+    const arr = new Uint8Array(n);
+    S.playAnalyser.getByteTimeDomainData(arr);
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const v = Math.abs((arr[i] - 128) / 128);
+      if (v > peak) peak = v;
+    }
+    pushPeak(waveDownState, peak);
+    drawWave(el.waveDown, waveDownState.peaks, "#38e0c8", false);
+  } else {
+    pushPeak(waveDownState, waveDownState.peaks.length ? waveDownState.peaks[waveDownState.peaks.length - 1] * 0.82 : 0);
+    drawWave(el.waveDown, waveDownState.peaks, "#38e0c8", true);
+  }
+}
+
+// ============================ LLM 设置面板 ============================
+const LLM = {
+  presets: [],
+  loaded: false,
+  clearKey: false,
+};
+
+function llmStatus(kind, text) {
+  const box = $('llmStatus');
+  box.className = 'status-box show ' + kind;
+  box.textContent = text;
+}
+
+function llmStatusHide() {
+  $('llmStatus').className = 'status-box';
+}
+
+async function openSettings() {
+  $('llmMask').classList.add('show');
+  llmStatusHide();
+  if (!LLM.loaded) await refreshLLMConfig();
+}
+
+function closeSettings() {
+  $('llmMask').classList.remove('show');
+}
+
+async function refreshLLMConfig() {
+  try {
+    const r = await fetch('/api/llm/config', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const c = j.config || {};
+
+    // 预设下拉
+    LLM.presets = j.presets || [];
+    const sel = $('llmPreset');
+    sel.innerHTML = '<option value="">— 选择供应商（自动填 base_url 与模型名）—</option>';
+    LLM.presets.forEach((p, i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = p.name + (p.note ? '  ·  ' + p.note : '');
+      sel.appendChild(o);
+    });
+
+    // 当前值
+    $('llmBaseUrl').value = c.base_url || '';
+    $('llmModel').value = c.model || '';
+    $('llmTemp').value = c.temperature == null ? '' : c.temperature;
+    $('llmApiKey').value = '';
+    LLM.clearKey = false;
+
+    const badge = $('llmKeyBadge');
+    if (c.api_key_set) {
+      badge.className = 'badge-set';
+      badge.textContent = '已设置 ' + (c.api_key_masked || '');
+    } else {
+      badge.className = 'badge-unset';
+      badge.textContent = '未设置';
+    }
+
+    // 状态提示
+    const h = j.health || {};
+    if (h.configured) {
+      llmStatus('ok', `当前已连接：${c.model} @ ${c.base_url}\n配置来源：${c.source === 'file' ? '界面保存' : '.env'}`);
+    } else {
+      llmStatus('info', '当前未配置真实模型，回复由本地规则引擎生成。\n填好 Base URL 与 API Key 后点「保存并启用」即可。');
+    }
+    LLM.loaded = true;
+  } catch (e) {
+    llmStatus('err', '读取配置失败：' + e.message + '\n后端可能未启动。');
+  }
+}
+
+function applyPreset(idx) {
+  const p = LLM.presets[Number(idx)];
+  if (!p) return;
+  if (p.base_url) $('llmBaseUrl').value = p.base_url;
+  if (p.model) $('llmModel').value = p.model;
+  if (p.key_hint) $('llmApiKey').placeholder = '密钥（' + p.key_hint + '）';
+  llmStatus('info', `已填入 ${p.name} 的默认端点与模型。\n填好 API Key 后点「保存并启用」。`);
+}
+
+function collectLLMForm() {
+  const body = {};
+  const base = $('llmBaseUrl').value.trim();
+  const model = $('llmModel').value.trim();
+  const key = $('llmApiKey').value.trim();
+  const temp = $('llmTemp').value.trim();
+
+  if (base) body.base_url = base;
+  if (model) body.model = model;
+  if (temp !== '') body.temperature = Number(temp);
+  if (LLM.clearKey) body.api_key = '__CLEAR__';
+  else if (key) body.api_key = key;
+  return body;
+}
+
+async function testLLM() {
+  const body = {};
+  const base = $('llmBaseUrl').value.trim();
+  const model = $('llmModel').value.trim();
+  const key = $('llmApiKey').value.trim();
+  if (base) body.base_url = base;
+  if (model) body.model = model;
+  if (key) body.api_key = key;
+
+  if (!Object.keys(body).length) {
+    llmStatus('err', '请先填写 Base URL、模型名或 API Key');
+    return;
+  }
+  llmStatus('info', '正在测试连接…');
+  $('llmTest').disabled = true;
+  try {
+    const r = await fetch('/api/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      llmStatus('ok', `✓ 连接成功（${j.latency_ms}ms）\n模型返回：${j.model_reply || '(空)'}`);
+    } else {
+      llmStatus('err', '✗ 连接失败\n' + (j.message || '未知错误'));
+    }
+  } catch (e) {
+    llmStatus('err', '请求失败：' + e.message);
+  } finally {
+    $('llmTest').disabled = false;
+  }
+}
+
+async function saveLLM() {
+  const body = collectLLMForm();
+  if (!Object.keys(body).length) {
+    llmStatus('err', '没有要保存的内容');
+    return;
+  }
+  llmStatus('info', '保存并验证中…');
+  $('llmSave').disabled = true;
+  try {
+    const r = await fetch('/api/llm/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, verify: true }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      llmStatus('ok', '✓ ' + (j.message || '已保存并生效') +
+        (j.verified ? `\n测试耗时 ${j.verified.latency_ms}ms，模型返回：${j.verified.model_reply || '(空)'}` : ''));
+      toast('模型已启用：' + (j.config?.model || ''), 3000);
+      LLM.clearKey = false;
+      $('llmApiKey').value = '';
+      await refreshLLMConfig();
+      await refreshBannerFromConfig();
+    } else {
+      const v = j.verified || {};
+      llmStatus('err', '⚠ ' + (j.message || '保存失败') + (v.message ? '\n' + v.message : ''));
+    }
+  } catch (e) {
+    llmStatus('err', '请求失败：' + e.message);
+  } finally {
+    $('llmSave').disabled = false;
+  }
+}
+
+async function resetLLM() {
+  llmStatus('info', '正在还原…');
+  try {
+    const r = await fetch('/api/llm/reset', { method: 'POST' });
+    const j = await r.json();
+    llmStatus('info', j.message || '已还原');
+    await refreshLLMConfig();
+    await refreshBannerFromConfig();
+  } catch (e) {
+    llmStatus('err', '还原失败：' + e.message);
+  }
+}
+
+async function refreshBannerFromConfig() {
+  try {
+    const r = await fetch('/api/llm/config', { cache: 'no-store' });
+    const j = await r.json();
+    const configured = !!(j.health && j.health.configured);
+    if (configured) {
+      el.banner.classList.remove('show');
+    } else {
+      el.banner.innerHTML = '⚠️ 尚未配置真实文本模型：当前回复由本地规则引擎生成。' +
+        ' <a href="#" id="bannerSetup" style="color:#9cc7ff;text-decoration:underline">点这里填写 Base URL 与 API Key</a>';
+      el.banner.classList.add('show');
+      const a = $('bannerSetup');
+      if (a) a.onclick = (e) => { e.preventDefault(); openSettings(); };
+    }
+  } catch (_) { /* 后端未起，忽略 */ }
+}
+
+// 绑定
+$('btnSettings').onclick = openSettings;
+$('llmClose').onclick = closeSettings;
+$('llmMask').onclick = (e) => { if (e.target === $('llmMask')) closeSettings(); };
+$('llmPreset').onchange = (e) => applyPreset(e.target.value);
+$('llmTest').onclick = testLLM;
+$('llmSave').onclick = saveLLM;
+$('llmReset').onclick = resetLLM;
+$('llmClearKey').onclick = () => {
+  LLM.clearKey = true;
+  $('llmApiKey').value = '';
+  llmStatus('info', '已标记清除密钥。点「保存并启用」后生效。');
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('llmMask').classList.contains('show')) closeSettings();
+});
+
+// ============================ 事件绑定 ============================
+el.btnConnect.onclick = () => {
+  if (S.connected) { try { S.ws.close(1000); } catch (_) {} }
+  else connect();
+  el.btnConnect.textContent = S.connected ? "连接" : "连接";
+};
+
+// 按住说话（鼠标 + 触摸 + 键盘空格）
+el.btnRec.addEventListener("pointerdown", async (e) => { e.preventDefault(); await startRecording(); });
+el.btnRec.addEventListener("pointerup", (e) => { e.preventDefault(); endRecording(); });
+el.btnRec.addEventListener("pointerleave", () => { if (S.recording) endRecording(); });
+el.btnRec.addEventListener("pointercancel", () => { if (S.recording) endRecording(); });
+
+el.btnStop.onclick = () => endRecording();
+el.btnInterrupt.onclick = () => interrupt();
+
+el.btnSend.onclick = sendText;
+el.textInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendText(); });
+
+function sendText() {
+  const v = el.textInput.value.trim();
+  if (!v) return;
+  if (!S.connected) { toast("请先连接后端"); return; }
+  send({ type: "text", text: v });
+  addMsg("user", v);
+  el.textInput.value = "";
+  setStatus("思考中…", "wait");
+}
+
+window.addEventListener("resize", () => {
+  drawWave(el.waveUp, waveUpState.peaks, "#f5a524", true);
+  drawWave(el.waveDown, waveDownState.peaks, "#38e0c8", true);
+});
+
+window.addEventListener("beforeunload", () => {
+  try { if (S.ws) S.ws.close(1000); } catch (_) {}
+  stopRecorder();
+});
+
+// ============================ 启动 ============================
+(async function boot() {
+  renderPersonas(FALLBACK_PERSONAS);
+  renderModes(FALLBACK_MODES);
+  drawWave(el.waveUp, new Float32Array(0), "#f5a524", true);
+  drawWave(el.waveDown, new Float32Array(0), "#38e0c8", true);
+
+  // 尝试从后端拿角色（后端没起也不影响）
+  try {
+    const r = await fetch("/api/personas", { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.personas && j.personas.length) {
+        renderPersonas(j.personas, j.default_persona_id);
+        S.personaId = j.default_persona_id || S.personaId;
+      }
+      if (j.modes && j.modes.length) renderModes(j.modes);
+    }
+  } catch (_) {
+    el.banner.innerHTML = "⚠️ 未能连接后端 /api/personas —— 后端可能还没启动。<br>启动命令：<code style='color:#9cc7ff'>python -m uvicorn app.main:app --app-dir backend --port 8000</code>";
+    el.banner.classList.add("show");
+  }
+
+  // 读 LLM 配置，决定是否显示"未配置"提示条
+  await refreshLLMConfig();
+  await refreshBannerFromConfig();
+
+  // 自动连接（后端在的话）
+  connect();
+})();
+</script>
+</body>
+</html>

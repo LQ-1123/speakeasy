@@ -71,6 +71,12 @@ class STTSettings(BaseModel):
     hotwords: str = ""
     mock_text: str = "I'd like a flat white to go, please."
     mock_latency_ms: int = 60
+    # ---- 云端 STT（SiliconFlow SenseVoiceSmall；可在个人设置里热切换）----
+    provider: str = "auto"                    # auto | local | siliconflow
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    siliconflow_model: str = "FunAudioLLM/SenseVoiceSmall"
+    siliconflow_api_key: str = ""
+    siliconflow_timeout_s: float = 30.0
 
 
 class TTSSettings(BaseModel):
@@ -164,6 +170,12 @@ class Settings(BaseSettings):
     torch_home: str = ""
     data_dir: str = ""
     ref_audio_dir: str = ""
+    # 云端 STT：扁平 env（pydantic-settings 能直接读到；嵌套 STTSettings 字段读不到）
+    stt_provider: str = ""
+    stt_siliconflow_api_key: str = ""
+    stt_siliconflow_base_url: str = ""
+    stt_siliconflow_model: str = ""
+    stt_siliconflow_timeout_s: float | None = None
 
     server: ServerSettings = Field(default_factory=ServerSettings)
     vad: VADSettings = Field(default_factory=VADSettings)
@@ -198,6 +210,17 @@ class Settings(BaseSettings):
                 setattr(self.llm, target, val)
         if os.getenv("API_KEY") and not self.llm.api_key:
             self.llm.api_key = os.environ["API_KEY"]
+        # 云端 STT（.env 扁平项 → STTSettings）
+        if self.stt_provider:
+            self.stt.provider = self.stt_provider
+        if self.stt_siliconflow_api_key:
+            self.stt.siliconflow_api_key = self.stt_siliconflow_api_key
+        if self.stt_siliconflow_base_url:
+            self.stt.siliconflow_base_url = self.stt_siliconflow_base_url
+        if self.stt_siliconflow_model:
+            self.stt.siliconflow_model = self.stt_siliconflow_model
+        if self.stt_siliconflow_timeout_s is not None:
+            self.stt.siliconflow_timeout_s = float(self.stt_siliconflow_timeout_s)
         return self
 
     # ---- 路径 ----

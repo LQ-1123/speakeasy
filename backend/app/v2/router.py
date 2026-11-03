@@ -16,10 +16,17 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.llm import runtime_config as llm_runtime
 from app.logging_utils import get_logger
 from app.v2 import moments as moments_mod
 from app.v2.timeutil import local_date_str, local_state
 from app.v2.voices import load_archetypes
+from app.voice.stt_config import (
+    STT_PRESETS,
+    STTRuntimeConfig,
+    STTConfigStore,
+    verify_config as verify_stt_config,
+)
 
 log = get_logger(__name__)
 
@@ -64,6 +71,29 @@ class MemoryUpdate(BaseModel):
 class FriendMemoryBody(BaseModel):
     shared_episodes: list[str] | None = None
     open_loops: list[dict] | None = None
+
+
+class SttConfigIn(BaseModel):
+    """个人设置：保存 STT 配置（api_key 留空=不改，__CLEAR__=清空）。"""
+
+    provider: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    language: str | None = None
+    timeout_s: float | None = None
+    verify: bool = True
+
+
+class SttTestIn(BaseModel):
+    """只测不存；缺省字段沿用当前配置。"""
+
+    provider: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    language: str | None = None
+    timeout_s: float | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -151,6 +181,167 @@ async def _friend_memory(friend: dict) -> dict:
         "closeness_level": friend.get("closeness_level", 1),
         "total_turns": friend.get("total_turns", 0),
     }
+
+
+# --------------------------------------------------------------------------- #
+# 运行时配置（LLM + STT）——个人设置页
+# --------------------------------------------------------------------------- #
+def _engines_obj(request: Request) -> Any:
+    engines = getattr(request.app.state, "engines", None)
+    if engines is None:
+        raise HTTPException(status_code=503, detail="引擎未初始化")
+    return engines
+
+
+def _llm_config_payload(engines: Any) -> dict:
+    store = getattr(engines, "llm_config", None)
+    if store is None:
+        settings = engines.settings
+        store = llm_runtime.LLMConfigStore(
+            settings.data_path,
+            env_defaults={
+                "base_url": settings.llm.base_url,
+                "api_key": settings.llm.api_key,
+                "model": settings.llm.model,
+                "suggestion_model": settings.llm.suggestion_model,
+                "temperature": settings.llm.temperature,
+                "max_tokens": settings.llm.max_tokens,
+            },
+        )
+        engines.llm_config = store
+    try:
+        health = engines.llm.health()
+    except Exception as exc:  # noqa: BLE001
+        health = {"configured": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"config": store.public(), "health": health, "presets": llm_runtime.PROVIDER_PRESETS}
+
+
+def _get_stt_store(engines: Any) -> STTConfigStore:
+    store = getattr(engines, "stt_config", None)
+    if store is None:
+        settings = getattr(engines, "settings", None)
+        stt = getattr(settings, "stt", None)
+        store = STTConfigStore(
+            getattr(settings, "data_path", "") or "data",
+            env_defaults={
+                "provider": getattr(stt, "provider", "auto"),
+                "base_url": getattr(stt, "siliconflow_base_url", ""),
+                "model": getattr(stt, "siliconflow_model", ""),
+                "api_key": getattr(stt, "siliconflow_api_key", ""),
+                "language": getattr(stt, "language", "en"),
+                "timeout_s": getattr(stt, "siliconflow_timeout_s", 30.0),
+            },
+        )
+        engines.stt_config = store
+    return store
+
+
+def _apply_stt_config(engines: Any, cfg: STTRuntimeConfig) -> None:
+    apply_fn = getattr(engines.stt, "apply_cloud_config", None)
+    if callable(apply_fn):
+        apply_fn(cfg.to_engine_dict())
+
+
+def _stt_health(engines: Any) -> dict:
+    fn = getattr(engines.stt, "cloud_health", None)
+    if callable(fn):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            return {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "enabled": False,
+        "provider": "auto",
+        "configured": False,
+        "backend": getattr(engines.stt, "backend_name", "unknown"),
+        "model": "",
+        "last_error": "STTEngine 未实现 cloud_health",
+        "last_latency_ms": None,
+        "requests": 0,
+        "last_success_at": None,
+    }
+
+
+def _stt_payload(engines: Any) -> dict:
+    store = _get_stt_store(engines)
+    return {
+        "config": store.public(),
+        "health": _stt_health(engines),
+        "presets": STT_PRESETS,
+    }
+
+
+@router.get("/settings")
+async def get_settings(request: Request) -> dict:
+    """个人设置首屏：LLM + STT + TTS 当前状态。"""
+    engines = _engines_obj(request)
+    return {
+        "llm": _llm_config_payload(engines),
+        "stt": _stt_payload(engines),
+        "tts": {"backend": getattr(engines.tts, "backend_name", "unknown")},
+    }
+
+
+@router.get("/settings/stt")
+async def get_stt_settings(request: Request) -> dict:
+    return _stt_payload(_engines_obj(request))
+
+
+@router.post("/settings/stt")
+async def save_stt_settings(request: Request, body: SttConfigIn) -> dict:
+    engines = _engines_obj(request)
+    store = _get_stt_store(engines)
+    changes = body.model_dump(exclude_none=True, exclude={"verify"})
+    try:
+        cfg = await asyncio.to_thread(store.save, **changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await asyncio.to_thread(_apply_stt_config, engines, cfg)
+    verified = None
+    if body.verify:
+        verified = await verify_stt_config(cfg)
+    return {
+        "ok": True,
+        "config": cfg.public(),
+        "health": _stt_health(engines),
+        "verified": verified,
+    }
+
+
+@router.post("/settings/stt/test")
+async def test_stt_settings(request: Request, body: SttTestIn | None = None) -> dict:
+    engines = _engines_obj(request)
+    store = _get_stt_store(engines)
+    body = body or SttTestIn()
+    current = store.config
+    changes: dict[str, Any] = {}
+    for name in ("provider", "base_url", "model", "language", "timeout_s"):
+        value = getattr(body, name)
+        if value is not None and value != "":
+            changes[name] = value
+    if body.api_key:
+        changes["api_key"] = body.api_key
+    merged = {
+        "provider": changes.get("provider", current.provider),
+        "base_url": changes.get("base_url", current.base_url),
+        "model": changes.get("model", current.model),
+        "api_key": changes.get("api_key", current.api_key),
+        "language": changes.get("language", current.language),
+        "timeout_s": changes.get("timeout_s", current.timeout_s),
+    }
+    temp = STTRuntimeConfig(**merged, source="test")
+    if temp.provider not in ("auto", "local", "siliconflow"):
+        raise HTTPException(status_code=422, detail="provider 不合法")
+    return await verify_stt_config(temp)
+
+
+@router.post("/settings/stt/reset")
+async def reset_stt_settings(request: Request) -> dict:
+    engines = _engines_obj(request)
+    store = _get_stt_store(engines)
+    cfg = await asyncio.to_thread(store.reset)
+    await asyncio.to_thread(_apply_stt_config, engines, cfg)
+    return {"config": cfg.public(), "health": _stt_health(engines)}
 
 
 # --------------------------------------------------------------------------- #
@@ -251,10 +442,12 @@ async def bootstrap(request: Request) -> dict:
     payload = await _friends_payload(services)
     profile = await _thread(services.db.get_profile)
     expressions = await _thread(services.db.list_expressions)
+    engines = services.engines
     return {
         "version": V2_VERSION,
         "profile": profile,
-        "llm": services.engines.llm.health(),
+        "llm": engines.llm.health(),
+        "stt": _stt_payload(engines),
         "audio": {"format": "wav", "sample_rate": 24000},
         **payload,
         "stats": {
@@ -666,4 +859,5 @@ async def v2_health(request: Request) -> dict:
         "pending_requests": len([f for f in friends if f.get("status") == "pending_request"]),
         "onboarding": services.onboarding_pending,
         "llm": services.engines.llm.health(),
+        "stt": _stt_payload(services.engines),
     }

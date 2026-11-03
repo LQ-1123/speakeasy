@@ -87,6 +87,18 @@
 | `PUT /api/v2/memories` | `{"nickname","native_language","target_languages","fact_sheet"}` 局部更新；fact_sheet 整体替换（用户手动纠错）。 |
 | `PUT /api/v2/friends/{id}/memory` | `{"shared_episodes": [...], "open_loops": [...]}` 手动修正好友记忆。 |
 
+## 4.5 个人设置（LLM / STT 热配置）
+
+| 方法/路由 | 说明 |
+|---|---|
+| `GET /api/v2/settings` | 聚合 LLM + STT + TTS 当前状态（个人设置首屏）。 |
+| `GET /api/v2/settings/stt` | STT 配置 + health + 预设（本地 Whisper / 硅基流动 SenseVoiceSmall）。 |
+| `POST /api/v2/settings/stt` | 保存并**热生效**：`{provider, base_url, api_key?, model, language?, timeout_s?, verify}`；api_key 留空=不改，`__CLEAR__`=清空。 |
+| `POST /api/v2/settings/stt/test` | 只测不存（缺省用当前配置，api_key 可覆盖）。 |
+| `POST /api/v2/settings/stt/reset` | 删除 `data/stt_config.json`，回到 `.env`/默认。 |
+
+完整字段与降级语义见 [`docs/V2_STT.md`](V2_STT.md)。LLM 配置沿用 1.0 的 `/api/llm/config|test|reset`。
+
 ## 5. 音频
 
 | 方法/路由 | 说明 |

@@ -44,3 +44,6 @@ Thumbs.db
 
 # v2 local model cache
 .cache/
+
+# QA 截图（留在 workspace artifacts/，不入库）
+artifacts/

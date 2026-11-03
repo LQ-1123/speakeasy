@@ -156,7 +156,7 @@ class ChatService:
             raise KeyError(friend_id)
 
         decoded = await asyncio.to_thread(self.audio.decode_upload, audio_bytes, filename)
-        transcript = await self._transcribe(decoded["pcm16"])
+        transcript, stt_meta = await self._transcribe(decoded["pcm16"])
         if not transcript:
             transcript = "（语音没有识别清楚，可以再说一次吗？）"
         dur = int(decoded["duration_ms"] or duration_ms or 0)
@@ -167,6 +167,7 @@ class ChatService:
             audio_filename=decoded["audio_filename"],
             duration_ms=dur,
             context=context,
+            stt_meta=stt_meta,
         )
 
     async def handle_text(
@@ -178,7 +179,10 @@ class ChatService:
         friend = await asyncio.to_thread(self.db.get_friend, friend_id)
         if friend is None:
             raise KeyError(friend_id)
-        return await self._handle_user_text(friend, text, msg_type="text", context=context)
+        return await self._handle_user_text(
+            friend, text, msg_type="text", context=context,
+            stt_meta={"backend": "text", "latency_ms": 0.0},
+        )
 
     # ------------------------------------------------------------------ #
     # 核心回合
@@ -192,6 +196,7 @@ class ChatService:
         audio_filename: str | None = None,
         duration_ms: int = 0,
         context: str | None = None,
+        stt_meta: dict[str, Any] | None = None,
     ) -> dict:
         fid = friend["id"]
         transcript = (transcript or "").strip()
@@ -245,6 +250,7 @@ class ChatService:
             "closeness_level": level,
             "total_turns": total_turns,
             "memory_updated": False,
+            "stt": stt_meta or {"backend": "unknown", "latency_ms": 0.0},
         }
 
     def trigger_memory(self, friend_id: str) -> None:
@@ -258,13 +264,33 @@ class ChatService:
     # ------------------------------------------------------------------ #
     # STT / LLM / TTS
     # ------------------------------------------------------------------ #
-    async def _transcribe(self, pcm16: bytes) -> str:
+    async def _transcribe(self, pcm16: bytes) -> tuple[str, dict[str, Any]]:
+        """返回 (文本, STT 元信息)，元信息用于前端展示/排查（backend、latency）。"""
         try:
             result = await self.engines.stt.transcribe(pcm16, 16000)
-            return (getattr(result, "text", "") or "").strip()
+            text = (getattr(result, "text", "") or "").strip()
+            meta = {
+                "backend": getattr(result, "backend", "unknown"),
+                "latency_ms": round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+            }
+            backend = str(meta.get("backend") or "")
+            if "sensevoice" in backend:
+                health_fn = getattr(self.engines.stt, "cloud_health", None)
+                if callable(health_fn):
+                    try:
+                        model = health_fn().get("model")
+                        if model:
+                            meta["model"] = model
+                    except Exception:  # noqa: BLE001
+                        pass
+            else:
+                local_model = getattr(getattr(self.engines.stt, "cfg", None), "model_size", None)
+                if local_model:
+                    meta["model"] = f"faster-whisper:{local_model}"
+            return text, meta
         except Exception as exc:  # noqa: BLE001
             log.warning("STT 失败（降级为空）: %s: %s", type(exc).__name__, exc)
-            return ""
+            return "", {"backend": "error", "latency_ms": 0.0, "error": f"{type(exc).__name__}"}
 
     def _system_prompt(self, friend: dict, review_exprs: list[dict]) -> str:
         persona = (friend.get("personality_prompt") or "").strip()

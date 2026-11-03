@@ -7,24 +7,41 @@
  * 每个调用都带超时；失败抛 `ApiError`，由 UI 转成中文提示 + 空态。
  */
 
+import { isRecord, str } from "@/lib/guards";
 import {
   parseBootstrap,
   parseChatTurn,
   parseExpressions,
   parseFriend,
   parseFriendsPayload,
+  parseLlmSaveResult,
+  parseLlmSettings,
+  parseLlmVerify,
   parseMemoryPayload,
   parseMessages,
   parseMoments,
+  parseSttSaveResult,
+  parseSttSettings,
+  parseSttVerify,
   type BootstrapPayload,
   type ChatTurnResponse,
   type Expression,
   type FactSheet,
   type Friend,
   type FriendsPayload,
+  type LlmSaveInput,
+  type LlmSaveResult,
+  type LlmSettingsPayload,
+  type LlmTestInput,
+  type LlmVerifyResult,
   type MemoryPayload,
   type Message,
   type Moment,
+  type SttSaveInput,
+  type SttSaveResult,
+  type SttSettingsPayload,
+  type SttTestInput,
+  type SttVerifyResult,
   type UserProfile,
 } from "@/lib/v2/types";
 
@@ -66,7 +83,8 @@ async function detailOf(res: Response): Promise<string> {
   return `请求失败（HTTP ${res.status}）`;
 }
 
-async function request<T>(
+/** 任意 `/api/...` 绝对路径请求（设置页的 LLM 接口在 `/api/llm/*`）。 */
+async function requestAt<T>(
   path: string,
   parse: (raw: unknown) => T,
   options: RequestOptions = {},
@@ -77,7 +95,7 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(path, {
       method,
       body,
       signal: controller.signal,
@@ -107,6 +125,15 @@ async function request<T>(
   } catch {
     throw new ApiError("响应格式异常", res.status);
   }
+}
+
+/** `/api/v2/...` 相对路径请求。 */
+function request<T>(
+  path: string,
+  parse: (raw: unknown) => T,
+  options: RequestOptions = {},
+): Promise<T> {
+  return requestAt(`${BASE}${path}`, parse, options);
 }
 
 function parseFriendEnvelope(raw: unknown): Friend | null {
@@ -372,3 +399,119 @@ export const api = {
 };
 
 export type { Friend, Message, Moment, Expression, MemoryPayload, UserProfile };
+
+/* ================================================================== */
+/* 个人设置：LLM（/api/llm/*）与 STT（/api/v2/settings/*）              */
+/* ================================================================== */
+
+function parseSettingsAggregate(raw: unknown): {
+  llm: LlmSettingsPayload | null;
+  stt: SttSettingsPayload | null;
+} {
+  if (!isRecord(raw)) return { llm: null, stt: null };
+  return {
+    llm: isRecord(raw.llm) ? parseLlmSettings(raw.llm) : null,
+    stt: isRecord(raw.stt) ? parseSttSettings(raw.stt) : null,
+  };
+}
+
+/** 聚合设置（docs/V2_STT.md §3 GET /api/v2/settings）；后端未实现时抛 404。 */
+export function getSettings(): Promise<{ llm: LlmSettingsPayload | null; stt: SttSettingsPayload | null }> {
+  return requestAt("/api/v2/settings", parseSettingsAggregate);
+}
+
+/* ---------------------------- LLM ---------------------------- */
+
+export function getLlmSettings(): Promise<LlmSettingsPayload> {
+  return requestAt("/api/llm/config", parseLlmSettings);
+}
+
+export function testLlmSettings(input: LlmTestInput): Promise<LlmVerifyResult> {
+  return requestAt("/api/llm/test", parseLlmVerify, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 45000,
+  });
+}
+
+export function saveLlmSettings(input: LlmSaveInput): Promise<LlmSaveResult> {
+  return requestAt("/api/llm/config", parseLlmSaveResult, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 45000,
+  });
+}
+
+export interface ResetResult {
+  ok: boolean;
+  message: string;
+}
+
+export function resetLlmSettings(): Promise<ResetResult> {
+  return requestAt(
+    "/api/llm/reset",
+    (raw) => ({
+      ok: isRecord(raw) ? raw.ok !== false : true,
+      message: isRecord(raw) ? str(raw.message) || "已恢复为 .env 默认配置" : "已恢复为 .env 默认配置",
+    }),
+    { method: "POST", timeoutMs: 20000 },
+  );
+}
+
+/* ---------------------------- STT ---------------------------- */
+
+/**
+ * 读取 STT 配置。优先 `/api/v2/settings/stt`；
+ * 若该接口尚未实现（404），退回聚合接口 `/api/v2/settings` 的 `stt` 字段。
+ */
+export async function getSttSettings(): Promise<SttSettingsPayload> {
+  try {
+    return await requestAt("/api/v2/settings/stt", parseSttSettings);
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 404 || err.status === 405)) {
+      const aggregate = await getSettings();
+      if (aggregate.stt) return aggregate.stt;
+    }
+    throw err;
+  }
+}
+
+export function saveSttSettings(input: SttSaveInput): Promise<SttSaveResult> {
+  return requestAt("/api/v2/settings/stt", parseSttSaveResult, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 60000,
+  });
+}
+
+export function testSttSettings(input: SttTestInput): Promise<SttVerifyResult> {
+  return requestAt("/api/v2/settings/stt/test", parseSttVerify, {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: 45000,
+  });
+}
+
+export function resetSttSettings(): Promise<SttSettingsPayload> {
+  return requestAt("/api/v2/settings/stt/reset", parseSttSettings, {
+    method: "POST",
+    timeoutMs: 20000,
+  });
+}
+
+
+/** 把设置页的接口错误翻译成可读中文（401/超时/404/5xx 区分）。 */
+export function apiErrorText(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) return "密钥无效或未授权（401），请检查 API Key 是否正确";
+    if (err.status === 403) return "没有权限（403），请检查该密钥是否可用";
+    if (err.status === 404) return "接口不存在（404）：后端可能尚未升级到该版本";
+    if (err.status === 429) return "请求太频繁（429），请稍后再试";
+    if (err.status >= 500) return `服务器错误（${err.status}），请查看后端日志`;
+    if (/超时|timeout/i.test(err.message)) return "连接超时：当前网络无法访问该地址";
+    return err.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err) return err;
+  return "操作失败，请稍后重试";
+}

@@ -436,3 +436,320 @@ export function parseChatTurn(raw: unknown): ChatTurnResponse {
     memory_updated: r.memory_updated === true,
   };
 }
+
+/* ================================================================== */
+/* 个人设置：LLM / STT 配置（契约见 docs/V2_STT.md §3、§5）              */
+/* ================================================================== */
+
+export interface LlmConfigView {
+  base_url: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  suggestion_model: string;
+  api_key_set: boolean;
+  api_key_masked: string;
+  configured: boolean;
+  source: string;
+}
+
+export interface LlmHealthView {
+  configured: boolean;
+  base_url: string;
+  model: string;
+  mock: boolean;
+  error: string;
+}
+
+export interface LlmPreset {
+  id: string;
+  name: string;
+  base_url: string;
+  model: string;
+  key_hint: string;
+  note: string;
+}
+
+export interface LlmSettingsPayload {
+  config: LlmConfigView | null;
+  health: LlmHealthView | null;
+  presets: LlmPreset[];
+}
+
+export interface LlmVerifyResult {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  model_reply: string;
+}
+
+export interface LlmSaveResult {
+  ok: boolean;
+  message: string;
+  config: LlmConfigView | null;
+  verified: LlmVerifyResult | null;
+}
+
+export interface LlmSaveInput {
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  verify?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface LlmTestInput {
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+}
+
+export type SttProvider = "auto" | "local" | "siliconflow";
+
+export interface SttConfigView {
+  provider: SttProvider;
+  enabled: boolean;
+  base_url: string;
+  model: string;
+  language: string;
+  timeout_s: number;
+  api_key_set: boolean;
+  api_key_masked: string;
+  configured: boolean;
+  source: string;
+}
+
+export interface SttHealthView {
+  enabled: boolean;
+  provider: string;
+  configured: boolean;
+  /** 当前实际生效的 STT 后端：faster-whisper | sensevoice ... */
+  backend: string;
+  model: string;
+  last_error: string;
+  last_latency_ms: number | null;
+  requests: number;
+  last_success_at: string;
+}
+
+export interface SttPreset {
+  id: "local" | "siliconflow" | string;
+  name: string;
+  base_url: string;
+  model: string;
+}
+
+export interface SttSettingsPayload {
+  config: SttConfigView | null;
+  health: SttHealthView | null;
+  presets: SttPreset[];
+}
+
+export interface SttVerifyResult {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  text: string;
+}
+
+export interface SttSaveInput {
+  provider: SttProvider;
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  language?: string;
+  timeout_s?: number;
+  verify?: boolean;
+}
+
+export interface SttTestInput {
+  provider?: SttProvider;
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  language?: string;
+  timeout_s?: number;
+}
+
+export interface SttSaveResult extends SttSettingsPayload {
+  ok: boolean;
+  message: string;
+  verified: SttVerifyResult | null;
+}
+
+export const DEFAULT_STT_CONFIG: SttConfigView = {
+  provider: "auto",
+  enabled: false,
+  base_url: "https://api.siliconflow.cn/v1",
+  model: "FunAudioLLM/SenseVoiceSmall",
+  language: "en",
+  timeout_s: 30,
+  api_key_set: false,
+  api_key_masked: "",
+  configured: false,
+  source: "default",
+};
+
+export const DEFAULT_STT_PRESETS: SttPreset[] = [
+  { id: "local", name: "本地 Whisper（离线）", base_url: "", model: "distil-large-v3" },
+  {
+    id: "siliconflow",
+    name: "硅基流动 SenseVoiceSmall",
+    base_url: "https://api.siliconflow.cn/v1",
+    model: "FunAudioLLM/SenseVoiceSmall",
+  },
+];
+
+function parseProvider(raw: unknown): SttProvider {
+  const value = str(raw);
+  return value === "local" || value === "siliconflow" ? value : "auto";
+}
+
+export function parseLlmConfigView(raw: unknown): LlmConfigView | null {
+  if (!isRecord(raw)) return null;
+  return {
+    base_url: str(raw.base_url),
+    model: str(raw.model),
+    temperature: num(raw.temperature),
+    max_tokens: num(raw.max_tokens),
+    suggestion_model: str(raw.suggestion_model),
+    api_key_set: raw.api_key_set === true,
+    api_key_masked: str(raw.api_key_masked),
+    configured: raw.configured === true,
+    source: str(raw.source),
+  };
+}
+
+export function parseLlmHealthView(raw: unknown): LlmHealthView | null {
+  if (!isRecord(raw)) return null;
+  return {
+    configured: raw.configured === true,
+    base_url: str(raw.base_url),
+    model: str(raw.model),
+    mock: raw.mock === true,
+    error: str(raw.error),
+  };
+}
+
+export function parseLlmPresets(raw: unknown): LlmPreset[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .map((item) => ({
+      id: str(item.id),
+      name: str(item.name),
+      base_url: str(item.base_url),
+      model: str(item.model),
+      key_hint: str(item.key_hint),
+      note: str(item.note),
+    }))
+    .filter((item) => item.id !== "");
+}
+
+export function parseLlmSettings(raw: unknown): LlmSettingsPayload {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    config: parseLlmConfigView(r.config),
+    health: parseLlmHealthView(r.health),
+    presets: parseLlmPresets(r.presets),
+  };
+}
+
+export function parseLlmVerify(raw: unknown): LlmVerifyResult {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ok: r.ok === true,
+    message: str(r.message),
+    latency_ms: num(r.latency_ms),
+    model_reply: str(r.model_reply),
+  };
+}
+
+export function parseLlmSaveResult(raw: unknown): LlmSaveResult {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ok: r.ok === true,
+    message: str(r.message),
+    config: parseLlmConfigView(r.config),
+    verified: isRecord(r.verified) ? parseLlmVerify(r.verified) : null,
+  };
+}
+
+export function parseSttConfigView(raw: unknown): SttConfigView | null {
+  if (!isRecord(raw)) return null;
+  const timeout = num(raw.timeout_s);
+  return {
+    provider: parseProvider(raw.provider),
+    enabled: raw.enabled === true,
+    base_url: str(raw.base_url),
+    model: str(raw.model),
+    language: str(raw.language) || "en",
+    timeout_s: timeout > 0 ? timeout : 30,
+    api_key_set: raw.api_key_set === true,
+    api_key_masked: str(raw.api_key_masked),
+    configured: raw.configured === true,
+    source: str(raw.source),
+  };
+}
+
+export function parseSttHealthView(raw: unknown): SttHealthView | null {
+  if (!isRecord(raw)) return null;
+  const latency = raw.last_latency_ms;
+  return {
+    enabled: raw.enabled === true,
+    provider: str(raw.provider) || "auto",
+    configured: raw.configured === true,
+    backend: str(raw.backend) || "faster-whisper",
+    model: str(raw.model),
+    last_error: str(raw.last_error),
+    last_latency_ms: typeof latency === "number" && Number.isFinite(latency) ? latency : null,
+    requests: num(raw.requests),
+    last_success_at: str(raw.last_success_at),
+  };
+}
+
+export function parseSttPresets(raw: unknown): SttPreset[] {
+  if (!Array.isArray(raw)) return [];
+  const presets = raw
+    .filter(isRecord)
+    .map((item) => ({
+      id: str(item.id),
+      name: str(item.name),
+      base_url: str(item.base_url),
+      model: str(item.model),
+    }))
+    .filter((item) => item.id !== "");
+  return presets.length > 0 ? presets : DEFAULT_STT_PRESETS;
+}
+
+export function parseSttSettings(raw: unknown): SttSettingsPayload {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    config: parseSttConfigView(r.config),
+    health: parseSttHealthView(r.health),
+    presets: parseSttPresets(r.presets),
+  };
+}
+
+export function parseSttVerify(raw: unknown): SttVerifyResult {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ok: r.ok === true,
+    message: str(r.message),
+    latency_ms: num(r.latency_ms),
+    text: str(r.text),
+  };
+}
+
+export function parseSttSaveResult(raw: unknown): SttSaveResult {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ok: r.ok === true,
+    message: str(r.message),
+    config: parseSttConfigView(r.config),
+    health: parseSttHealthView(r.health),
+    presets: parseSttPresets(r.presets),
+    verified: isRecord(r.verified) ? parseSttVerify(r.verified) : null,
+  };
+}

@@ -18,13 +18,25 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 
 from app.config import STTSettings
 from app.logging_utils import Stopwatch, get_logger
-from app.voice.audio_utils import SR_IN, array_duration_s, pcm16_to_float32, resample
+from app.voice.audio_utils import (
+    SR_IN,
+    array_duration_s,
+    float32_to_pcm16,
+    pcm16_to_float32,
+    resample,
+)
+from app.voice.sensevoice import (
+    DEFAULT_BASE_URL as SENSEVOICE_DEFAULT_BASE_URL,
+    DEFAULT_MODEL as SENSEVOICE_DEFAULT_MODEL,
+    SiliconFlowSTT,
+)
 
 log = get_logger(__name__)
 
@@ -158,6 +170,70 @@ def _clean_hotwords(raw: str) -> str:
     return ", ".join(out)
 
 
+# --------------------------------------------------------------------------- #
+# 云端 STT 配置（SiliconFlow SenseVoiceSmall）—— 运行时热切换
+# --------------------------------------------------------------------------- #
+#: ``apply_cloud_config`` 认识的字段（对象或 dict 均可）
+_CLOUD_CONFIG_FIELDS = (
+    "provider",
+    "enabled",
+    "base_url",
+    "api_key",
+    "model",
+    "language",
+    "timeout_s",
+)
+
+#: 云端 STT 在 health/config 里的 provider 取值
+_CLOUD_PROVIDERS = ("auto", "local", "siliconflow")
+
+
+def _now_iso() -> str:
+    """UTC ISO8601（与 DB 时间约定一致）。"""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _clamp_timeout(value: Any, default: float = 30.0) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(5.0, min(120.0, v))
+
+
+def _coerce_cloud_config(cfg: Any) -> dict[str, Any]:
+    """把 ``apply_cloud_config`` 的入参规范成 dict。
+
+    支持三种形态：
+    - ``dict``（``STTRuntimeConfig.to_engine_dict()``）；
+    - pydantic 模型（有 ``model_dump()``）；
+    - 普通对象/``SimpleNamespace``（按属性读取 ``_CLOUD_CONFIG_FIELDS``）。
+    """
+    if cfg is None:
+        return {}
+    if isinstance(cfg, dict):
+        return dict(cfg)
+
+    for method_name in ("to_engine_dict", "model_dump", "dict"):
+        method = getattr(cfg, method_name, None)
+        if callable(method):
+            try:
+                data = method()
+                if isinstance(data, dict):
+                    return dict(data)
+            except Exception:  # noqa: BLE001 - 继续退化为属性读取
+                pass
+
+    data: dict[str, Any] = {}
+    for key in _CLOUD_CONFIG_FIELDS:
+        if hasattr(cfg, key):
+            try:
+                data[key] = getattr(cfg, key)
+            except Exception:  # noqa: BLE001 - property 抛错则忽略该字段
+                continue
+    return data
+
+
 class STTEngine:
     """语音转文字引擎。
 
@@ -180,12 +256,39 @@ class STTEngine:
         self._closed = False
         self._calls = 0
 
+        # ---- 云端 STT（SiliconFlow SenseVoiceSmall）状态 ----
+        # 默认关闭：由 `apply_cloud_config()`（engines 装配 / 设置页保存时）热开启，
+        # 因此 1.0 的纯本地行为完全不变。
+        self._cloud: SiliconFlowSTT | None = None
+        self._cloud_enabled = False
+        self._cloud_provider = "auto"
+        self._cloud_config: dict[str, Any] = {
+            "base_url": SENSEVOICE_DEFAULT_BASE_URL,
+            "model": SENSEVOICE_DEFAULT_MODEL,
+            "language": str(self.cfg.language or "en"),
+            "timeout_s": 30.0,
+        }
+        self._cloud_last_error: str | None = None
+        self._cloud_last_latency_ms: float | None = None
+        self._cloud_requests = 0
+        self._cloud_last_success_at: str | None = None
+
     # ------------------------------------------------------------------ #
     # 状态
     # ------------------------------------------------------------------ #
+    def _cloud_is_active(self) -> bool:
+        """云端是否真正生效（启用 + 客户端已配置）。"""
+        return bool(self._cloud_enabled and self._cloud is not None and self._cloud.configured)
+
     @property
     def backend_name(self) -> str:
-        """当前后端名（``faster-whisper`` / ``mock``）。**不加载模型**。"""
+        """当前后端名（``faster-whisper`` / ``mock`` / 云端生效时 ``sensevoice``）。
+
+        **不加载模型**：云端生效（enabled + configured）时返回 ``sensevoice``；
+        否则保持 1.0 语义（``auto`` 在 prewarm 前仍显示 ``auto``）。
+        """
+        if self._cloud_is_active():
+            return "sensevoice"
         return self._backend
 
     @property
@@ -210,6 +313,90 @@ class STTEngine:
             "loaded": self._model is not None,
             "error": self._load_error,
             "calls": self._calls,
+        }
+
+    # ------------------------------------------------------------------ #
+    # 云端 STT（热切换 / health）
+    # ------------------------------------------------------------------ #
+    def apply_cloud_config(self, cfg: Any) -> None:
+        """应用云端 STT 配置（对象或 dict），**立即生效、无需重启**。
+
+        字段：``provider`` / ``enabled`` / ``base_url`` / ``api_key`` / ``model`` /
+        ``language`` / ``timeout_s``。
+
+        启用语义（``docs/V2_STT.md`` §2 / 任务契约）：
+        - ``provider == "local"`` → 关闭云端（恢复纯本地）；
+        - ``provider == "siliconflow"`` → 启用（key 为空时 enabled=True 但 configured=False，
+          不会真正发请求，health 里可见）；
+        - 其它（``auto``）→ 有 api_key 才启用。
+
+        重建 :class:`SiliconFlowSTT`；同时清空 ``last_error`` / ``last_latency_ms``
+        （新配置的首次请求重新计时），``requests`` / ``last_success_at`` 保留累计值。
+        """
+        data = _coerce_cloud_config(cfg)
+
+        provider = str(data.get("provider") or "auto").strip().lower()
+        if provider not in _CLOUD_PROVIDERS:
+            provider = "auto"
+        base_url = str(data.get("base_url") or SENSEVOICE_DEFAULT_BASE_URL).strip()
+        api_key = str(data.get("api_key") or "").strip()
+        model = str(data.get("model") or SENSEVOICE_DEFAULT_MODEL).strip()
+        language = str(data.get("language") or self.cfg.language or "en").strip() or "en"
+        timeout_s = _clamp_timeout(data.get("timeout_s"), 30.0)
+
+        if provider == "local":
+            enabled = False
+        elif provider == "siliconflow":
+            enabled = True
+        else:  # auto：有 key 才启用
+            enabled = bool(api_key)
+
+        self._cloud_provider = provider
+        self._cloud_config = {
+            "base_url": base_url,
+            "model": model,
+            "language": language,
+            "timeout_s": timeout_s,
+        }
+        if enabled:
+            self._cloud = SiliconFlowSTT(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                timeout_s=timeout_s,
+                language=language,
+            )
+            log.info(
+                "STT 云端配置已应用: provider=%s base_url=%s model=%s key=%s configured=%s",
+                provider, base_url, model, "set" if api_key else "empty",
+                self._cloud.configured,
+            )
+        else:
+            self._cloud = None
+            log.info("STT 云端已关闭（provider=%s），使用本地 faster-whisper → mock", provider)
+
+        self._cloud_enabled = bool(enabled)
+        self._cloud_last_error = None
+        self._cloud_last_latency_ms = None
+
+    def cloud_health(self) -> dict[str, Any]:
+        """云端 STT 健康状态（``/api/v2/settings`` 直接读取）。"""
+        model = ""
+        if self._cloud is not None:
+            model = str(self._cloud.model or "")
+        if not model:
+            model = str(self._cloud_config.get("model") or SENSEVOICE_DEFAULT_MODEL)
+        latency = self._cloud_last_latency_ms
+        return {
+            "enabled": bool(self._cloud_enabled),
+            "provider": self._cloud_provider,
+            "configured": bool(self._cloud is not None and self._cloud.configured),
+            "backend": self.backend_name,
+            "model": model,
+            "last_error": self._cloud_last_error,
+            "last_latency_ms": round(float(latency), 1) if latency is not None else None,
+            "requests": int(self._cloud_requests),
+            "last_success_at": self._cloud_last_success_at,
         }
 
     # ------------------------------------------------------------------ #
@@ -355,6 +542,12 @@ class STTEngine:
             sr = SR_IN
         duration = array_duration_s(audio, sr)
 
+        # 云端优先：成功直接返回（backend="sensevoice-siliconflow"）；
+        # 失败只记 health，继续本地 faster-whisper → mock，绝不抛给上层。
+        cloud_transcript = await self._try_cloud(audio, duration)
+        if cloud_transcript is not None:
+            return cloud_transcript
+
         if self._backend == "mock":
             return await self._transcribe_mock(sw, duration)
 
@@ -391,6 +584,40 @@ class STTEngine:
             backend=self._backend,
             segments=segments,
         )
+
+    async def _try_cloud(self, audio: np.ndarray, duration: float) -> Transcript | None:
+        """云端转写（成功返回 Transcript；失败返回 None 让上层走本地链路）。
+
+        绝不抛异常（``CancelledError`` 例外，必须透传）。失败时记录
+        ``cloud_health()`` 的 ``last_error`` / ``requests``。
+        """
+        cloud = self._cloud
+        if not (self._cloud_enabled and cloud is not None and cloud.configured):
+            return None
+
+        try:
+            pcm16 = float32_to_pcm16(audio)
+            transcript = await cloud.transcribe(pcm16, SR_IN)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 云端失败必须回退本地，不能抛
+            self._cloud_requests += 1
+            self._cloud_last_error = f"{type(exc).__name__}: {exc}"
+            log.warning(
+                "云端 STT 失败（自动回退本地 faster-whisper/mock）: %s",
+                self._cloud_last_error,
+            )
+            return None
+
+        self._cloud_requests += 1
+        self._cloud_last_error = None
+        self._cloud_last_latency_ms = float(getattr(transcript, "latency_ms", 0.0) or 0.0)
+        self._cloud_last_success_at = _now_iso()
+        log.debug(
+            "云端 STT %.0fms dur=%.2fs text=%r",
+            self._cloud_last_latency_ms, duration, transcript.text[:80],
+        )
+        return transcript
 
     def _transcribe_sync(
         self, model: Any, audio: np.ndarray

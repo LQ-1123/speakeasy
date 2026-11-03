@@ -7,12 +7,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, RefreshCw, WifiOff } from "lucide-react";
+import { Plus, RefreshCw, Settings, WifiOff } from "lucide-react";
 
 import { ChatsTab } from "@/components/v2/ChatsTab";
 import { ChatView } from "@/components/v2/ChatView";
 import { DiscoverTab } from "@/components/v2/DiscoverTab";
 import { NotesTab } from "@/components/v2/NotesTab";
+import { SettingsPanel } from "@/components/v2/SettingsPanel";
 import { TabBar } from "@/components/v2/TabBar";
 import { ToastProvider, useToast } from "@/components/v2/Toast";
 import { api } from "@/lib/v2/api";
@@ -53,6 +54,7 @@ function AppInner() {
 
   const [tab, setTab] = useState<Tab>("chats");
   const [activeFriend, setActiveFriend] = useState<Friend | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<Friend[]>([]);
@@ -107,6 +109,7 @@ function AppInner() {
       if (isTab(rawTab)) setTab(rawTab);
       const friendId = params.get("friend");
       if (friendId) pendingFriendIdRef.current = friendId;
+      if (params.get("settings") === "1") setSettingsOpen(true);
     } catch {
       /* 忽略非法 URL */
     }
@@ -524,6 +527,15 @@ function AppInner() {
               <button type="button" onClick={() => handleTabChange("discover")} aria-label="偶遇新朋友" className="se-header-icon">
                 <Plus size={19} />
               </button>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="个人设置"
+                title="个人设置"
+                className="se-header-icon"
+              >
+                <Settings size={18} />
+              </button>
             </div>
           </header>
 
@@ -600,6 +612,16 @@ function AppInner() {
           <TabBar tab={tab} unread={unreadTotal} requests={requests.length} onChange={handleTabChange} />
         </>
       )}
+
+      {settingsOpen ? (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onChanged={() => {
+            // LLM/STT 配置变更后刷新全局状态（「演示模式」徽章、健康信息）
+            void loadBootstrap(true);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

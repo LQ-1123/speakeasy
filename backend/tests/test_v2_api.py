@@ -28,6 +28,7 @@ from app.v2.router import router as v2_router  # noqa: E402
 from app.v2.services import V2Services  # noqa: E402
 from app.v2.spawner import PersonaSpawner  # noqa: E402
 from app.voice.audio_utils import write_wav  # noqa: E402
+from app.voice.stt_config import STTConfigStore  # noqa: E402
 
 pytestmark = pytest.mark.asyncio
 
@@ -103,6 +104,7 @@ def client(tmp_path):
     chat = ChatService(
         engines, db, memory, voice, spawner, audio, memory_idle_s=0
     )
+    engines.stt_config = STTConfigStore(str(tmp_path))
     services = V2Services(
         db=db, engines=engines, audio=audio, memory=memory, voice=voice,
         spawner=spawner, chat=chat, data_dir=str(tmp_path),

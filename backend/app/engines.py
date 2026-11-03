@@ -35,6 +35,8 @@ class Engines:
     ref_audio: ReferenceLibrary
     settings: Settings
     llm_config: Any = None
+    #: 运行时 STT 配置（本地 ↔ 硅基流动 SenseVoiceSmall 热切换）
+    stt_config: Any = None
     #: 声音克隆引擎（XTTS-v2）。惰性创建，只在用户上传音色时才加载模型。
     xtts: Any = None
     #: 声音转换引擎（OpenVoice V2）。与 xtts 配合实现「保留口音」的克隆：
@@ -181,6 +183,27 @@ def build_engines(settings: Settings | None = None) -> Engines:
     rc.apply_to_settings(s.llm, llm_store.config)
 
     stt = STTEngine(s.stt)
+
+    # 运行时 STT 配置（文件 > .env > 默认），构造后立即应用，保证首启就用对后端
+    from app.voice.stt_config import STTConfigStore  # noqa: PLC0415
+
+    stt_store = STTConfigStore(
+        s.data_path,
+        env_defaults={
+            "provider": s.stt.provider,
+            "base_url": s.stt.siliconflow_base_url,
+            "model": s.stt.siliconflow_model,
+            "api_key": s.stt.siliconflow_api_key,
+            "language": s.stt.language,
+            "timeout_s": s.stt.siliconflow_timeout_s,
+        },
+    )
+    apply_cloud = getattr(stt, "apply_cloud_config", None)
+    if callable(apply_cloud):
+        apply_cloud(stt_store.config.to_engine_dict())
+    else:  # pragma: no cover - 兼容尚未接入云端 STT 的旧代码
+        log.warning("STTEngine 尚未实现 apply_cloud_config，云端 STT 暂不可用")
+
     tts = TTSEngine(s.tts, personas=personas)
     llm = LLMClient(s.llm)
     ref_audio = ReferenceLibrary(s.ref_audio_path)
@@ -203,9 +226,14 @@ def build_engines(settings: Settings | None = None) -> Engines:
     except Exception as exc:  # noqa: BLE001
         log.warning("OpenVoice 初始化失败（忽略）：%s", exc)
 
+    stt_cfg = stt_store.config
     log.info(
-        "engines built: stt=%s tts=%s llm=%s (configured=%s, source=%s)",
+        "engines built: stt=%s (cloud_provider=%s enabled=%s configured=%s) "
+        "tts=%s llm=%s (configured=%s, source=%s)",
         stt.backend_name,
+        stt_cfg.provider,
+        stt_cfg.enabled,
+        stt_cfg.configured,
         tts.backend_name,
         s.llm.model,
         bool(s.llm.api_key),
@@ -221,6 +249,7 @@ def build_engines(settings: Settings | None = None) -> Engines:
         ref_audio=ref_audio,
         settings=s,
         llm_config=llm_store,
+        stt_config=stt_store,
     )
 
 

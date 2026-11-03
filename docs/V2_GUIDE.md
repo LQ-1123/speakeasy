@@ -26,6 +26,7 @@
 | 气泡内联批注 | 用户气泡下 `✨ 地道表达` 胶囊：better_version/解释/tag、🔊 试听、⭐ 收藏；无 key 时规则库兜底 | `suggestion.py`、`frontend/src/components/v2/SuggestionPill.tsx` |
 | 表达本刻意复现 | learning 表达每轮抽 1–2 条注入 prompt；用户实战说出 → mastery+1，满 3 次 mastered | `chat_service.py`、`v2/router.py` |
 | 实时语音通话 | 1.0 的 `/ws` 通道与 `/classic` 页面保留可用（新 UI 暂以"即将上线"占位，接口未破坏） | `backend/app/routers/ws.py`、`frontend/src/app/classic` |
+| 云端 STT（SenseVoiceSmall） | 个人设置里填硅基流动 Key 即热切换到 `FunAudioLLM/SenseVoiceSmall`；云端失败自动回退本地 Whisper→mock | `backend/app/voice/sensevoice.py`、`stt_config.py`、`v2/router.py`、`frontend/src/components/v2/SettingsPanel.tsx` |
 | 移动端三 Tab + PWA | 消息 / 动态·偶遇 / 表达本·画像；微信式浅色；按住说话；PWA manifest+SW+图标 | `frontend/src/components/v2/*`、`frontend/public/*` |
 | SQLite 5 表 | `user_profile` / `friends` / `messages` / `moments` / `saved_expressions`（额外列见 db.py） | `backend/app/v2/db.py` |
 | REST API | `/api/v2/bootstrap|friends|chat|moments|expressions|memories|audio|tts` | `backend/app/v2/router.py`、`docs/V2_API.md` |
@@ -50,7 +51,12 @@ HF_HOME="$PWD/.cache/hf" .venv/bin/python -m uvicorn app.main:app --app-dir back
 
 **演示模式**：不填 `LLM_API_KEY` 时 LLM 走本地规则（人员生成、记忆提炼、润色、朋友圈都有确定性兜底），
 TTS 走 edge-tts（需联网，失败退 tone），STT 走 faster-whisper（CPU 可用）。UI 顶部会显示「演示模式」。
-填 Key：页面右上角 ⚙ 或 `.env` 的 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`。
+填 Key：页面右上角 **⚙ 个人设置**：
+- **对话模型 LLM**：Base URL / API Key / 模型名（DeepSeek、OpenAI、SiliconFlow、自定义），保存即热生效；
+- **语音识别 STT**：选「硅基流动 SenseVoiceSmall」→ 填 SiliconFlow API Key（默认 `https://api.siliconflow.cn/v1` +
+  `FunAudioLLM/SenseVoiceSmall`），保存即热切换；云端失败自动回退本地 Whisper。密钥只存 `data/stt_config.json`（0600），
+  接口只回传脱敏指纹。
+也可写 `.env`：`STT_PROVIDER=siliconflow`、`STT_SILICONFLOW_API_KEY=...`（扁平项）。
 
 环境变量补充：`V2_MEMORY_IDLE_S`（默认 120，聊天静默多久后提炼记忆；调 0 便于演示/测试）。
 数据库/音频默认在 `repo/data/`（`speakeasy_v2.db`、`audio/`），删掉即可重置。
@@ -67,7 +73,7 @@ TTS 走 edge-tts（需联网，失败退 tone），STT 走 faster-whisper（CPU 
 
 ## 5. 验收结果（本机 macOS / Apple Silicon）
 
-- 后端测试：`pytest backend/tests -q` → **282 passed**（1.0 回归 174 + v2 新增 108）。
+- 后端测试：`pytest backend/tests -q` → **327 passed**（1.0 回归 174 + v2 新增 153，含 SenseVoice 云端 STT 34 个离线用例）。
 - 前端：`npm run typecheck` ✅、`npm run build:backend` ✅（36 文件 / 16 目录 → `backend/app/static/app`）。
 - 真实链路（无 LLM key）：
   - 首启 onboarding 生成英音 + 意大利好友并各发一条 edge-tts 破冰语音；
@@ -75,9 +81,12 @@ TTS 走 edge-tts（需联网，失败退 tone），STT 走 faster-whisper（CPU 
   - 表达收藏 → 再次说出表达 → mastery 计数；朋友圈生成 + 语音/文字评论转私聊；
   - 15 轮裂变生成 pending 好友申请；到期 open loop 自动补发追问；
   - `POST /discover` 偶遇新好友（真实 edge 声线）。
+  - **云端 STT（SenseVoiceSmall）**：个人设置保存 SiliconFlow Key → 热生效为 `sensevoice`；用假 Key 打真实接口返回 401
+    （UI 中文提示），语音条仍自动回退本地 faster-whisper 且转写正确；`cloud_health` 记录 `last_error/requests`。
+    真 Key 的实际转写需用户填入自己的 SiliconFlow Key 验证（本机未持有可用 Key）。
 - 浏览器（Puppeteer + 系统 Chrome，390×844 / 375×844）：三 Tab、单聊、胶囊展开、朋友圈、
   记忆卡全部正常；`innerWidth == scrollWidth` 无横向溢出；无 JS 异常。
-- 截图见 `artifacts/v2-final-*.png`。
+- 截图见 `artifacts/v2-final-*.png`（主界面）与 `artifacts/v2-settings-filled.png` / `v2-settings-stt.png`（个人设置 / STT 401 回退）。
 
 ## 6. 已知限制
 

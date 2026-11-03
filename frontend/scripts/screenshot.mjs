@@ -161,6 +161,8 @@ try {
   ];
   const friendId = await firstFriendId();
   if (friendId) views.push(["chat", `${BASE}/?tab=chats&friend=${encodeURIComponent(friendId)}`]);
+  // 个人设置页（顶部 ⚙ 的深链，见 docs/V2_STT.md §5）
+  views.push(["settings", `${BASE}/?tab=chats&settings=1`]);
 
   for (const [name, url] of views) {
     await capture(cdp, url, join(OUT_DIR, `v2-${name}-${size}.png`));

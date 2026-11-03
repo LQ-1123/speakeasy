@@ -2939,3 +2939,165 @@ body:has(.se-app) {
     animation: none !important;
   }
 }
+
+
+/* ==================================================================
+   Phase C+：免提自动对话（VAD）底部麦克风 / 状态
+   ================================================================== */
+
+.se-call-status.recording {
+  color: #7ce6a8;
+}
+
+.se-call-status.processing {
+  color: #ffd9a8;
+}
+
+.se-call-status.muted {
+  color: #ffb4b4;
+}
+
+.se-call-controls {
+  padding: 4px 22px calc(16px + env(safe-area-inset-bottom));
+}
+
+.se-call-orb-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 12px;
+}
+
+.se-call-orb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #3fd383 0%, #0f8f52 62%, #0b6c40 100%);
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(7, 193, 96, 0.32);
+  transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+}
+
+.se-call-orb:active {
+  transform: scale(0.96);
+}
+
+.se-call-orb.muted {
+  background: radial-gradient(circle at 32% 28%, #7a8794 0%, #46525e 62%, #333d47 100%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+.se-call-orb.busy {
+  background: radial-gradient(circle at 32% 28%, #4c5f72 0%, #2b3946 62%, #1e2934 100%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.se-call-orb-rings {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.se-call-orb-rings i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(124, 230, 168, 0.5);
+  opacity: 0;
+}
+
+.se-call-orb.active .se-call-orb-rings i:first-child {
+  animation: se-call-orb-breathe 2.6s ease-out infinite;
+}
+
+.se-call-orb.active .se-call-orb-rings i:last-child {
+  animation: se-call-orb-breathe 2.6s ease-out 1.3s infinite;
+}
+
+.se-call-orb.recording .se-call-orb-rings i {
+  border-color: rgba(124, 230, 168, 0.8);
+}
+
+@keyframes se-call-orb-breathe {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.75;
+  }
+  75% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+}
+
+.se-call-level {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 30px;
+}
+
+.se-call-level i {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(124, 230, 168, 0.85);
+  transition: height 0.12s ease-out, opacity 0.2s;
+}
+
+.se-call-orb-hint {
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}
+
+.se-call-warn-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 10px;
+  color: #ffe6c7;
+}
+
+.se-call-fallback {
+  padding: 0 4px 14px;
+}
+
+.se-call-fallback .se-hold {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.se-call-fallback .se-hold.active {
+  background: rgba(7, 193, 96, 0.3);
+  color: #fff;
+}
+
+.se-call-fallback .se-hold.cancel {
+  background: rgba(250, 81, 81, 0.3);
+  color: #ffd9d9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .se-call-orb.active .se-call-orb-rings i {
+    animation: none !important;
+  }
+}

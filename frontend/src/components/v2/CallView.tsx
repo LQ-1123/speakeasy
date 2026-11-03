@@ -1,17 +1,16 @@
 "use client";
 
 /**
- * 语音通话（回合制 push-to-talk）全屏界面。
+ * 语音通话（免提 / hands-free VAD）全屏界面。
  *
- * - 打开 ~800ms 后「正在接通…」→「通话中」；
- * - 按住说话复用 HoldToTalk/useVoiceRecorder → api.sendVoice（与聊天语音条同一接口）；
- * - 好友回复语音自动播放，播放期间禁止录音；播放失败 toast，可点按头像重试；
- * - 结束通话写 call_summary（POST /chat/{id}/call/summary），关闭后由 ChatView 刷新消息列表。
- * - 视觉：深色渐变、大头像脉冲、计时、字幕、静音/扬声器纯视觉开关、红色结束按钮。
+ * - 接通后自动监听：直接说话即可，VAD 自动断句（~1.2s 静音）上传 `api.sendVoice`；
+ * - 好友语音自动播放，播放结束自动恢复监听，循环；播放期间不录音（enabled=false）；
+ * - 静音 = 暂停监听；不支持 VAD 时降级为「按住说话」；麦克风被拒绝可重试或结束；
+ * - 结束通话写 call_summary；卸载时停止录音、关闭 AudioContext、停止 tracks、清计时器。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
+import { Loader2, Mic, MicOff, PhoneOff, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
 import { HoldToTalk } from "@/components/v2/HoldToTalk";
@@ -19,6 +18,7 @@ import { useToast } from "@/components/v2/Toast";
 import { api, apiErrorText } from "@/lib/v2/api";
 import { localStateOf, replyLanguageMeta } from "@/lib/v2/format";
 import type { Friend } from "@/lib/v2/types";
+import { useHandsFreeVad } from "@/lib/v2/useHandsFreeVad";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
 
 interface CallViewProps {
@@ -26,6 +26,26 @@ interface CallViewProps {
   /** 关闭通话（ChatView 负责 loadMessages 刷新 call_summary） */
   onClose: () => void;
 }
+
+type CallPhase = "connecting" | "listening" | "recording" | "processing" | "speaking" | "muted";
+
+const STATUS_TEXT: Record<CallPhase, string> = {
+  connecting: "正在接通…",
+  listening: "我在听…",
+  recording: "正在聆听…",
+  processing: "正在发送…",
+  speaking: "对方正在说话…",
+  muted: "已静音",
+};
+
+const ORB_HINT: Record<CallPhase, string> = {
+  connecting: "正在接通对方…",
+  listening: "直接说话即可，我在听",
+  recording: "说完停顿一下，我会自动发送",
+  processing: "正在发送语音，稍等…",
+  speaking: "对方正在说话，稍后会自动继续听",
+  muted: "已静音，点麦克风或静音键恢复",
+};
 
 function clockText(totalSeconds: number): string {
   const safe = Math.max(0, Math.floor(totalSeconds));
@@ -53,6 +73,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
   const [speakerOn, setSpeakerOn] = useState(true);
   const [lastUserText, setLastUserText] = useState("");
   const [lastFriendText, setLastFriendText] = useState("");
+  const [vadUnsupported, setVadUnsupported] = useState(false);
 
   const startedAtRef = useRef(Date.now());
   const turnsRef = useRef(0);
@@ -65,32 +86,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
   const local = localStateOf(friend);
   const langMeta = replyLanguageMeta(friend);
 
-  /* ------------------------------ 接通 & 计时 ------------------------------ */
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const connectTimer = setTimeout(() => {
-      if (mountedRef.current) setActive(true);
-    }, 800);
-    const tick = setInterval(() => {
-      if (mountedRef.current) setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
-    }, 1000);
-    return () => {
-      mountedRef.current = false;
-      clearTimeout(connectTimer);
-      clearInterval(tick);
-      const audio = audioRef.current;
-      if (audio) {
-        audio.onended = null;
-        audio.onerror = null;
-        audio.pause();
-        audio.src = "";
-      }
-      audioRef.current = null;
-    };
-  }, []);
-
-  /* ------------------------------ 播放好友语音 ------------------------------ */
+  /* ------------------------------ 好友语音播放 ------------------------------ */
 
   const playReply = useCallback(
     (url: string) => {
@@ -107,7 +103,8 @@ export function CallView({ friend, onClose }: CallViewProps) {
       audio.muted = muted;
       audio.volume = speakerOn ? 1 : 0.35;
       audio.onended = () => {
-        if (mountedRef.current) setSpeaking(false);
+        if (!mountedRef.current) return;
+        setSpeaking(false); // enabled 随之恢复 → VAD 自动重新监听
       };
       audio.onerror = () => {
         if (!mountedRef.current) return;
@@ -129,15 +126,15 @@ export function CallView({ friend, onClose }: CallViewProps) {
     playReply(lastAudioUrlRef.current);
   };
 
-  /* ------------------------------ 每轮说话 ------------------------------ */
+  /* ------------------------------ 上传一轮语音 ------------------------------ */
 
-  const handleVoice = useCallback(
-    async (result: RecordingResult) => {
-      if (!active || endingRef.current || busyRef.current) return;
+  const sendUtterance = useCallback(
+    async (blob: Blob, durationMs: number, filename: string) => {
+      if (endingRef.current || busyRef.current) return;
       busyRef.current = true;
       setWaiting(true);
       try {
-        const response = await api.sendVoice(friend.id, result.blob, result.durationMs, result.filename);
+        const response = await api.sendVoice(friend.id, blob, durationMs, filename);
         if (!mountedRef.current || endingRef.current) return;
 
         const userText = response.user_message?.transcript?.trim() ?? "";
@@ -163,8 +160,56 @@ export function CallView({ friend, onClose }: CallViewProps) {
         busyRef.current = false;
       }
     },
-    [active, friend.id, playReply, showToast],
+    [friend.id, playReply, showToast],
   );
+
+  /* ------------------------------ 免提 VAD ------------------------------ */
+
+  const vadEnabled = active && !muted && !waiting && !speaking && !ending && !vadUnsupported;
+
+  const vad = useHandsFreeVad({
+    enabled: vadEnabled,
+    onUtterance: (utterance) => sendUtterance(utterance.blob, utterance.durationMs, utterance.filename),
+    onUnavailable: (message) => {
+      setVadUnsupported(true);
+      showToast(message, "info");
+    },
+    onDenied: (message) => {
+      setMicBlocked(true);
+      showToast(message, "error");
+    },
+    onError: (message) => showToast(message, "error"),
+  });
+
+  /* 首次用户手势恢复 AudioContext（自动播放策略） */
+  const resumeAudio = useCallback(() => {
+    void vad.resume();
+  }, [vad]);
+
+  /* ------------------------------ 接通 & 计时 ------------------------------ */
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const connectTimer = setTimeout(() => {
+      if (mountedRef.current) setActive(true);
+    }, 800);
+    const tick = setInterval(() => {
+      if (mountedRef.current) setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(connectTimer);
+      clearInterval(tick);
+      const audio = audioRef.current;
+      if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.src = "";
+      }
+      audioRef.current = null;
+    };
+  }, []);
 
   /* ------------------------------ 结束通话 ------------------------------ */
 
@@ -193,14 +238,32 @@ export function CallView({ friend, onClose }: CallViewProps) {
     }
   }, [friend.id, onClose, showToast]);
 
-  /* ------------------------------ 状态文案 ------------------------------ */
+  /* ------------------------------ 状态机 ------------------------------ */
 
-  const statusText = !active ? "正在接通…" : waiting || speaking ? "对方正在说话…" : "通话中";
-  const statusBusy = !active || waiting || speaking;
-  const holdDisabled = !active || waiting || speaking || ending;
+  const callPhase: CallPhase = !active
+    ? "connecting"
+    : muted
+      ? "muted"
+      : speaking
+        ? "speaking"
+        : waiting
+          ? "processing"
+          : vad.phase === "recording"
+            ? "recording"
+            : "listening";
+
+  const statusText = STATUS_TEXT[callPhase];
+  const level = callPhase === "recording" ? Math.max(vad.level, 0.25) : callPhase === "listening" ? vad.level : 0;
+  const orbActive = callPhase === "listening" || callPhase === "recording";
+  const orbBusy = callPhase === "speaking" || callPhase === "processing";
+  const bars = [0.55, 0.9, 0.7, 1, 0.62];
+
+  const handleFallbackVoice = async (result: RecordingResult) => {
+    await sendUtterance(result.blob, result.durationMs, result.filename);
+  };
 
   return (
-    <div className="se-call">
+    <div className="se-call" onPointerDown={resumeAudio} data-phase={callPhase}>
       <div className="se-call-glow" aria-hidden />
 
       <header className="se-call-head">
@@ -232,7 +295,7 @@ export function CallView({ friend, onClose }: CallViewProps) {
       <main className="se-call-main">
         <button
           type="button"
-          className={`se-call-avatar ${statusBusy ? "pulse" : ""}`}
+          className={`se-call-avatar ${orbBusy ? "pulse" : ""}`}
           onClick={replayLast}
           aria-label="重播对方语音"
         >
@@ -245,9 +308,9 @@ export function CallView({ friend, onClose }: CallViewProps) {
           {langMeta.flag} {langMeta.label} · {local.time} 当地
         </p>
 
-        <p className={`se-call-status ${speaking ? "speaking" : ""}`}>
+        <p className={`se-call-status ${callPhase}`}>
           {statusText}
-          {speaking ? (
+          {callPhase === "speaking" ? (
             <span className="se-call-wave" aria-hidden>
               <i />
               <i />
@@ -274,15 +337,14 @@ export function CallView({ friend, onClose }: CallViewProps) {
               </p>
             ) : null}
           </div>
-        ) : (
-          <p className="se-call-hint">
-            {active ? "按住下方按钮说话，松手发送" : "正在接通对方…"}
-          </p>
-        )}
+        ) : null}
 
         {micBlocked ? (
           <p className="se-call-warn">
-            <MicOff size={12} /> 麦克风不可用（请检查浏览器权限），仍可结束通话
+            <MicOff size={12} /> 麦克风不可用（请检查浏览器权限）
+            <button type="button" className="se-call-warn-retry" onClick={() => void vad.retry()}>
+              <RefreshCw size={11} /> 重试
+            </button>
           </p>
         ) : null}
 
@@ -290,18 +352,54 @@ export function CallView({ friend, onClose }: CallViewProps) {
       </main>
 
       <footer className="se-call-controls">
-        <div className="se-call-hold">
-          <HoldToTalk
-            onComplete={handleVoice}
-            onUnavailable={(message) => {
-              setMicBlocked(true);
-              showToast(message, "info");
-            }}
-            onError={(message) => showToast(message, "error")}
-            disabled={holdDisabled}
-            label={waiting ? "对方正在回复…" : "按住 说话"}
-          />
+        <div className="se-call-orb-wrap">
+          <button
+            type="button"
+            className={`se-call-orb ${orbActive ? "active" : ""} ${callPhase === "recording" ? "recording" : ""} ${
+              callPhase === "muted" ? "muted" : ""
+            } ${orbBusy ? "busy" : ""}`}
+            aria-label={muted ? "取消静音" : "静音"}
+            aria-pressed={muted}
+            data-level={level.toFixed(2)}
+            onClick={() => setMuted((value) => !value)}
+          >
+            <span className="se-call-orb-rings" aria-hidden>
+              <i />
+              <i />
+            </span>
+            {waiting || speaking ? (
+              <Loader2 size={30} className="animate-spin" />
+            ) : muted ? (
+              <MicOff size={32} />
+            ) : (
+              <Mic size={32} />
+            )}
+          </button>
+          <span className="se-call-level" aria-hidden>
+            {bars.map((factor, index) => (
+              <i
+                key={index}
+                style={{
+                  height: `${6 + Math.round(level * 26 * factor)}px`,
+                  opacity: orbActive ? 0.85 : 0.35,
+                }}
+              />
+            ))}
+          </span>
+          <p className="se-call-orb-hint">{ORB_HINT[callPhase]}</p>
         </div>
+
+        {vadUnsupported ? (
+          <div className="se-call-fallback">
+            <HoldToTalk
+              onComplete={handleFallbackVoice}
+              onUnavailable={() => setMicBlocked(true)}
+              onError={(message) => showToast(message, "error")}
+              disabled={waiting || speaking || ending}
+              label="按住说话（兼容模式）"
+            />
+          </div>
+        ) : null}
 
         <div className="se-call-bottom">
           <button

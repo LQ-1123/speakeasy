@@ -29,6 +29,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const retriedRef = useRef(false);
+  const mountedRef = useRef(true);
   const rafRef = useRef<number | null>(null);
   const bars = waveformBars(message.id || message.created_at, message.duration_ms > 8000 ? 22 : 16);
 
@@ -63,6 +64,8 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
 
   /** 直接加载失败时（Safari/WAV MIME、Range、瞬时 404）用 fetch+blob 重试一次。 */
   const retryWithBlob = async () => {
+    // 已经离开聊天页/组件卸载：绝不能再发请求/播放（否则退回主页会突然响一声）
+    if (!mountedRef.current) return;
     if (retriedRef.current) {
       setPlaying(false);
       setLoading(false);
@@ -77,6 +80,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
       const resp = await fetch(src, { cache: "no-store" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
+      if (!mountedRef.current) return;
       if (blob.size < 44) throw new Error("音频数据异常");
       if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = URL.createObjectURL(blob);
@@ -94,6 +98,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
       };
       audioRef.current = retry;
       retry.playbackRate = rate;
+      if (!mountedRef.current) return;
       await retry.play();
       setPlaying(true);
       setLoading(false);
@@ -126,6 +131,7 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
         stopRaf();
       };
       audio.onerror = () => {
+        if (!mountedRef.current) return;
         void retryWithBlob();
       };
       audioRef.current = audio;
@@ -139,17 +145,27 @@ export function VoiceBubble({ message, friend, mine, showAvatar = true }: VoiceB
       stopRaf();
       rafRef.current = requestAnimationFrame(tick);
     } catch {
-      void retryWithBlob();
+      if (mountedRef.current) void retryWithBlob();
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      // 关键：先标记卸载并解绑事件，再清空 src（清空 src 会触发 error 事件）
+      mountedRef.current = false;
       stopRaf();
       const audio = audioRef.current;
       if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
         audio.pause();
-        audio.src = "";
+        audio.removeAttribute("src");
+        try {
+          audio.load();
+        } catch {
+          /* ignore */
+        }
       }
       audioRef.current = null;
       if (blobUrlRef.current) {

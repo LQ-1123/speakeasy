@@ -18,8 +18,10 @@ import {
   parseLlmSettings,
   parseLlmVerify,
   parseMemoryPayload,
+  parseMessage,
   parseMessages,
   parseMoments,
+  parsePostedMoment,
   parseBatchTranslationResponse,
   parseSttSaveResult,
   parseSttSettings,
@@ -39,6 +41,7 @@ import {
   type MemoryPayload,
   type Message,
   type Moment,
+  type PostedMoment,
   type SttSaveInput,
   type SttSaveResult,
   type SttSettingsPayload,
@@ -296,6 +299,33 @@ export const api = {
     });
   },
 
+  /** 发送图片消息（多模态）：multipart image + 可选 caption。 */
+  sendImage(friendId: string, file: Blob, caption = "", filename = "image.png"): Promise<ChatTurnResponse> {
+    const form = new FormData();
+    form.append("image", file, filename);
+    form.append("text", caption.trim());
+    return request(`/chat/${encodeURIComponent(friendId)}/image`, parseChatTurn, {
+      method: "POST",
+      body: form,
+      timeoutMs: 180000,
+    });
+  },
+
+  /** 结束通话：写入一条 call_summary 聊天记录。 */
+  callSummary(
+    friendId: string,
+    input: { duration_s: number; turns: number },
+  ): Promise<Message | null> {
+    return request(
+      `/chat/${encodeURIComponent(friendId)}/call/summary`,
+      (raw) => {
+        const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+        return parseMessage(r.message);
+      },
+      { method: "POST", body: JSON.stringify(input), timeoutMs: 20000 },
+    );
+  },
+
   sendText(friendId: string, text: string): Promise<ChatTurnResponse> {
     return request(`/chat/${encodeURIComponent(friendId)}/text`, parseChatTurn, {
       method: "POST",
@@ -310,6 +340,33 @@ export const api = {
 
   generateMoments(): Promise<Moment[]> {
     return request("/moments/generate", parseMoments, { method: "POST", timeoutMs: 60000 });
+  },
+
+  /** 发布我的动态（AI 好友评论异步生成，前端轮询 /moments 取评论）。 */
+  postMoment(input: { content: string; mood_tag?: string }): Promise<PostedMoment> {
+    return request("/moments", parsePostedMoment, {
+      method: "POST",
+      body: JSON.stringify(input),
+      timeoutMs: 30000,
+    });
+  },
+
+  /** 发布带图动态：multipart content + mood_tag + image。 */
+  postMomentPhoto(input: {
+    image: Blob;
+    content?: string;
+    mood_tag?: string;
+    filename?: string;
+  }): Promise<PostedMoment> {
+    const form = new FormData();
+    form.append("image", input.image, input.filename ?? "moment.png");
+    form.append("content", (input.content ?? "").trim());
+    form.append("mood_tag", input.mood_tag ?? "");
+    return request("/moments/photo", parsePostedMoment, {
+      method: "POST",
+      body: form,
+      timeoutMs: 60000,
+    });
   },
 
   commentMomentVoice(momentId: string, blob: Blob, durationMs: number, filename = "comment.webm"): Promise<{

@@ -70,6 +70,9 @@ function AppInner() {
   const [momentsError, setMomentsError] = useState<string | null>(null);
   const [momentsLoaded, setMomentsLoaded] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [publishingMoment, setPublishingMoment] = useState(false);
+  /** 已发布但 AI 评论尚未出现的动态 id（用于「AI 好友正在评论…」） */
+  const [pendingCommentIds, setPendingCommentIds] = useState<string[]>([]);
 
   const [discovering, setDiscovering] = useState(false);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
@@ -247,6 +250,54 @@ function AppInner() {
     if (tab !== "discover" || momentsLoaded || momentsLoading) return;
     void loadMoments();
   }, [tab, momentsLoaded, momentsLoading, loadMoments]);
+
+  /** DiscoverTab 轮询到的动态：静默合并，不触发整页 loading。 */
+  const handleMomentsUpdated = useCallback((list: Moment[]) => {
+    if (!mountedRef.current) return;
+    setMoments(list);
+    setMomentsLoaded(true);
+    setMomentsError(null);
+    setPendingCommentIds((prev) =>
+      prev.filter((id) => {
+        const moment = list.find((item) => item.id === id);
+        return moment ? moment.comments.length === 0 : false;
+      }),
+    );
+  }, []);
+
+  /** 发布我的动态；AI 好友评论异步生成，DiscoverTab 会每 4s 轮询刷新。 */
+  const handlePublishMoment = useCallback(
+    async (input: { content: string; mood_tag?: string; image?: File }): Promise<boolean> => {
+      if (publishingMoment) return false;
+      setPublishingMoment(true);
+      try {
+        const result = input.image
+          ? await api.postMomentPhoto({
+              image: input.image,
+              content: input.content,
+              mood_tag: input.mood_tag,
+              filename: input.image.name || "moment.png",
+            })
+          : await api.postMoment({ content: input.content, mood_tag: input.mood_tag });
+        if (!mountedRef.current) return false;
+        if (result.moment) {
+          const posted = result.moment;
+          setMoments((prev) => [posted, ...prev.filter((item) => item.id !== posted.id)]);
+          if (result.comments_pending) {
+            setPendingCommentIds((prev) => (prev.includes(posted.id) ? prev : [...prev, posted.id]));
+          }
+        }
+        showToast("已发布动态，好友们马上来评论 ✨", "success");
+        return true;
+      } catch (err) {
+        showToast(`发布失败：${apiErrorText(err)}`, "error");
+        return false;
+      } finally {
+        if (mountedRef.current) setPublishingMoment(false);
+      }
+    },
+    [publishingMoment, showToast],
+  );
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -594,6 +645,10 @@ function AppInner() {
                 onDecline={(friend) => void handleDecline(friend)}
                 onCommentVoice={handleCommentVoice}
                 onOpenChat={openChat}
+                publishingMoment={publishingMoment}
+                onPublishMoment={handlePublishMoment}
+                commentingIds={pendingCommentIds}
+                onMomentsUpdated={handleMomentsUpdated}
               />
             ) : null}
 

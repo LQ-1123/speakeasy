@@ -69,11 +69,16 @@
 }
 ```
 
+| `POST /api/v2/chat/{id}/image` | multipart `image`（JPG/PNG/WebP/GIF，≤8MB）+ `text`（caption 可空）→ 多模态 LLM 结合图片回复（语音条）。`user_message.msg_type="image"`，带 `image_url=/api/v2/media/xxx`。 |
+| `POST /api/v2/chat/{id}/call/summary` | JSON `{duration_s, turns}` → 落一条 `msg_type="call_summary"` 消息（如「📞 语音通话 01:23 · 4 轮对话」）。 |
+
 ## 3. 朋友圈
 
 | 方法/路由 | 说明 |
 |---|---|
-| `GET /api/v2/moments` | `{"moments":[{...moment, "friend": {...}}], "generated_at":"..."}`；若今日为空自动返回空，前端可调 generate。 |
+| `GET /api/v2/moments` | 合并好友动态 + 用户动态（按时间倒序）。每条含 `author_type:"friend"|"user"`、`author_name`、`friend`（用户动态为 null）、`image_url?`、`comments:[{id,friend_id,content,created_at,friend}]`；用户动态 `comments` 为 AI 好友评论。 |
+| `POST /api/v2/moments` | JSON `{content(1..500), mood_tag?}` → 用户发布文字动态；AI 好友评论后台生成（`comments_pending:true`，前端轮询 GET）。 |
+| `POST /api/v2/moments/photo` | multipart `content?` + `mood_tag?` + `image`（≤8MB）→ 带图用户动态，返回 `{moment, comments_pending}`；AI 评论同异步生成。 |
 | `POST /api/v2/moments/generate` | 为 3~5 位活跃好友批量生成今日动态（幂等：同一天已有则直接返回）。 |
 | `POST /api/v2/moments/{id}/comment` | multipart `audio`（或 JSON `{"text":...}`）→ 把动态作为 `context` 写入私聊用户消息 + 好友回复；返回 `{"friend_id":..., "moment":..., "reply": {...}}`。 |
 
@@ -111,14 +116,20 @@
 翻译复用已配置的 OpenAI 兼容 LLM（进程内 LRU 缓存，按 text+target），不额外消耗翻译 API。
 同样用于**朋友圈动态**（前端 DiscoverTab 的单条「译」/「全部翻译」，均调用本接口，target=zh）。
 
-## 5. 音频
+## 5. 音频 / 图片
 
 | 方法/路由 | 说明 |
 |---|---|
+| `GET /api/v2/media/{filename}` | 用户上传图片静态服务（JPG/PNG/WebP/GIF，显式 MIME + 缓存头）。 |
 | `GET /api/v2/audio/{filename}` | 返回 `data/audio/<filename>`（wav/mp3），用于语音条播放。 |
 | `GET /api/v2/tts/sample?text=...&voice=...` | 调试/试听：用指定 edge 声线合成一句 wav。 |
 | `GET /api/v2/archetypes` | 声线原型底池（`archetypes / countries / languages`），供偶遇筛选下拉框。 |
 | `GET /api/v2/health` | v2 健康状态（好友数、待处理申请、LLM 状态、引导是否进行中）。 |
+
+## 5.5 表情（emoji）
+
+- AI 好友回复允许最多 1 个 emoji（人设/系统 prompt 已放开；TTS 合成前会剥离 emoji，气泡内仍显示原文）。
+- 用户端 Composer 有 48 个常用 emoji 选择面板。
 
 ## 6. 错误
 

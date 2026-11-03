@@ -20,6 +20,7 @@ from app.llm import runtime_config as llm_runtime
 from app.logging_utils import get_logger
 from app.v2 import moments as moments_mod
 from app.v2 import translate as translate_mod
+from app.v2 import user_moments as user_moments_mod
 from app.v2.timeutil import local_date_str, local_state
 from app.v2.voices import load_archetypes
 from app.voice.stt_config import (
@@ -99,6 +100,16 @@ class TranslateBatchIn(BaseModel):
     friend_id: str | None = None
 
 
+class CallSummaryIn(BaseModel):
+    duration_s: int = Field(0, ge=0, le=36000)
+    turns: int = Field(0, ge=0, le=2000)
+
+
+class UserMomentIn(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+    mood_tag: str = Field("", max_length=30)
+
+
 class SttTestIn(BaseModel):
     """只测不存；缺省字段沿用当前配置。"""
 
@@ -130,6 +141,8 @@ def _message_public(msg: dict | None) -> dict | None:
     data = dict(msg)
     name = data.get("audio_path")
     data["audio_url"] = f"/api/v2/audio/{os.path.basename(name)}" if name else None
+    image = data.get("image_path")
+    data["image_url"] = f"/api/v2/media/{os.path.basename(image)}" if image else None
     return data
 
 
@@ -609,6 +622,65 @@ async def read_messages(request: Request, friend_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # 聊天（异步语音条）
 # --------------------------------------------------------------------------- #
+@router.post("/chat/{friend_id}/call/summary")
+async def save_call_summary(
+    request: Request, friend_id: str, body: CallSummaryIn
+) -> dict:
+    """通话结束落一条 call_summary 消息（进入聊天记录）。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    total = max(0, int(body.duration_s))
+    minutes, seconds = divmod(total, 60)
+    turns = max(0, int(body.turns))
+    transcript = f"📞 语音通话 {minutes:02d}:{seconds:02d} · {turns} 轮对话"
+    msg = await _thread(
+        services.db.add_message,
+        friend_id,
+        "friend",
+        transcript,
+        msg_type="call_summary",
+        is_read=True,
+    )
+    return {"message": _message_public(msg)}
+
+
+@router.post("/chat/{friend_id}/image")
+async def chat_image(
+    request: Request,
+    friend_id: str,
+    image: UploadFile = File(...),
+    text: str = Form(""),
+) -> dict:
+    """用户发图片 → 多模态 LLM 结合图片回复（语音条）。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    data = await image.read()
+    try:
+        result = await services.chat.handle_image(
+            friend_id,
+            data,
+            image.filename or "image.jpg",
+            image.content_type or "",
+            text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {
+        "user_message": _message_public(result["user_message"]),
+        "friend_messages": [_message_public(m) for m in result["friend_messages"]],
+        "suggestion_pending": result.get("suggestion_pending", False),
+        "closeness_level": result.get("closeness_level", 1),
+        "total_turns": result.get("total_turns", 0),
+        "memory_updated": result.get("memory_updated", False),
+        "reply_language": result.get("reply_language", "en"),
+        "stt": result.get("stt", {"backend": "image", "latency_ms": 0.0}),
+    }
+
+
 @router.post("/chat/{friend_id}/voice")
 async def chat_voice(
     request: Request,
@@ -716,36 +788,163 @@ async def translate_batch(request: Request, body: TranslateBatchIn) -> dict:
 # --------------------------------------------------------------------------- #
 # 朋友圈
 # --------------------------------------------------------------------------- #
+def _friend_mini(friend: dict | None) -> dict | None:
+    if not friend:
+        return None
+    return {
+        "id": friend.get("id"),
+        "name": friend.get("name"),
+        "avatar_seed": friend.get("avatar_seed"),
+        "city": friend.get("city"),
+        "nationality": friend.get("nationality"),
+        "timezone": friend.get("timezone"),
+        "voice_id": friend.get("voice_id"),
+    }
+
+
+async def _comment_public(services: Any, comment: dict) -> dict:
+    friend = await _thread(services.db.get_friend, comment.get("friend_id"))
+    data = dict(comment)
+    data["friend"] = _friend_mini(friend)
+    return data
+
+
 async def _moment_public(services: Any, moment: dict) -> dict:
     friend = await _thread(services.db.get_friend, moment.get("friend_id"))
     data = dict(moment)
-    data["friend"] = (
+    data.pop("_kind", None)
+    data["author_type"] = "friend"
+    data["author_name"] = friend.get("name") if friend else "好友"
+    data["friend"] = _friend_mini(friend)
+    data["comments"] = []
+    return data
+
+
+async def _user_moment_public(services: Any, moment: dict) -> dict:
+    comments = await _thread(services.db.list_moment_comments, moment["id"])
+    data = dict(moment)
+    data.pop("_kind", None)
+    data.update(
         {
-            "id": friend.get("id"),
-            "name": friend.get("name"),
-            "avatar_seed": friend.get("avatar_seed"),
-            "city": friend.get("city"),
-            "nationality": friend.get("nationality"),
-            "timezone": friend.get("timezone"),
-            "voice_id": friend.get("voice_id"),
+            "author_type": "user",
+            "author_name": "我",
+            "friend_id": "",
+            "friend": None,
+            "local_time": "",
+            "feed_date": _user_today(),
+            "replied": False,
         }
-        if friend
-        else None
     )
+    image = data.get("image_path")
+    data["image_url"] = f"/api/v2/media/{os.path.basename(image)}" if image else None
+    data["comments"] = list(await asyncio.gather(*(_comment_public(services, c) for c in comments)))
     return data
 
 
 async def _moments_payload(services: Any, rows: list[dict]) -> list[dict]:
-    return list(await asyncio.gather(*(_moment_public(services, m) for m in rows)))
+    """rows 里每条带 ``_kind``（friend/user），分别序列化后合并。"""
+    results = await asyncio.gather(
+        *(
+            _user_moment_public(services, row)
+            if row.get("_kind") == "user"
+            else _moment_public(services, row)
+            for row in rows
+        )
+    )
+    return list(results)
+
+
+def _merged_moment_rows(friend_rows: list[dict], user_rows: list[dict], limit: int) -> list[dict]:
+    rows: list[dict] = []
+    for row in friend_rows:
+        item = dict(row)
+        item["_kind"] = "friend"
+        rows.append(item)
+    for row in user_rows:
+        item = dict(row)
+        item["_kind"] = "user"
+        rows.append(item)
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return rows[: max(1, min(limit, 100))]
 
 
 @router.get("/moments")
 async def get_moments(request: Request, limit: int = 30) -> dict:
     services = _services(request)
-    rows = await _thread(services.db.list_moments, limit)
+    friend_rows, user_rows = await asyncio.gather(
+        _thread(services.db.list_moments, limit),
+        _thread(services.db.list_user_moments, limit),
+    )
+    rows = _merged_moment_rows(friend_rows, user_rows, limit)
     return {
         "moments": await _moments_payload(services, rows),
         "generated_at": rows[0]["created_at"] if rows else None,
+    }
+
+
+@router.post("/moments")
+async def create_user_moment(request: Request, body: UserMomentIn) -> dict:
+    """用户发布动态；AI 好友评论在后台生成（前端轮询 /moments 获取）。"""
+    services = _services(request)
+    content = " ".join(body.content.split()).strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="动态内容不能为空")
+    moment = await _thread(
+        services.db.add_user_moment, content, (body.mood_tag or "").strip()
+    )
+    friends = [
+        f
+        for f in await _thread(services.db.list_friends, "active")
+        if str(f.get("status") or "active") == "active"
+    ]
+    services.spawn_bg(
+        user_moments_mod.generate_comments(
+            services.db, services.engines.llm, moment, friends
+        )
+    )
+    return {
+        "moment": await _user_moment_public(services, moment),
+        "comments_pending": True,
+    }
+
+
+@router.post("/moments/photo")
+async def create_user_moment_photo(
+    request: Request,
+    content: str = Form(""),
+    mood_tag: str = Form(""),
+    image: UploadFile = File(...),
+) -> dict:
+    """带图片的用户动态（多模态）；AI 好友评论同样后台生成。"""
+    services = _services(request)
+    if not hasattr(services, "media") or services.media is None:
+        raise HTTPException(status_code=503, detail="图片存储未初始化")
+    data = await image.read()
+    try:
+        image_name = await _thread(
+            services.media.save_image, data, image.content_type or "", image.filename or ""
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    text = " ".join((content or "").split()).strip() or "（分享了一张图片）"
+    if len(text) > 500:
+        raise HTTPException(status_code=422, detail="动态内容过长")
+    moment = await _thread(
+        services.db.add_user_moment, text, (mood_tag or "").strip(), image_name
+    )
+    friends = [
+        f
+        for f in await _thread(services.db.list_friends, "active")
+        if str(f.get("status") or "active") == "active"
+    ]
+    services.spawn_bg(
+        user_moments_mod.generate_comments(
+            services.db, services.engines.llm, moment, friends
+        )
+    )
+    return {
+        "moment": await _user_moment_public(services, moment),
+        "comments_pending": True,
     }
 
 
@@ -987,3 +1186,22 @@ async def v2_health(request: Request) -> dict:
         "llm": services.engines.llm.health(),
         "stt": _stt_payload(services.engines),
     }
+
+
+@router.get("/media/{filename}")
+async def get_media(request: Request, filename: str) -> FileResponse:
+    """用户上传图片的静态服务（显式 MIME，移动端 Safari 兼容）。"""
+    services = _services(request)
+    if not hasattr(services, "media") or services.media is None:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    try:
+        path = services.media.path_for(filename)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="图片不存在") from None
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(
+        path,
+        media_type=services.media.mime_for(filename),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

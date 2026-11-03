@@ -17,7 +17,7 @@ interface AvatarProps {
 export function Avatar({ name, seed, friend, size = 46, flag = true, ring = false }: AvatarProps) {
   const { from, to } = avatarColors(seed || name);
   const fontSize = Math.max(11, Math.round(size * 0.36));
-  const badge = friend ? flagOf(friend) : "";
+  const badge = friend && flag ? flagOf(friend) : "";
 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>

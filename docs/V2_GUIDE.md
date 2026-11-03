@@ -28,6 +28,10 @@
 | 实时语音通话 | 1.0 的 `/ws` 通道与 `/classic` 页面保留可用（新 UI 暂以"即将上线"占位，接口未破坏） | `backend/app/routers/ws.py`、`frontend/src/app/classic` |
 | 多语言好友（ja/ko/pt/es-MX…） | 28 个声线原型（14 国 × 男女）；「偶遇」国家/语种筛选**严格生效**（无匹配返回 422 + 支持列表）；好友按 `reply_language` 用该语言回复，TTS 用对应语言声线；**回复语言有后置校验/纠偏**（跑偏成英文时自动重写，仍失败则用目标语言模板兜底，绝不发错语言）；日语/韩语等语音输入走多语言 STT 模型或云端 SenseVoice | `voice_archetypes.json`、`spawner.py`、`chat_service.py`、`DiscoverTab.tsx` |
 | 云端 STT（SenseVoiceSmall） | 个人设置里填硅基流动 Key 即热切换到 `FunAudioLLM/SenseVoiceSmall`；云端失败自动回退本地 Whisper→mock | `backend/app/voice/sensevoice.py`、`stt_config.py`、`v2/router.py`、`frontend/src/components/v2/SettingsPanel.tsx` |
+| 用户动态 + AI 评论 | 「动态·偶遇」顶部「分享此刻…」发布文字/图片动态；AI 好友按各自语言异步评论（含 emoji），4s 轮询自动出现 | `v2/user_moments.py`、`PublishMoment.tsx`、`DiscoverTab.tsx` |
+| 图片多模态 | 聊天/动态可上传 JPG/PNG/WebP/GIF（≤8MB）；聊天发图后多模态 LLM 结合图片回复语音条；动态可配图 | `v2/media_store.py`、`ImageBubble`、`PublishMoment.tsx` |
+| 表情 | Composer 48 个 emoji 选择面板；AI 回复最多 1 个 emoji，TTS 不念 emoji | `Composer.tsx`、`spawner.py`、`chat_service.py` |
+| 语音通话 | 全屏 CallView：计时/状态/按住说话/自动播放好友语音/结束保存 call_summary | `CallView.tsx`、`router.py` |
 | 聊天内翻译 | 每条消息「译」按钮（好友消息→中文、自己消息→对方语言）+ ⋯「翻译最近消息」批量对照；**朋友圈动态每条可「译」、支持「全部翻译」**；复用 LLM Key，无 Key 时明确提示 | `v2/translate.py`、`ChatView.tsx`、`DiscoverTab.tsx` |
 | 删除好友 | 单聊右上角「⋯」→「删除好友」（二次确认），后端级联删除消息/朋友圈/音频并清理推荐关系 | `router.py`、`ChatView.tsx` |
 | 移动端三 Tab + PWA | 消息 / 动态·偶遇 / 表达本·画像；微信式浅色；按住说话；PWA manifest+SW+图标 | `frontend/src/components/v2/*`、`frontend/public/*` |

@@ -2,14 +2,15 @@
 
 /** 动态 · 偶遇 Tab：偶遇好友（国家/语种筛选）+ 好友申请 + 朋友圈动态流（按住语音评论）。 */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Compass, Languages, Loader2, MessageCircle, RefreshCw, Sparkles, Users, X } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
+import { PublishMoment } from "@/components/v2/PublishMoment";
 import { HoldToTalk } from "@/components/v2/HoldToTalk";
 import { useToast } from "@/components/v2/Toast";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/v2/ui";
-import { apiErrorText, getArchetypeFilters, translateBatch, translateText } from "@/lib/v2/api";
+import { api, apiErrorText, getArchetypeFilters, translateBatch, translateText } from "@/lib/v2/api";
 import { countryMeta, flagOf, langLabel, languageMeta, localStateOf, relativeLabel } from "@/lib/v2/format";
 import type { Friend, Moment, TranslationResult } from "@/lib/v2/types";
 import type { RecordingResult } from "@/lib/v2/useRecorder";
@@ -59,6 +60,13 @@ interface DiscoverTabProps {
   onDecline: (friend: Friend) => void;
   onCommentVoice: (moment: Moment, result: RecordingResult) => Promise<void>;
   onOpenChat: (friend: Friend) => void;
+  /** 发布我的动态（父级负责调接口 + 合并列表） */
+  publishingMoment: boolean;
+  onPublishMoment: (input: { content: string; mood_tag?: string }) => Promise<boolean>;
+  /** 发布后等 AI 评论的 moment id 列表 */
+  commentingIds: string[];
+  /** DiscoverTab 轮询到的动态（静默合并，不触发整页 loading） */
+  onMomentsUpdated: (moments: Moment[]) => void;
 }
 
 export function DiscoverTab({
@@ -77,6 +85,10 @@ export function DiscoverTab({
   onDecline,
   onCommentVoice,
   onOpenChat,
+  publishingMoment,
+  onPublishMoment,
+  commentingIds,
+  onMomentsUpdated,
 }: DiscoverTabProps) {
   const { showToast } = useToast();
   const [nationality, setNationality] = useState("");
@@ -132,6 +144,50 @@ export function DiscoverTab({
     return list;
   }, [languages, language]);
 
+  /* ---------------- 用户动态发布后：4s 轮询 AI 评论（最多 ~30s） ---------------- */
+
+  const momentsRef = useRef(moments);
+  momentsRef.current = moments;
+  const onMomentsUpdatedRef = useRef(onMomentsUpdated);
+  onMomentsUpdatedRef.current = onMomentsUpdated;
+  const pollDeadlineRef = useRef(0);
+
+  // 新的用户动态出现（发布/首次加载）时重新开始 30s 窗口
+  const userMomentKey = useMemo(
+    () =>
+      moments
+        .filter((moment) => moment.author_type === "user")
+        .map((moment) => moment.id)
+        .join(","),
+    [moments],
+  );
+
+  useEffect(() => {
+    if (!userMomentKey) return;
+    pollDeadlineRef.current = Date.now() + 30000;
+  }, [userMomentKey]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const pending = momentsRef.current.some(
+        (moment) => moment.author_type === "user" && moment.comments.length === 0,
+      );
+      if (!pending) return;
+      if (Date.now() > pollDeadlineRef.current) return;
+      // 页面不可见时暂停轮询
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void (async () => {
+        try {
+          const list = await api.moments();
+          onMomentsUpdatedRef.current(list);
+        } catch {
+          /* 轮询失败静默，下次再试 */
+        }
+      })();
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
   const toggleMomentTranslation = async (moment: Moment) => {
     const existing = momentTranslations[moment.id];
     if (existing) {
@@ -171,7 +227,9 @@ export function DiscoverTab({
 
   const handleTranslateAllMoments = async () => {
     if (translatingAll) return;
-    const pending = moments.filter((moment) => !momentTranslations[moment.id]?.result);
+    const pending = moments.filter(
+      (moment) => moment.author_type !== "user" && !momentTranslations[moment.id]?.result,
+    );
     if (pending.length === 0) {
       showToast("所有动态都翻译过了", "info");
       return;
@@ -358,6 +416,8 @@ export function DiscoverTab({
         </div>
       </div>
 
+      <PublishMoment publishing={publishingMoment} onPublish={onPublishMoment} />
+
       {error ? <ErrorBanner message={`动态加载失败：${error}`} onRetry={onRetry} /> : null}
 
       {momentsLoading && moments.length === 0 ? (
@@ -380,55 +440,84 @@ export function DiscoverTab({
 
       <div className="mt-2 flex flex-col gap-2.5 px-3">
         {moments.map((moment) => {
+          const isUser = moment.author_type === "user";
           const friend = moment.friend;
           const local = friend ? localStateOf(friend) : null;
+          const comments = moment.comments.slice(0, 3);
+          const remainingComments = Math.max(0, moment.comments.length - comments.length);
+          const waitingForAi = isUser && comments.length === 0 && commentingIds.includes(moment.id);
+          const displayName = isUser ? moment.author_name || "我" : friend?.name ?? (moment.author_name || "好友");
           return (
-            <article key={moment.id} className="se-moment">
+            <article key={moment.id} className={`se-moment ${isUser ? "mine" : ""}`}>
               <div className="flex items-center gap-2.5">
-                {friend ? (
+                {isUser ? (
+                  <Avatar name="我" seed="me-speakeasy" size={40} flag={false} />
+                ) : friend ? (
                   <Avatar name={friend.name} seed={friend.avatar_seed} friend={friend} size={40} />
                 ) : (
-                  <Avatar name="?" seed={moment.friend_id} size={40} />
+                  <Avatar name={displayName} seed={moment.friend_id} size={40} />
                 )}
-                <button type="button" onClick={() => friend && onOpenChat(friend)} className="min-w-0 flex-1 text-left">
-                  <p className="truncate text-[14px] font-medium">{friend?.name ?? "好友"}</p>
-                  <p className="truncate text-[11px] text-[color:var(--se-dim)]">
-                    {friend ? `${flagOf(friend)} ${friend.city || friend.nationality}` : "远方"}
-                    {local ? ` · ${local.time}` : moment.local_time ? ` · ${moment.local_time}` : ""}
-                  </p>
-                </button>
+                {isUser || !friend ? (
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[14px] font-medium">{displayName}</p>
+                    <p className="truncate text-[11px] text-[color:var(--se-dim)]">
+                      {isUser ? "我的动态 · 好友会来评论" : "远方"}
+                    </p>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => onOpenChat(friend)} className="min-w-0 flex-1 text-left">
+                    <p className="truncate text-[14px] font-medium">{displayName}</p>
+                    <p className="truncate text-[11px] text-[color:var(--se-dim)]">
+                      {flagOf(friend)} {friend.city || friend.nationality}
+                      {local ? ` · ${local.time}` : moment.local_time ? ` · ${moment.local_time}` : ""}
+                    </p>
+                  </button>
+                )}
                 <span className="text-[10.5px] text-[color:var(--se-faint)]">
                   {relativeLabel(moment.created_at)}
                 </span>
               </div>
 
-              <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed text-[color:var(--se-text)]">
-                {moment.content}
-              </p>
+              {moment.content ? (
+                <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed text-[color:var(--se-text)]">
+                  {moment.content}
+                </p>
+              ) : null}
+
+              {moment.image_url ? (
+                <img
+                  src={moment.image_url}
+                  alt={moment.content || "动态图片"}
+                  className="se-moment-image"
+                  loading="lazy"
+                />
+              ) : null}
 
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 {moment.mood_tag ? <span className="se-mood">#{moment.mood_tag}</span> : null}
-                <button
-                  type="button"
-                  className={`se-translate-btn ${momentTranslations[moment.id] ? "done" : ""}`}
-                  aria-label="翻译这条动态"
-                  aria-expanded={momentTranslations[moment.id]?.open === true}
-                  disabled={translatingMoments[moment.id] === true}
-                  onClick={() => void toggleMomentTranslation(moment)}
-                >
-                  {translatingMoments[moment.id] ? (
-                    <Loader2 size={10} className="animate-spin" />
-                  ) : (
-                    <Languages size={11} />
-                  )}
-                  {translatingMoments[moment.id] ? "翻译中…" : "译"}
-                </button>
-                {momentTranslations[moment.id]?.result.cached ? (
+                {!isUser ? (
+                  <button
+                    type="button"
+                    className={`se-translate-btn ${momentTranslations[moment.id] ? "done" : ""}`}
+                    aria-label="翻译这条动态"
+                    aria-expanded={momentTranslations[moment.id]?.open === true}
+                    disabled={translatingMoments[moment.id] === true}
+                    onClick={() => void toggleMomentTranslation(moment)}
+                  >
+                    {translatingMoments[moment.id] ? (
+                      <Loader2 size={10} className="animate-spin" />
+                    ) : (
+                      <Languages size={11} />
+                    )}
+                    {translatingMoments[moment.id] ? "翻译中…" : "译"}
+                  </button>
+                ) : null}
+                {!isUser && momentTranslations[moment.id]?.result.cached ? (
                   <span className="se-translate-cached">缓存</span>
                 ) : null}
               </div>
 
-              {momentTranslations[moment.id]?.open ? (
+              {!isUser && momentTranslations[moment.id]?.open ? (
                 <button
                   type="button"
                   className="se-translation mt-1.5"
@@ -446,36 +535,74 @@ export function DiscoverTab({
                 </button>
               ) : null}
 
-              <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2">
-                <span className="text-[10.5px] text-[color:var(--se-faint)]">
-                  {moment.replied ? "已评论 · 话题已带进私聊" : "按住语音评论，把话题带进私聊"}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => friend && onOpenChat(friend)}
-                    className="se-moment-open"
-                    aria-label="打开私聊"
-                  >
-                    私聊
-                  </button>
-                  <HoldToTalk
-                    compact
-                    label="按住 评论"
-                    disabled={commentingId === moment.id}
-                    onComplete={async (result) => {
-                      setCommentingId(moment.id);
-                      try {
-                        await onCommentVoice(moment, result);
-                      } finally {
-                        setCommentingId(null);
-                      }
-                    }}
-                    onUnavailable={(message) => showToast(message, "info")}
-                    onError={(message) => showToast(message, "error")}
-                  />
+              {comments.length > 0 || isUser ? (
+                <div className="se-moment-comments">
+                  {comments.map((comment) => {
+                    const commentFriend = comment.friend;
+                    return (
+                      <div key={comment.id} className="se-comment">
+                        <Avatar
+                          name={commentFriend?.name ?? "AI 好友"}
+                          seed={commentFriend?.avatar_seed ?? comment.friend_id}
+                          friend={commentFriend ?? undefined}
+                          size={22}
+                          flag={false}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="se-comment-name">{commentFriend?.name ?? "AI 好友"}</p>
+                          <p className="se-comment-text">{comment.content}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {comments.length === 0 ? (
+                    waitingForAi ? (
+                      <p className="se-comment-pending">
+                        <Loader2 size={11} className="animate-spin" />
+                        AI 好友正在评论…
+                      </p>
+                    ) : (
+                      <p className="se-comment-pending">等好友来评论…</p>
+                    )
+                  ) : null}
+                  {remainingComments > 0 ? (
+                    <p className="se-comment-more">还有 {remainingComments} 条评论</p>
+                  ) : null}
                 </div>
-              </div>
+              ) : null}
+
+              {!isUser ? (
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-black/[0.05] pt-2">
+                  <span className="text-[10.5px] text-[color:var(--se-faint)]">
+                    {moment.replied ? "已评论 · 话题已带进私聊" : "按住语音评论，把话题带进私聊"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => friend && onOpenChat(friend)}
+                      className="se-moment-open"
+                      aria-label="打开私聊"
+                    >
+                      私聊
+                    </button>
+                    <HoldToTalk
+                      compact
+                      label="按住 评论"
+                      disabled={commentingId === moment.id}
+                      onComplete={async (result) => {
+                        setCommentingId(moment.id);
+                        try {
+                          await onCommentVoice(moment, result);
+                        } finally {
+                          setCommentingId(null);
+                        }
+                      }}
+                      onUnavailable={(message) => showToast(message, "info")}
+                      onError={(message) => showToast(message, "error")}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </article>
           );
         })}

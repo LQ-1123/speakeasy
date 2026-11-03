@@ -174,6 +174,7 @@ class DB:
                     msg_type TEXT DEFAULT 'voice',
                     transcript TEXT NOT NULL DEFAULT '',
                     audio_path TEXT,
+                    image_path TEXT DEFAULT '',
                     duration_ms INTEGER DEFAULT 0,
                     suggestion JSON DEFAULT NULL,
                     context TEXT,
@@ -195,6 +196,24 @@ class DB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_moments_date ON moments(feed_date);
 
+                CREATE TABLE IF NOT EXISTS user_moments (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    mood_tag TEXT DEFAULT '',
+                    image_path TEXT DEFAULT '',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS moment_comments (
+                    id TEXT PRIMARY KEY,
+                    moment_id TEXT NOT NULL REFERENCES user_moments(id) ON DELETE CASCADE,
+                    friend_id TEXT,
+                    content TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_moment_comments_moment
+                    ON moment_comments(moment_id);
+
                 CREATE TABLE IF NOT EXISTS saved_expressions (
                     id TEXT PRIMARY KEY,
                     original_text TEXT,
@@ -212,6 +231,11 @@ class DB:
             if "reply_language" not in columns:
                 conn.execute("ALTER TABLE friends ADD COLUMN reply_language TEXT DEFAULT 'en'")
                 log.info("migrated friends table: added reply_language column")
+
+            msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+            if msg_columns and "image_path" not in msg_columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
+                log.info("migrated messages table: added image_path column")
 
             row = conn.execute("SELECT id FROM user_profile WHERE id=1").fetchone()
             if row is None:
@@ -394,6 +418,7 @@ class DB:
         *,
         msg_type: str = "voice",
         audio_path: str | None = None,
+        image_path: str | None = None,
         duration_ms: int = 0,
         suggestion: dict | None = None,
         is_read: bool = True,
@@ -408,6 +433,7 @@ class DB:
             "msg_type": msg_type,
             "transcript": transcript or "",
             "audio_path": audio_path,
+            "image_path": image_path or "",
             "duration_ms": int(duration_ms or 0),
             "suggestion": _json_dumps(suggestion) if suggestion is not None else None,
             "context": context,
@@ -526,6 +552,71 @@ class DB:
     def mark_moment_replied(self, mid: str) -> None:
         with self._lock, self.conn:
             self.conn.execute("UPDATE moments SET is_replied=1 WHERE id=?", (mid,))
+
+    # ---------------------------------------------------------------- #
+    # 用户动态（用户自己发） + AI 好友评论
+    # ---------------------------------------------------------------- #
+    def add_user_moment(
+        self, content: str, mood_tag: str = "", image_path: str = ""
+    ) -> dict:
+        mid = _uuid()
+        now = _now_iso()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO user_moments (id, content, mood_tag, image_path, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (mid, content, mood_tag or "", image_path or "", now),
+            )
+            row = self.conn.execute(
+                "SELECT * FROM user_moments WHERE id=?", (mid,)
+            ).fetchone()
+        return dict(row) if row else {"id": mid}
+
+    def list_user_moments(self, limit: int = 30) -> list[dict]:
+        return self._fetch_all(
+            "user_moments",
+            "SELECT * FROM user_moments ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        )
+
+    def get_user_moment(self, mid: str) -> dict | None:
+        return self._fetch_one("user_moments", "id=?", (mid,))
+
+    def add_moment_comment(self, moment_id: str, friend_id: str, content: str) -> dict:
+        cid = _uuid()
+        now = _now_iso()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO moment_comments (id, moment_id, friend_id, content, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (cid, moment_id, friend_id or "", content, now),
+            )
+            row = self.conn.execute(
+                "SELECT * FROM moment_comments WHERE id=?", (cid,)
+            ).fetchone()
+        return dict(row) if row else {"id": cid}
+
+    def list_moment_comments(self, moment_id: str) -> list[dict]:
+        return self._fetch_all(
+            "moment_comments",
+            "SELECT * FROM moment_comments WHERE moment_id=? ORDER BY created_at, rowid",
+            (moment_id,),
+        )
+
+    def comments_for_moments(self, moment_ids: list[str]) -> dict[str, list[dict]]:
+        if not moment_ids:
+            return {}
+        placeholders = ",".join("?" for _ in moment_ids)
+        with self._lock:
+            rows = self.conn.execute(
+                f"SELECT * FROM moment_comments WHERE moment_id IN ({placeholders})"
+                " ORDER BY created_at, rowid",
+                tuple(moment_ids),
+            ).fetchall()
+        grouped: dict[str, list[dict]] = {mid: [] for mid in moment_ids}
+        for row in rows:
+            grouped.setdefault(str(row["moment_id"]), []).append(dict(row))
+        return grouped
 
     def moments_exist_for_date(self, feed_date: str) -> bool:
         with self._lock:

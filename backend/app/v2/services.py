@@ -11,6 +11,7 @@ from app.logging_utils import get_logger
 from app.v2.audio_store import AudioStore
 from app.v2.chat_service import ChatService
 from app.v2.db import DB
+from app.v2.media_store import MediaStore
 from app.v2.memory import MemoryManager
 from app.v2.spawner import PersonaSpawner
 from app.v2.voices import FriendVoiceSynth
@@ -31,6 +32,7 @@ class V2Services:
     onboarding_task: asyncio.Task | None = None
     followup_inflight: set[str] = field(default_factory=set)
     _tasks: set[asyncio.Task] = field(default_factory=set)
+    media: Any = None
 
     def spawn_bg(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -62,17 +64,19 @@ def build_services(engines: Any, data_dir: str) -> V2Services:
     db = DB(os.path.join(data_dir, "speakeasy_v2.db"))
     db.init()
     audio = AudioStore(data_dir)
+    media = MediaStore(data_dir)
     memory = MemoryManager(db, engines.llm)
     voice = FriendVoiceSynth()
     spawner = PersonaSpawner(db, engines.llm)
     idle_s = float(os.getenv("V2_MEMORY_IDLE_S", "120") or 120)
     chat = ChatService(
-        engines, db, memory, voice, spawner, audio, memory_idle_s=idle_s
+        engines, db, memory, voice, spawner, audio, media, memory_idle_s=idle_s
     )
     services = V2Services(
         db=db,
         engines=engines,
         audio=audio,
+        media=media,
         memory=memory,
         voice=voice,
         spawner=spawner,

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
+  ImageOff,
   Languages,
   Loader2,
   MoreHorizontal,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Avatar } from "@/components/v2/Avatar";
+import { CallView } from "@/components/v2/CallView";
 import { Composer } from "@/components/v2/Composer";
 import { SuggestionPill } from "@/components/v2/SuggestionPill";
 import { useToast } from "@/components/v2/Toast";
@@ -83,6 +85,44 @@ function TextBubble({ message, friend, mine }: { message: Message; friend: Frien
   );
 }
 
+/** 图片消息气泡：图片 + caption（图片下方），发送中显示 spinner。 */
+function ImageBubble({ message, friend, mine }: { message: Message; friend: Friend; mine: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const src = message.local_image_url || message.image_url;
+  const caption =
+    message.transcript && message.transcript !== "（发来一张图片）" ? message.transcript : "";
+
+  return (
+    <div className={`se-bubble-row ${mine ? "me" : ""}`}>
+      {!mine ? <Avatar name={friend.name} seed={friend.avatar_seed} friend={friend} size={38} /> : null}
+      <div className={`se-image-card ${mine ? "me" : ""}`}>
+        {src && !failed ? (
+          <img
+            src={src}
+            alt={caption || "图片消息"}
+            className="se-image"
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <div className="se-image-placeholder">
+            <ImageOff size={16} />
+            {failed ? "图片加载失败" : "图片发送中…"}
+          </div>
+        )}
+        {message.pending ? (
+          <span className="se-image-pending">
+            <Loader2 size={10} className="animate-spin" />
+            发送中…
+          </span>
+        ) : null}
+        {caption ? <p className="se-image-caption">{caption}</p> : null}
+      </div>
+      {mine ? <Avatar name="我" seed="me-speakeasy" size={38} flag={false} /> : null}
+    </div>
+  );
+}
+
 export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatViewProps) {
   const { showToast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -92,6 +132,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const [suggestionPending, setSuggestionPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [callOpen, setCallOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [now, setNow] = useState(() => new Date());
   /** 每条消息的译文缓存（按 message.id），open 控制展开/收起 */
@@ -249,6 +290,12 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     tempUrlsRef.current = tempUrlsRef.current.filter((item) => item !== url);
   };
 
+  /** 清理本地临时气泡的 blob（语音 / 图片） */
+  const releaseTempUrls = (message: Message) => {
+    revokeTemp(message.local_audio_url);
+    revokeTemp(message.local_image_url);
+  };
+
   const send = async (temp: Message, request: () => Promise<Awaited<ReturnType<typeof api.sendText>>>) => {
     setSending(true);
     setMessages((prev) => mergeMessages(prev, [temp]));
@@ -257,7 +304,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
       const response = await request();
       if (!mountedRef.current) {
         // 用户等待期间已离开聊天：不更新 UI、不标已读（回复算未读）、不启动轮询
-        revokeTemp(temp.local_audio_url);
+        releaseTempUrls(temp);
         return;
       }
       setMessages((prev) => {
@@ -267,7 +314,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         incoming.push(...response.friend_messages);
         return mergeMessages(withoutTemp, incoming);
       });
-      revokeTemp(temp.local_audio_url);
+      releaseTempUrls(temp);
       // 好友回复已直接展示在聊天窗里 → 标记已读，否则退回列表会亮红点。
       // 若用户在等待期间已经退出聊天，则不标记（回复未看到，应保留未读）。
       if (mountedRef.current) {
@@ -283,7 +330,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
       requestAnimationFrame(() => scrollToBottom(true));
     } catch (err) {
       setMessages((prev) => prev.filter((message) => message.id !== temp.id));
-      revokeTemp(temp.local_audio_url);
+      releaseTempUrls(temp);
       showToast(`发送失败：${errorText(err)}`, "error");
       throw err;
     } finally {
@@ -300,6 +347,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
       transcript: text,
       audio_path: "",
       audio_url: "",
+      image_url: "",
       duration_ms: 0,
       suggestion: null,
       is_read: true,
@@ -321,6 +369,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
       transcript: "识别中…",
       audio_path: "",
       audio_url: "",
+      image_url: "",
       local_audio_url: url,
       duration_ms: result.durationMs,
       suggestion: null,
@@ -335,6 +384,30 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
     } catch {
       /* 错误提示已在 send 内处理，这里吞掉避免未捕获 rejection */
     }
+  };
+
+  const handleSendImage = async (file: File, caption: string) => {
+    const url = URL.createObjectURL(file);
+    tempUrlsRef.current.push(url);
+    const temp: Message = {
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      friend_id: friend.id,
+      sender: "user",
+      msg_type: "image",
+      transcript: caption.trim(),
+      audio_path: "",
+      audio_url: "",
+      image_url: "",
+      local_image_url: url,
+      duration_ms: 0,
+      suggestion: null,
+      is_read: true,
+      context: "",
+      created_at: new Date().toISOString(),
+      pending: true,
+    };
+    // 失败时抛出，让 Composer 保留待发送预览（错误提示已在 send 内 toast）
+    await send(temp, () => api.sendImage(friend.id, file, caption, file.name || "image.png"));
   };
 
   const friendStateTone = local.period === "night" || local.period === "late_night";
@@ -399,7 +472,14 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const handleTranslateRecent = useCallback(async () => {
     if (batchTranslating) return;
     const candidates = messages
-      .filter((message) => !message.pending && message.transcript.trim().length > 0)
+      .filter(
+        (message) =>
+          !message.pending &&
+          message.msg_type !== "image" &&
+          !message.image_url &&
+          !message.local_image_url &&
+          message.transcript.trim().length > 0,
+      )
       .slice(-TRANSLATE_RECENT_LIMIT);
     if (candidates.length === 0) {
       showToast("还没有可翻译的聊天记录", "info");
@@ -514,9 +594,10 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         </div>
         <button
           type="button"
-          onClick={() => showToast("语音通话即将上线 📞", "info")}
+          onClick={() => setCallOpen(true)}
           className="se-chat-action"
           aria-label="语音通话"
+          title="语音通话"
         >
           <Phone size={18} />
         </button>
@@ -601,6 +682,8 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
 
         {messages.map((message, index) => {
           const mine = message.sender === "user";
+          const isImage =
+            message.msg_type === "image" || Boolean(message.image_url) || Boolean(message.local_image_url);
           const showDivider = shouldShowDayDivider(messages[index - 1], message);
           return (
             <div key={message.id} className="relative">
@@ -609,7 +692,9 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
                   <span>{chatDayLabel(message.created_at, now)}</span>
                 </div>
               ) : null}
-              {message.msg_type === "text" || message.msg_type === "call_summary" ? (
+              {isImage ? (
+                <ImageBubble message={message} friend={friend} mine={mine} />
+              ) : message.msg_type === "text" || message.msg_type === "call_summary" ? (
                 <TextBubble message={message} friend={friend} mine={mine} />
               ) : (
                 <VoiceBubble message={message} friend={friend} mine={mine} />
@@ -625,7 +710,7 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
                 </div>
               ) : null}
 
-              {!message.pending && message.transcript.trim() ? (
+              {!message.pending && !isImage && message.transcript.trim() ? (
                 <>
                   <div className={`se-translate-row ${mine ? "me" : ""}`}>
                     <button
@@ -685,7 +770,13 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         <div className="h-2" />
       </div>
 
-      <Composer onSendVoice={handleSendVoice} onSendText={handleSendText} sending={sending} disabled={loading && messages.length === 0} />
+      <Composer
+        onSendVoice={handleSendVoice}
+        onSendText={handleSendText}
+        onSendImage={handleSendImage}
+        sending={sending}
+        disabled={loading && messages.length === 0}
+      />
 
       {infoOpen ? (
         <div className="absolute inset-0 z-40 flex items-end">
@@ -755,6 +846,16 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
         </div>
       ) : null}
 
+      {callOpen ? (
+        <CallView
+          friend={friend}
+          onClose={() => {
+            setCallOpen(false);
+            // 通话结束刷新消息列表：call_summary 会出现在聊天记录里
+            void loadMessages();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

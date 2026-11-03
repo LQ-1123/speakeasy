@@ -18,6 +18,7 @@ import time
 import zlib
 from typing import Any
 
+from app.llm.client import ChatMessage
 from app.logging_utils import get_logger
 from app.v2 import social
 from app.v2.suggestion import generate_suggestion
@@ -207,6 +208,26 @@ def _native_quirk_prefix(quirk: str, lang: str) -> str:
     return f"{q}, "
 
 
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport
+    "\U0001F900-\U0001F9FF"  # supplemental symbols
+    "\U0001FA00-\U0001FAFF"  # newer symbols
+    "\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _strip_emoji(text: str) -> str:
+    """TTS 前去掉 emoji（气泡里仍显示原文）；避免语音引擎把 emoji 念出来。"""
+    cleaned = _EMOJI_RE.sub("", text or "")
+    return " ".join(cleaned.split()).strip()
+
+
 def _clean_reply(text: str) -> str:
     text = _MARKDOWN_RE.sub("", text or "")
     text = re.sub(r"\s+", " ", text).strip().strip('"')
@@ -234,6 +255,7 @@ class ChatService:
         voice: Any,
         spawner: Any,
         audio_store: Any,
+        media_store: Any = None,
         *,
         memory_idle_s: float = 120.0,
     ) -> None:
@@ -243,6 +265,7 @@ class ChatService:
         self.voice = voice
         self.spawner = spawner
         self.audio = audio_store
+        self.media = media_store
         self.memory_idle_s = max(0.0, float(memory_idle_s))
         self._tasks: set[asyncio.Task] = set()
         self._memory_tasks: dict[str, asyncio.Task] = {}
@@ -310,6 +333,150 @@ class ChatService:
             friend, text, msg_type="text", context=context,
             stt_meta={"backend": "text", "latency_ms": 0.0},
         )
+
+    # ------------------------------------------------------------------ #
+    # 图片多模态回合
+    # ------------------------------------------------------------------ #
+    async def handle_image(
+        self,
+        friend_id: str,
+        image_bytes: bytes,
+        filename: str,
+        content_type: str = "",
+        caption: str = "",
+    ) -> dict:
+        """用户发图 → 多模态 LLM 结合图片回复 → TTS，落一条 image 消息。"""
+        friend = await asyncio.to_thread(self.db.get_friend, friend_id)
+        if friend is None:
+            raise KeyError(friend_id)
+        if self.media is None:
+            raise ValueError("图片存储未初始化")
+
+        image_name = await asyncio.to_thread(
+            self.media.save_image, image_bytes, content_type, filename
+        )
+        text = (caption or "").strip() or "（发来一张图片）"
+
+        history = await asyncio.to_thread(self.db.recent_messages, friend_id, 10)
+        user_msg = await asyncio.to_thread(
+            self.db.add_message,
+            friend_id,
+            "user",
+            text,
+            msg_type="image",
+            image_path=image_name,
+            is_read=True,
+        )
+
+        friend = await asyncio.to_thread(self.db.add_turns, friend_id, 1)
+        total_turns = await asyncio.to_thread(self.db.count_turns, friend_id)
+        level = social.closeness_level(total_turns)
+        friend = await asyncio.to_thread(
+            self.db.update_friend,
+            friend_id,
+            closeness_level=level,
+            total_turns=total_turns,
+            last_interaction_at=_now_iso(),
+        )
+
+        review_exprs = await asyncio.to_thread(self.db.pick_review_expressions, 2)
+        referral_friend = await self._maybe_refer(friend)
+        reply_text = await self._llm_reply_with_image(
+            friend, text, history, review_exprs, image_name
+        )
+        if referral_friend is not None:
+            reply_text = f"{reply_text} {social.referral_line(friend, referral_friend['name'])}".strip()
+            await self._notify_referral(friend, referral_friend)
+
+        friend_msg = await self.store_friend_voice(friend, reply_text)
+        self._schedule_memory(friend_id)
+        self.spawn_bg(self._expression_mastery_worker(text))
+
+        return {
+            "user_message": user_msg,
+            "friend_messages": [friend_msg],
+            "suggestion_pending": False,
+            "closeness_level": level,
+            "total_turns": total_turns,
+            "memory_updated": False,
+            "reply_language": self._reply_language(friend),
+            "stt": {"backend": "image", "latency_ms": 0.0},
+        }
+
+    async def _llm_reply_with_image(
+        self,
+        friend: dict,
+        caption: str,
+        history: list[dict],
+        review_exprs: list[dict],
+        image_name: str,
+    ) -> str:
+        if getattr(self.engines.llm, "uses_mock", False):
+            return self._mock_image_reply(friend)
+        import base64  # noqa: PLC0415
+
+        try:
+            with open(self.media.path_for(image_name), "rb") as fh:
+                raw = fh.read()
+            mime = self.media.mime_for(image_name)
+            data_url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+        except OSError:
+            return self._mock_image_reply(friend)
+
+        instruction = (
+            f"The user sent you a photo. Caption from them: {caption!r}. "
+            "Look at the photo carefully and react like a friend in a chat: mention one "
+            "specific thing you see, then ask one natural follow-up question. "
+            "Keep it to 1-2 short spoken sentences."
+        )
+        messages: list[Any] = [
+            {"role": "system", "content": self._system_prompt(friend, review_exprs)}
+        ]
+        for item in history[-10:]:
+            role = "user" if item.get("sender") == "user" else "assistant"
+            content = (item.get("transcript") or "").strip()
+            if content:
+                messages.append({"role": role, "content": content})
+        messages.append(ChatMessage(role="user", content=instruction, images=(data_url,)))
+
+        chunks: list[str] = []
+        try:
+            async for delta in self.engines.llm.stream_chat(
+                messages, temperature=0.8, max_tokens=160
+            ):
+                if delta:
+                    chunks.append(delta)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 模型不支持图片/网络失败都降级
+            log.warning("图片多模态回复失败（%s: %s），用模板兜底", type(exc).__name__, exc)
+            return self._mock_image_reply(friend)
+
+        text = _clean_reply("".join(chunks))
+        if not text:
+            return self._mock_image_reply(friend)
+        lang = _language_of(friend)
+        if not _matches_language(text, lang):
+            fixed = await self._rewrite_in_language(friend, text, lang)
+            if fixed:
+                return fixed
+            return self._mock_image_reply(friend)
+        return text
+
+    def _mock_image_reply(self, friend: dict) -> str:
+        lang = _language_of(friend)
+        defaults = {
+            "zh": "这张图看着真不错！你是在哪里拍的呀？",
+            "en": "That photo looks great! Where did you take it?",
+            "ja": "いい写真だね！どこで撮ったの？",
+            "ko": "사진 좋다! 어디서 찍었어?",
+            "pt": "Que foto boa! Onde você tirou?",
+            "es": "¡Qué buena foto! ¿Dónde la sacaste?",
+            "de": "Schönes Foto! Wo hast du das aufgenommen?",
+            "fr": "Jolie photo ! Tu l'as prise où ?",
+            "it": "Bella foto! Dove l'hai scattata?",
+        }
+        return defaults.get(lang, defaults["en"])
 
     # ------------------------------------------------------------------ #
     # 核心回合
@@ -464,7 +631,8 @@ class ChatService:
             f"{friend.get('nationality', '')}. You are chatting with your friend on a messaging app. "
             + language_rule
             + "Never mention being an AI. Always leave a hook (a question or an invitation to continue). "
-            "Do not use markdown or emojis. Do not write action descriptions."
+            "You may occasionally add ONE fitting emoji at the very end (not in the middle of a "
+            "sentence); no markdown, no action descriptions."
         )
         return "\n\n".join(p for p in (persona, base, memory_ctx) if p)
 
@@ -594,7 +762,7 @@ class ChatService:
         duration_ms = 0
         try:
             path, duration_ms = await self.voice.synth_to_wav(
-                text,
+                _strip_emoji(text) or text,
                 friend.get("voice_id") or "en-GB-RyanNeural",
                 rate=friend.get("voice_rate") or "+0%",
                 pitch=friend.get("voice_pitch") or "+0Hz",

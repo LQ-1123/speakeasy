@@ -22,7 +22,8 @@ if str(BACKEND) not in sys.path:
 
 from app.v2.audio_store import AudioStore  # noqa: E402
 from app.v2.chat_service import ChatService  # noqa: E402
-from app.v2.db import DB  # noqa: E402
+from app.v2.db import DB
+from app.v2.media_store import MediaStore  # noqa: E402
 from app.v2.memory import MemoryManager  # noqa: E402
 from app.v2.router import router as v2_router  # noqa: E402
 from app.v2.services import V2Services  # noqa: E402
@@ -101,17 +102,18 @@ def client(tmp_path):
     db = DB(str(tmp_path / "v2.db"))
     db.init()
     audio = AudioStore(str(tmp_path))
+    media = MediaStore(str(tmp_path))
     engines = FakeEngines()
     memory = MemoryManager(db, engines.llm)
     voice = FakeVoice()
     spawner = PersonaSpawner(db, engines.llm)
     chat = ChatService(
-        engines, db, memory, voice, spawner, audio, memory_idle_s=0
+        engines, db, memory, voice, spawner, audio, media, memory_idle_s=0
     )
     engines.stt_config = STTConfigStore(str(tmp_path))
     services = V2Services(
         db=db, engines=engines, audio=audio, memory=memory, voice=voice,
-        spawner=spawner, chat=chat, data_dir=str(tmp_path),
+        spawner=spawner, chat=chat, data_dir=str(tmp_path), media=media,
     )
     app = FastAPI()
     app.include_router(v2_router)
@@ -434,3 +436,61 @@ async def test_audio_and_tts_sample(client):
 
     assert http.get("/api/v2/audio/nope.wav").status_code == 404
     assert http.get("/api/v2/health").json()["status"] == "ok"
+
+
+# --------------------------------------------------------------------------- #
+# 图片多模态 / 带图动态 / 通话摘要
+# --------------------------------------------------------------------------- #
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+    b"\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+async def test_chat_image_upload_and_media_serving(client):
+    http, services = client
+    friend = await _make_friend(services)
+    r = http.post(
+        f"/api/v2/chat/{friend['id']}/image",
+        files={"image": ("cat.png", PNG_BYTES, "image/png")},
+        data={"text": "看我的猫"},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    user_msg = data["user_message"]
+    assert user_msg["msg_type"] == "image"
+    assert user_msg["transcript"] == "看我的猫"
+    assert user_msg["image_url"].startswith("/api/v2/media/")
+    friend_msg = data["friend_messages"][0]
+    assert friend_msg["audio_url"]
+    media = http.get(user_msg["image_url"])
+    assert media.status_code == 200
+    assert media.headers["content-type"].startswith("image/png")
+    assert media.content == PNG_BYTES
+
+
+async def test_user_moment_photo_and_call_summary(client):
+    http, services = client
+    friend = await _make_friend(services)
+    r = http.post(
+        "/api/v2/moments/photo",
+        files={"image": ("sunset.png", PNG_BYTES, "image/png")},
+        data={"content": "傍晚的天空", "mood_tag": "🌇 傍晚"},
+    )
+    assert r.status_code == 200, r.text
+    moment = r.json()["moment"]
+    assert moment["author_type"] == "user"
+    assert moment["author_name"] == "我"
+    assert moment["image_url"].startswith("/api/v2/media/")
+    assert http.get(moment["image_url"]).status_code == 200
+
+    r = http.post(
+        f"/api/v2/chat/{friend['id']}/call/summary",
+        json={"duration_s": 83, "turns": 4},
+    )
+    assert r.status_code == 200, r.text
+    msg = r.json()["message"]
+    assert msg["msg_type"] == "call_summary"
+    assert "01:23" in msg["transcript"] and "4 轮" in msg["transcript"]

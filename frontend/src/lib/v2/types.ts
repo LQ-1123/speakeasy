@@ -71,6 +71,8 @@ export interface Message {
   transcript: string;
   audio_path: string;
   audio_url: string;
+  /** 图片消息（Phase B）：服务端 /api/v2/media/xxx；文字/语音消息为空串 */
+  image_url: string;
   duration_ms: number;
   suggestion: Suggestion | null;
   is_read: boolean;
@@ -82,6 +84,16 @@ export interface Message {
   placeholder?: boolean;
   /** 仅前端：本地 blob 预览地址（发送中即时回放自己的语音） */
   local_audio_url?: string;
+  /** 仅前端：本地图片 blob 预览（发送中乐观展示，成功后 revoke） */
+  local_image_url?: string;
+}
+
+export interface MomentComment {
+  id: string;
+  friend_id: string;
+  content: string;
+  created_at: string;
+  friend: Friend | null;
 }
 
 export interface Moment {
@@ -94,6 +106,12 @@ export interface Moment {
   replied: boolean;
   created_at: string;
   friend: Friend | null;
+  /** 图片动态（Phase B）：服务端 /api/v2/media/xxx；纯文字动态为空串 */
+  image_url: string;
+  /** friend = 好友发的动态；user = 我发的动态（会带 AI 好友评论） */
+  author_type: "friend" | "user";
+  author_name: string;
+  comments: MomentComment[];
 }
 
 export interface Expression {
@@ -273,6 +291,7 @@ export function parseMessage(raw: unknown): Message | null {
     transcript: str(raw.transcript),
     audio_path: str(raw.audio_path),
     audio_url: str(raw.audio_url),
+    image_url: str(raw.image_url),
     duration_ms: num(raw.duration_ms),
     suggestion: parseSuggestion(raw.suggestion),
     is_read: raw.is_read !== false,
@@ -290,11 +309,27 @@ export function parseMessages(raw: unknown): Message[] {
   return list.map(parseMessage).filter((x): x is Message => x !== null);
 }
 
+export function parseMomentComment(raw: unknown): MomentComment | null {
+  if (!isRecord(raw)) return null;
+  const id = str(raw.id);
+  if (!id) return null;
+  return {
+    id,
+    friend_id: str(raw.friend_id),
+    content: str(raw.content),
+    created_at: str(raw.created_at),
+    friend: parseFriend(raw.friend),
+  };
+}
+
 export function parseMoment(raw: unknown): Moment | null {
   if (!isRecord(raw)) return null;
   const id = str(raw.id);
   if (!id) return null;
   const friend = parseFriend(raw.friend);
+  const authorType = raw.author_type === "user" ? "user" : "friend";
+  const commentsRaw = Array.isArray(raw.comments) ? raw.comments : [];
+  const comments = commentsRaw.map(parseMomentComment).filter((x): x is MomentComment => x !== null);
   return {
     id,
     friend_id: str(raw.friend_id),
@@ -305,12 +340,29 @@ export function parseMoment(raw: unknown): Moment | null {
     replied: raw.replied === true || raw.is_replied === true,
     created_at: str(raw.created_at),
     friend,
+    image_url: str(raw.image_url),
+    author_type: authorType,
+    author_name: str(raw.author_name) || (authorType === "user" ? "我" : friend?.name || "好友"),
+    comments,
   };
 }
 
 export function parseMoments(raw: unknown): Moment[] {
   const list = isRecord(raw) && Array.isArray(raw.moments) ? raw.moments : Array.isArray(raw) ? raw : [];
   return list.map(parseMoment).filter((x): x is Moment => x !== null);
+}
+
+export interface PostedMoment {
+  moment: Moment | null;
+  comments_pending: boolean;
+}
+
+export function parsePostedMoment(raw: unknown): PostedMoment {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    moment: parseMoment(r.moment),
+    comments_pending: r.comments_pending === true,
+  };
 }
 
 export function parseExpression(raw: unknown): Expression | null {

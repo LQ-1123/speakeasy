@@ -223,9 +223,10 @@ export interface LiveSnapshot {
 /** 拉一次全量：好友 + 每位好友最近消息 + 我的资料 */
 export async function loadAll(): Promise<LiveSnapshot | null> {
   const boot = await getJson<Record<string, unknown>>(`${BASE}/bootstrap`);
+  /* 只有“请求失败”才算掉线；好友为空是合法状态（新手引导/清空后），
+     否则前端会误判成离线并回退到 mock 名单 —— 删都删不掉。 */
   if (!boot) return null;
   const rawFriends = (boot.friends as RawFriend[]) ?? [];
-  if (!rawFriends.length) return null;
 
   const friends = rawFriends.map(mapFriend);
   assignAvatars(friends); // 头像整批分配（两阶段，避免抢照片）

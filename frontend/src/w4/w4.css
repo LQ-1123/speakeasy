@@ -3502,3 +3502,31 @@
   color: var(--w-text-3);
   border-top: 1px solid var(--w-line-soft);
 }
+
+/* 通话中的实时转写 + 按住说话按钮 */
+.w4-root .w4-call-transcript {
+  margin: 10px 20px 0;
+  min-height: 34px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.w4-root .w4-call-line {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+  max-height: 72px;
+  overflow-y: auto;
+}
+.w4-root .w4-call-line.is-me {
+  color: rgba(255, 255, 255, 0.62);
+}
+.w4-root .w4-call-btn.is-talk {
+  background: var(--w-green, #07c160);
+}
+.w4-root .w4-call-btn.is-talk.is-rec {
+  background: #fa5151;
+  box-shadow: 0 0 0 6px rgba(250, 81, 81, 0.22);
+  transform: scale(1.04);
+}

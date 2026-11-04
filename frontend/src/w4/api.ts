@@ -593,3 +593,62 @@ export async function saveCallSummary(friendId: string, durationS: number, turns
     body: JSON.stringify({ duration_s: Math.round(durationS), turns }),
   });
 }
+
+export type CallTurnEvent =
+  | { type: "transcript"; text: string }
+  | { type: "sentence"; index: number; text: string; audioUrl: string }
+  | { type: "done"; totalTurns?: number }
+  | { type: "error"; message: string };
+
+/**
+ * 通话一个回合：上传一句录音，后端按 NDJSON 流式回
+ * 转写 → 逐句文本 + 音频 URL → done。
+ */
+export async function callTurnStream(
+  friendId: string,
+  blob: Blob,
+  durationMs: number,
+  onEvent: (e: CallTurnEvent) => void,
+): Promise<boolean> {
+  const form = new FormData();
+  form.append("audio", blob, blob.type.includes("ogg") ? "call.ogg" : "call.webm");
+  form.append("duration_ms", String(Math.round(durationMs)));
+
+  const resp = await fetch(`${BASE}/chat/${friendId}/call/turn`, { method: "POST", body: form });
+  if (!resp.ok || !resp.body) {
+    console.warn("[call] turn 失败", resp.status);
+    return false;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl = buffer.indexOf("\n");
+    while (nl >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf("\n");
+      if (!line) continue;
+      try {
+        const raw = JSON.parse(line) as Record<string, any>;
+        if (raw.type === "transcript") onEvent({ type: "transcript", text: String(raw.text ?? "") });
+        else if (raw.type === "sentence")
+          onEvent({
+            type: "sentence",
+            index: Number(raw.index ?? 0),
+            text: String(raw.text ?? ""),
+            audioUrl: String(raw.audio_url ?? ""),
+          });
+        else if (raw.type === "done") onEvent({ type: "done", totalTurns: Number(raw.total_turns ?? 0) });
+        else if (raw.type === "error") onEvent({ type: "error", message: String(raw.message ?? "") });
+      } catch {
+        /* 跳过坏行 */
+      }
+    }
+  }
+  return true;
+}

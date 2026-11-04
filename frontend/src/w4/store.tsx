@@ -125,7 +125,7 @@ interface Store {
   updateSettings: (patch: Partial<Settings>) => void;
   updateFriendVoice: (friendId: string, voice: string, voiceLabel: string) => void;
   deleteFriend: (friendId: string) => void;
-  callSummary: (friendId: string, seconds: number) => void;
+  callSummary: (friendId: string, seconds: number, turns?: number) => void;
   discoverPool: DiscoverCandidate[];
 }
 
@@ -963,7 +963,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   const callSummary = useCallback(
-    (friendId: string, seconds: number) => {
+    (friendId: string, seconds: number, turns = 1) => {
       const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
       const ss = String(seconds % 60).padStart(2, "0");
       /* 先本地落一条，保证 UI 立刻可见 */
@@ -979,7 +979,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
       ]);
       /* 后端把摘要写进聊天记录；成功后用真实数据替换这一栏 */
-      void apiSaveCallSummary(friendId, seconds, 1).then(async (ok) => {
+      void apiSaveCallSummary(friendId, seconds, Math.max(1, turns)).then(async (ok) => {
         if (!ok) return;
         const fresh = await apiFetchMessages(friendId);
         if (fresh?.length) {

@@ -26,7 +26,13 @@ import {
 
 import { clockTime, dayOf } from "../format";
 import type { Friend, Message, Route } from "../model";
-import { callWarmup, changeFriendVoice, loadArchetypes, type ArchetypeLite } from "../api";
+import {
+  callTurnStream,
+  callWarmup,
+  changeFriendVoice,
+  loadArchetypes,
+  type ArchetypeLite,
+} from "../api";
 import { useApp } from "../store";
 import { Avatar, Confirm, Dialog, Icon, Lightbox, VoiceBar } from "../ui";
 import { FriendInfo } from "./FriendInfo";
@@ -89,6 +95,18 @@ export function ChatPane({
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceList, setVoiceList] = useState<ArchetypeLite[]>([]);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  /* ---- 通话中的真实回合 ---- */
+  const [callTurns, setCallTurns] = useState(0);
+  const [callUserText, setCallUserText] = useState("");
+  const [callFriendText, setCallFriendText] = useState("");
+  const [callTalking, setCallTalking] = useState(false);
+  const [callWaiting, setCallWaiting] = useState(false);
+  const callRec = useRef<MediaRecorder | null>(null);
+  const callStreamRef = useRef<MediaStream | null>(null);
+  const callChunks = useRef<Blob[]>([]);
+  const callStartAt = useRef(0);
+  const callAudioQueue = useRef<string[]>([]);
+  const callAudioPlaying = useRef(false);
   const [mobileInfo, setMobileInfo] = useState(false);
   const [wide, setWide] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -270,16 +288,118 @@ export function ChatPane({
     showToast(`已换成 ${a.accent_label || a.display_name}`, "success");
   };
 
+  /** 顺序播放后端逐句下发的语音，避免叠在一起 */
+  const pumpCallAudio = async () => {
+    if (callAudioPlaying.current) return;
+    callAudioPlaying.current = true;
+    while (callAudioQueue.current.length) {
+      const url = callAudioQueue.current.shift();
+      if (!url) break;
+      await new Promise<void>((resolve) => {
+        const audio = new Audio(url);
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        void audio.play().catch(() => resolve());
+      });
+    }
+    callAudioPlaying.current = false;
+  };
+
+  const startCallTalk = async () => {
+    if (!friend) return;
+    setCallTalking(true);
+    setCallUserText("");
+    callStartAt.current = Date.now();
+    try {
+      callStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const rec = new MediaRecorder(callStreamRef.current, { mimeType: mime });
+      callChunks.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size) callChunks.current.push(e.data);
+      };
+      rec.start(200);
+      callRec.current = rec;
+    } catch {
+      setCallTalking(false);
+      showToast("没有麦克风权限，先在浏览器里允许一下", "error");
+    }
+  };
+
+  const finishCallTalk = () => {
+    if (!callTalking) return;
+    setCallTalking(false);
+    const ms = Date.now() - callStartAt.current;
+    const rec = callRec.current;
+    const stream = callStreamRef.current;
+    if (!rec || !friend || ms < 500) {
+      if (rec && rec.state !== "inactive") rec.stop();
+      stream?.getTracks().forEach((t) => t.stop());
+      callRec.current = null;
+      callStreamRef.current = null;
+      if (ms < 500) showToast("说一句再松手");
+      return;
+    }
+
+    rec.onstop = () => {
+      const blob = new Blob(callChunks.current, { type: rec.mimeType || "audio/webm" });
+      callChunks.current = [];
+      stream?.getTracks().forEach((t) => t.stop());
+      callRec.current = null;
+      callStreamRef.current = null;
+      if (blob.size < 1200) {
+        showToast("没录到声音", "error");
+        return;
+      }
+
+      setCallWaiting(true);
+      setCallFriendText("");
+      void callTurnStream(friend.id, blob, ms, (ev) => {
+        if (ev.type === "transcript") {
+          setCallUserText(ev.text);
+        } else if (ev.type === "sentence") {
+          setCallFriendText((t) => (t ? t + " " : "") + ev.text);
+          if (ev.audioUrl) {
+            callAudioQueue.current.push(ev.audioUrl);
+            void pumpCallAudio();
+          }
+        } else if (ev.type === "done") {
+          setCallWaiting(false);
+          setCallTurns((n) => n + 1);
+        } else if (ev.type === "error") {
+          setCallWaiting(false);
+          showToast(ev.message || "这一轮没接上", "error");
+        }
+      }).then((ok) => {
+        if (!ok) {
+          setCallWaiting(false);
+          showToast("通话连接失败", "error");
+        }
+      });
+    };
+    rec.stop();
+  };
+
   const startCall = async () => {
     setCalling(true);
+    setCallTurns(0);
+    setCallUserText("");
+    setCallFriendText("");
     if (friend) await callWarmup(friend.id);
   };
 
   const endCall = (seconds: number) => {
     setCalling(false);
+    callAudioQueue.current = [];
+    if (callRec.current && callRec.current.state !== "inactive") callRec.current.stop();
+    callStreamRef.current?.getTracks().forEach((t) => t.stop());
+    callRec.current = null;
+    callStreamRef.current = null;
     if (seconds >= 2) {
-      callSummary(friendId, seconds);
-      showToast("通话结束，摘要已存进会话");
+      callSummary(friendId, seconds, callTurns);
+      showToast(callTurns > 0 ? `通话结束，聊了 ${callTurns} 轮` : "通话结束，摘要已存进会话");
     }
   };
 
@@ -595,6 +715,13 @@ export function ChatPane({
               friend={friend}
               phase={callPhase}
               seconds={callSeconds}
+              turns={callTurns}
+              userText={callUserText}
+              friendText={callFriendText}
+              talking={callTalking}
+              waiting={callWaiting}
+              onTalkStart={() => void startCallTalk()}
+              onTalkEnd={finishCallTalk}
               onEnd={() => endCall(callSeconds)}
             />
           ) : null}
@@ -900,17 +1027,36 @@ function CallOverlay({
   friend,
   phase,
   seconds,
+  turns,
+  userText,
+  friendText,
+  talking,
+  waiting,
+  onTalkStart,
+  onTalkEnd,
   onEnd,
 }: {
   friend: Friend;
   phase: "dialing" | "live";
   seconds: number;
+  turns: number;
+  userText: string;
+  friendText: string;
+  talking: boolean;
+  waiting: boolean;
+  onTalkStart: () => void;
+  onTalkEnd: () => void;
   onEnd: () => void;
 }) {
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
-  const hints = ["TA 说：周末的市集你去过吗？", "你在说：还没，听起来不错。", "TA 说：那一起去吧，我请你喝咖啡。"];
-  const hint = hints[Math.min(hints.length - 1, Math.floor(seconds / 6))];
+  const hint = waiting
+    ? "TA 正在想怎么回你…"
+    : talking
+      ? "在听你说…松手发出去"
+      : turns === 0
+        ? "按住下面的话筒说话，松手发给 TA"
+        : "继续按住说话，或者挂断";
 
   return (
     <div className="w4-call">
@@ -933,12 +1079,26 @@ function CallOverlay({
           {hint}
         </div>
       ) : null}
+      <div className="w4-call-transcript">
+        {userText ? <div className="w4-call-line is-me">你：{userText}</div> : null}
+        {friendText ? <div className="w4-call-line">{friendText}</div> : null}
+      </div>
       <div className="w4-call-actions">
+        <button
+          className={`w4-call-btn is-talk ${talking ? "is-rec" : ""}`}
+          onPointerDown={() => void onTalkStart()}
+          onPointerUp={onTalkEnd}
+          onPointerCancel={onTalkEnd}
+          onPointerLeave={() => talking && onTalkEnd()}
+          aria-label="按住说话"
+        >
+          <Phone size={20} strokeWidth={1.8} />
+        </button>
         <button className="w4-call-btn is-danger" onClick={onEnd} aria-label="挂断">
           <Phone size={20} strokeWidth={1.8} style={{ transform: "rotate(135deg)" }} />
         </button>
       </div>
-      <div className="w4-call-foot">免提对话 · 说完自动断句 · 结束后会存一条摘要</div>
+      <div className="w4-call-foot">免提对话 · 松手即发送 · 结束后会存一条摘要</div>
     </div>
   );
 }

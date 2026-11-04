@@ -315,14 +315,30 @@ export async function translate(
 }
 
 /** 捏一个新朋友 */
-export async function discover(language?: string): Promise<Friend | null> {
-  const r = await getJson<{ friend?: RawFriend }>(`${BASE}/friends/discover`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(language ? { language } : {}),
-  });
+export type DiscoverResult = {
+  friend: Friend;
+  /** 后端现捏的打招呼语音（icebreaker） */
+  greeting: string;
+  greetingAudio?: string;
+};
+
+export async function discover(language?: string): Promise<DiscoverResult | null> {
+  const r = await getJson<{ friend?: RawFriend; message?: RawMessage }>(
+    `${BASE}/friends/discover`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(language ? { language } : {}),
+    },
+  );
   if (!r?.friend) return null;
-  return mapFriend(r.friend);
+  const friend = mapFriend(r.friend);
+  const msg = r.message ? mapMessage(r.message, friend.id) : null;
+  return {
+    friend,
+    greeting: msg?.text ?? "",
+    greetingAudio: msg?.audio,
+  };
 }
 
 /** 保存「我在练」 */

@@ -38,7 +38,8 @@ export function DiscoverCard({
           {candidate.name} <span style={{ fontSize: 13 }}>{candidate.flag}</span>
         </div>
         <div className="w4-card-meta" style={{ textAlign: "center" }}>
-          {candidate.age} 岁 · {candidate.city}，{candidate.country}
+          {candidate.age ? `${candidate.age} 岁 · ` : ""}
+          {candidate.city}，{candidate.country}
           <br />
           {candidate.occupation}
         </div>
@@ -64,7 +65,11 @@ export function DiscoverCard({
         </div>
         <div className="w4-card-say-orig">{candidate.greeting}</div>
         <div className="w4-card-say-zh">{candidate.greetingZh}</div>
-        <button className={`w4-say-play ${playing ? "is-playing" : ""}`} onClick={onPlay}>
+        <button
+          className={`w4-say-play ${playing ? "is-playing" : ""}`}
+          onClick={onPlay}
+          disabled={!candidate.greetingAudio}
+        >
           <span className="w4-say-play-btn">
             {playing ? (
               <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
@@ -81,7 +86,11 @@ export function DiscoverCard({
             ))}
           </span>
           <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>
-            {playing ? "播放中 · 0:06" : "听 TA 的声音 · 0:06"}
+            {playing
+              ? "播放中…"
+              : candidate.greetingAudio
+                ? "听 TA 的声音"
+                : "声音还没准备好"}
           </span>
         </button>
       </div>

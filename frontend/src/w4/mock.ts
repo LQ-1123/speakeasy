@@ -925,6 +925,8 @@ export interface DiscoverCandidate {
   bio: string;
   greeting: string;
   greetingZh: string;
+  /** 真实后端返回的打招呼音频地址（mock 数据没有） */
+  greetingAudio?: string;
   voiceLabel: string;
   accent: string;
   online: boolean;

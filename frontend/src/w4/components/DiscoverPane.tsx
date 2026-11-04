@@ -8,7 +8,7 @@
  * 点进去才是内容。
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   Compass,
@@ -19,11 +19,35 @@ import {
   Plus,
 } from "lucide-react";
 
+import { discover as apiDiscover, translate as apiTranslate } from "../api";
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
+import type { DiscoverCandidate } from "../mock";
 import { useApp } from "../store";
 import { Avatar, Dialog, Icon, Lightbox } from "../ui";
 import { DiscoverCard } from "./DiscoverCard";
+
+/** 后端语音 id → 口音标签（en-US-Andrew... → 美式口音） */
+const ACCENT_BY_VOICE: Record<string, string> = {
+  "en-US": "美式口音",
+  "en-GB": "英式口音",
+  "en-AU": "澳洲口音",
+  "en-NZ": "新西兰口音",
+  "en-CA": "加拿大口音",
+  "en-IE": "爱尔兰口音",
+  "es-ES": "西班牙口音",
+  "de-DE": "德语口音",
+  "fr-FR": "法语口音",
+  "it-IT": "意大利口音",
+  "pt-BR": "巴西口音",
+  "pt-PT": "葡萄牙口音",
+  "ja-JP": "日语口音",
+  "ko-KR": "韩语口音",
+};
+
+function accentLabelOf(voiceId: string): string {
+  return ACCENT_BY_VOICE[(voiceId || "").slice(0, 5)] ?? "";
+}
 
 const MOODS = ["☕ 日常", "🌿 散步", "📚 在读书", "🍜 吃了点好的", "🌙 夜里", "🎧 在听歌"];
 
@@ -413,19 +437,98 @@ function PublishDialog({
 /* ================================================================== 偶遇 */
 
 function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack: () => void }) {
-  const { discoverPool, addDiscovered, friends } = useApp();
+  const { friends, reloadAll } = useApp();
   const [language, setLanguage] = useState("");
-  const [country, setCountry] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [candidate, setCandidate] = useState<DiscoverCandidate | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const seq = useRef(0);
 
-  const countries = [...new Map(discoverPool.map((c) => [c.country, c.flag])).entries()];
+  const stopAudio = () => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    setPlaying(false);
+  };
 
-  let pool = discoverPool;
-  if (language) pool = pool.filter((c) => c.language === language);
-  if (country) pool = pool.filter((c) => c.country === country);
-  const current = pool.length ? pool[offset % pool.length] : null;
-  const already = current ? friends.some((f) => f.id === current.id) : false;
+  /** 真实捏人：后端 spawner 造一个人 + 生成第一条打招呼语音（10–30 秒） */
+  const pickOne = async (lang: string) => {
+    const my = ++seq.current;
+    setLoading(true);
+    setError("");
+    setCandidate(null);
+    stopAudio();
+    try {
+      const res = await apiDiscover(lang || undefined);
+      if (seq.current !== my) return;
+      if (!res) throw new Error("discover 失败");
+      const f = res.friend;
+      let zh = "";
+      if (res.greeting) {
+        zh = (await apiTranslate(res.greeting, f.id).catch(() => null)) ?? "";
+      }
+      if (seq.current !== my) return;
+      setCandidate({
+        id: f.id,
+        name: f.name,
+        avatar: f.avatar,
+        age: f.age ?? 0,
+        city: f.city,
+        country: f.country,
+        flag: f.flag,
+        language: f.language,
+        languageLabel: f.languageLabel,
+        occupation: f.occupation ?? "",
+        bio: f.bio || f.localActivity || "",
+        greeting: res.greeting || "…",
+        greetingZh: zh,
+        greetingAudio: res.greetingAudio,
+        voiceLabel: f.voiceLabel,
+        accent: accentLabelOf(f.voice ?? f.voiceLabel),
+        online: Boolean(f.online),
+        tags: [],
+      });
+    } catch {
+      if (seq.current === my) setError("这次没捏出来，再试一次");
+    } finally {
+      if (seq.current === my) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void pickOne("");
+    return () => {
+      seq.current += 1;
+      audioRef.current?.pause();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const togglePlay = () => {
+    if (!candidate?.greetingAudio) return;
+    if (playing) {
+      stopAudio();
+      return;
+    }
+    const a = new Audio(candidate.greetingAudio);
+    audioRef.current = a;
+    a.onended = () => setPlaying(false);
+    a.onerror = () => setPlaying(false);
+    /* 只有真的播起来才点亮按钮，避免"显示播放中但没声音" */
+    a.play()
+      .then(() => setPlaying(true))
+      .catch(() => setPlaying(false));
+  };
+
+  const already = candidate ? friends.some((f) => f.id === candidate.id) : false;
+
+  const openChat = async () => {
+    if (!candidate) return;
+    stopAudio();
+    await reloadAll();
+    navigate({ name: "chat", friendId: candidate.id });
+  };
 
   return (
     <div className="w4-main">
@@ -449,9 +552,7 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
               className={`w4-filter ${!language ? "on" : ""}`}
               onClick={() => {
                 setLanguage("");
-                setCountry("");
-                setOffset(0);
-                setPlaying(false);
+                void pickOne("");
               }}
             >
               不限
@@ -461,10 +562,8 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
                 key={l.code}
                 className={`w4-filter ${language === l.code ? "on" : ""}`}
                 onClick={() => {
-                  setLanguage(language === l.code ? "" : l.code);
-                  setCountry("");
-                  setOffset(0);
-                  setPlaying(false);
+                  setLanguage(l.code);
+                  void pickOne(l.code);
                 }}
               >
                 {l.label}
@@ -472,65 +571,32 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
             ))}
           </div>
 
-          <div className="w4-filter-row" style={{ marginTop: -6 }}>
-            <span className="w4-filter-label">国家</span>
-            <button
-              className={`w4-filter ${!country ? "on" : ""}`}
-              onClick={() => {
-                setCountry("");
-                setOffset(0);
-                setPlaying(false);
-              }}
-            >
-              不限
-            </button>
-            {countries.map(([name, flag]) => (
-              <button
-                key={name}
-                className={`w4-filter ${country === name ? "on" : ""}`}
-                onClick={() => {
-                  setCountry(country === name ? "" : name);
-                  setOffset(0);
-                  setPlaying(false);
-                }}
-              >
-                {flag} {name}
-              </button>
-            ))}
-          </div>
-
-          {!current ? (
-            <div className="w4-card" style={{ padding: 30, textAlign: "center" }}>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>这个组合暂时没有合适的人</div>
-              <div style={{ fontSize: 12.5, color: "var(--w-text-3)", marginBottom: 16 }}>
-                换一种语言，或者取消国家筛选试试。
+          {loading ? (
+            <div className="w4-card w4-deck-loading">
+              <div className="w4-deck-spinner" aria-hidden />
+              <div className="w4-deck-loading-title">正在找一位新朋友…</div>
+              <div className="w4-deck-loading-sub">
+                要现捏一个人、配好声音，再让 TA 说第一句，通常 10–30 秒
               </div>
-              <button
-                className="w4-btn is-primary"
-                onClick={() => {
-                  setLanguage("");
-                  setCountry("");
-                  setOffset(0);
-                }}
-              >
-                清空筛选
+            </div>
+          ) : error || !candidate ? (
+            <div className="w4-card" style={{ padding: 30, textAlign: "center" }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>
+                {error || "这次没找到合适的人"}
+              </div>
+              <button className="w4-btn is-primary" onClick={() => void pickOne(language)}>
+                再试一次
               </button>
             </div>
           ) : (
             <DiscoverCard
-              candidate={current}
+              candidate={candidate}
               playing={playing}
               already={already}
-              onPlay={() => setPlaying((v) => !v)}
-              onNext={() => {
-                setOffset((o) => o + 1);
-                setPlaying(false);
-              }}
-              onAdd={() => {
-                const f = addDiscovered(current);
-                navigate({ name: "chat", friendId: f.id });
-              }}
-              onOpen={() => navigate({ name: "chat", friendId: current.id })}
+              onPlay={togglePlay}
+              onNext={() => void pickOne(language)}
+              onAdd={() => void openChat()}
+              onOpen={() => void openChat()}
             />
           )}
 

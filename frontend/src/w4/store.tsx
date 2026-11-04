@@ -129,6 +129,8 @@ interface Store {
   updateFriendVoice: (friendId: string, voice: string, voiceLabel: string) => void;
   deleteFriend: (friendId: string) => void;
   callSummary: (friendId: string, seconds: number, turns?: number) => void;
+  /** 偶遇捏到新人后，刷新好友/会话，让新朋友能被打开 */
+  reloadAll: () => Promise<void>;
   discoverPool: DiscoverCandidate[];
 }
 
@@ -863,6 +865,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void apiDeclineFriend(friendId);
   }, [showToast]);
 
+  const reloadAll = useCallback(async () => {
+    const snap = await apiLoadAll();
+    if (!snap) return;
+    setFriends(snap.friends);
+    setMessages(snap.messages);
+    setRequests(snap.requests ?? []);
+  }, []);
+
   const addDiscovered = useCallback(
     (candidate: DiscoverCandidate) => {
       const friend: Friend = {
@@ -1068,6 +1078,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateFriendVoice,
       deleteFriend,
       callSummary,
+      reloadAll,
       discoverPool: DISCOVER_POOL,
     }),
     [

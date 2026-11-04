@@ -1254,3 +1254,35 @@
 .w4-root .w4-ctx-item:hover {
   background: var(--w-hover, #f2f2f2);
 }
+
+/* 偶遇：真实捏人时的加载态 */
+.w4-root .w4-deck-loading {
+  padding: 48px 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.w4-root .w4-deck-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid var(--w-line, #e5e5e5);
+  border-top-color: var(--w-green, #07c160);
+  animation: w4-spin 0.9s linear infinite;
+}
+@keyframes w4-spin {
+  to { transform: rotate(360deg); }
+}
+.w4-root .w4-deck-loading-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--w-text-2);
+}
+.w4-root .w4-deck-loading-sub {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--w-text-3);
+  max-width: 300px;
+}

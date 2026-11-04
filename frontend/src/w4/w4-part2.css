@@ -857,3 +857,21 @@
     visibility: hidden;
   }
 }
+
+/* ===========================================================================
+   手机端：全屏子页（聊天 / 详情 / 设置…）不需要给底部 TabBar 留位
+   背景：@media(max-width:900px) 里给 .w4-main 加了 54px 底部内边距，
+   并用 `.w4-main.is-chat { padding-bottom: 0 }` 取消，但主区从没被加上 is-chat
+   → 聊天页底部一直多出一条 54px 空白。
+   这里按「主内容覆盖在列表上」这一状态统一取消，并给输入框补安全区。
+   =========================================================================== */
+@media (max-width: 899.98px) {
+  .w4-root .w4-app[data-mobile-view="main"] .w4-main,
+  .w4-root .w4-main.is-chat {
+    padding-bottom: 0;
+  }
+  /* 去掉留白后输入框会贴到屏幕底：补上 iPhone Home 指示条的安全区 */
+  .w4-root .w4-app[data-mobile-view="main"] .w4-composer {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+}

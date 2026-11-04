@@ -385,7 +385,7 @@ function mapMoment(raw: Record<string, any>): Moment {
     text: String(raw.content ?? ""),
     translation: raw.content_zh ? String(raw.content_zh) : undefined,
     mood: String(raw.mood_tag ?? ""),
-    time: String(raw.created_at ?? ""),
+    time: relTime(String(raw.created_at ?? "")) || String(raw.created_at ?? ""),
     comments,
     likedBy: [],
   };

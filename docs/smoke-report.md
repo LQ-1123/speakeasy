@@ -63,3 +63,25 @@
 | 表达本 | `docs/screenshots/smoke-expressions.png` |
 | 设置 | `docs/screenshots/smoke-settings.png` |
 | 我的资料 | `docs/screenshots/smoke-me.png` |
+
+## 六、冒烟后半段追加发现
+
+### 已修：朋友圈时间显示原始 ISO
+
+后端返回 `created_at`（ISO 字符串），前端 mock 时代用的是「今天 07:12」这种预格式化文本，
+接真数据后直接显示成 `2026-11-04T14:39:17+00:00`。
+
+修法：`mapMoment` 用 `relTime()` 格式化。复测：`['22:57', '22:39', '22:39', '22:39']`。
+
+### 未修：AI 动态文案与发布时间过于一致（数据质量，非 bug）
+
+生成的一批好友动态有两个痕迹：
+
+```
+时间：5 条全是 22:39（同一批写入，created_at 相同）
+文案：全是 "Halfway through the afternoon. <城市> is being kind to me today..." 同一句式
+```
+
+这是**看起来像批量生成**的典型特征，和产品想营造的「朋友们各自在过日子」冲突。
+建议后端调整：生成时把 created_at 打散到过去 6 小时内，并要求 LLM 每条用不同开头。
+本次只记录，不擅自改后端提示词。

@@ -1,0 +1,57 @@
+[
+  {
+    "step": "健康检查",
+    "status": "PASS",
+    "detail": "200 ok"
+  },
+  {
+    "step": "设置读取",
+    "status": "PASS",
+    "detail": "llm=deepseek-flash key=True | stt=auto"
+  },
+  {
+    "step": "捏人 discover",
+    "status": "PASS",
+    "detail": "27.9s → Antoine / male / France / 音色 89e9fdb8"
+  },
+  {
+    "step": "文字聊天",
+    "status": "PASS",
+    "detail": "7.8s → 回复「Bah, still at the shop, wrapping up a long after」 audio=有"
+  },
+  {
+    "step": "语音聊天",
+    "status": "PASS",
+    "detail": "6.9s → 转写「Hey, here is mores, asmazobroken in.」 / 回复音频 有"
+  },
+  {
+    "step": "翻译",
+    "status": "PASS",
+    "detail": "0.8s → 我一直想问你那件事。"
+  },
+  {
+    "step": "朋友圈读取+发布",
+    "status": "PASS",
+    "detail": "现存 5 条 | 发布 0.0s → 200"
+  },
+  {
+    "step": "朋友圈 AI 评论",
+    "status": "PASS",
+    "detail": "我的动态 1 条新增，评论 3 条：「That's a proper Bristol sunset, that」"
+  },
+  {
+    "step": "表达本增改删",
+    "status": "PASS",
+    "detail": "新增→PATCH(mastered)→列表 2 条→DELETE 200"
+  },
+  {
+    "step": "换口音",
+    "status": "PASS",
+    "detail": "American English (New York) → en-US-AndrewMultilingualNeural (rate +10%, pitch -7Hz)"
+  },
+  {
+    "step": "通话流式回合",
+    "status": "PASS",
+    "detail": "warmup 200 | 3 事件 / 1 句 / 11.6s | summary 200"
+  }
+]

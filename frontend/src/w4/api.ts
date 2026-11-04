@@ -368,16 +368,20 @@ export async function testStt() {
 /* ========================================================================== */
 
 function mapMoment(raw: Record<string, any>): Moment {
+  /* 我的动态：后端 author_type="user"、friend_id 为空 —— 必须映射成 "me"，
+     否则会被「AI 互评过滤」当成好友动态，把 AI 评论全清掉 */
+  const isMine = raw.author_type === "user" || (!raw.friend_id && raw.author_name === "我");
   const comments = (raw.comments ?? []).map((c: Record<string, any>) => ({
     id: String(c.id ?? ""),
     friendId: String(c.friend_id ?? ""),
-    text: String(c.text ?? ""),
+    text: String(c.content ?? c.text ?? ""),
     time: String(c.created_at ?? ""),
   }));
+  const imageUrl = raw.image_url ? String(raw.image_url) : "";
   return {
     id: String(raw.id ?? ""),
-    authorId: String(raw.friend_id ?? ""),
-    images: [],
+    authorId: isMine ? "me" : String(raw.friend_id ?? ""),
+    images: imageUrl ? [imageUrl] : [],
     text: String(raw.content ?? ""),
     translation: raw.content_zh ? String(raw.content_zh) : undefined,
     mood: String(raw.mood_tag ?? ""),

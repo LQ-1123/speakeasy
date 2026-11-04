@@ -1,0 +1,37 @@
+[
+  {
+    "step": "UI 通讯录",
+    "status": "PASS",
+    "detail": "好友 20 人，含新朋友 Antoine；头像 21 张全为 DiceBear(21)，首字母 0 个"
+  },
+  {
+    "step": "UI 聊天记录",
+    "status": "PASS",
+    "detail": "气泡 8 个，语音条 9 个（后端该好友消息含文字+语音回合）"
+  },
+  {
+    "step": "UI 语音转写",
+    "status": "PASS",
+    "detail": "展开后文本「Hey! Antoine here, cheesemonger over in Strasbourg」"
+  },
+  {
+    "step": "UI 朋友圈",
+    "status": "PASS",
+    "detail": "渲染 6 条 / 后端 6 条；我的动态可见=True，AI 评论可见=False"
+  },
+  {
+    "step": "UI 表达本",
+    "status": "PASS",
+    "detail": "界面 1 条 / 后端 1 条"
+  },
+  {
+    "step": "UI 设置",
+    "status": "PASS",
+    "detail": "模型输入框 ['https://api.deepseek.com/v1', 'deepseek-flash']，后端 deepseek-flash"
+  },
+  {
+    "step": "UI 我的资料",
+    "status": "PASS",
+    "detail": "城市/职业来自真实 profile：{'city': True, 'job': True}"
+  }
+]

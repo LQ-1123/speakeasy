@@ -16,11 +16,14 @@ import {
   Info,
   Languages,
   Mic,
+  Minimize2,
   MoreHorizontal,
   Phone,
   Smile,
   Star,
   Trash2,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 
@@ -107,6 +110,15 @@ export function ChatPane({
   const callStartAt = useRef(0);
   const callAudioQueue = useRef<string[]>([]);
   const callAudioPlaying = useRef(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const speakerOnRef = useRef(true);
+  const currentCallAudio = useRef<HTMLAudioElement | null>(null);
+
+  /* 关掉声音时立刻停下正在播的那句，而不是等它播完 */
+  useEffect(() => {
+    speakerOnRef.current = speakerOn;
+    if (!speakerOn) currentCallAudio.current?.pause();
+  }, [speakerOn]);
   const [mobileInfo, setMobileInfo] = useState(false);
   const [wide, setWide] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -297,6 +309,8 @@ export function ChatPane({
       if (!url) break;
       await new Promise<void>((resolve) => {
         const audio = new Audio(url);
+        audio.muted = !speakerOnRef.current;
+        currentCallAudio.current = audio;
         audio.onended = () => resolve();
         audio.onerror = () => resolve();
         void audio.play().catch(() => resolve());
@@ -393,6 +407,8 @@ export function ChatPane({
   const endCall = (seconds: number) => {
     setCalling(false);
     callAudioQueue.current = [];
+    currentCallAudio.current?.pause();
+    currentCallAudio.current = null;
     if (callRec.current && callRec.current.state !== "inactive") callRec.current.stop();
     callStreamRef.current?.getTracks().forEach((t) => t.stop());
     callRec.current = null;
@@ -720,8 +736,10 @@ export function ChatPane({
               friendText={callFriendText}
               talking={callTalking}
               waiting={callWaiting}
+              speakerOn={speakerOn}
               onTalkStart={() => void startCallTalk()}
               onTalkEnd={finishCallTalk}
+              onToggleSpeaker={() => setSpeakerOn((v) => !v)}
               onEnd={() => endCall(callSeconds)}
             />
           ) : null}
@@ -1032,8 +1050,10 @@ function CallOverlay({
   friendText,
   talking,
   waiting,
+  speakerOn,
   onTalkStart,
   onTalkEnd,
+  onToggleSpeaker,
   onEnd,
 }: {
   friend: Friend;
@@ -1044,61 +1064,106 @@ function CallOverlay({
   friendText: string;
   talking: boolean;
   waiting: boolean;
+  speakerOn: boolean;
   onTalkStart: () => void;
   onTalkEnd: () => void;
+  onToggleSpeaker: () => void;
   onEnd: () => void;
 }) {
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
-  const hint = waiting
-    ? "TA 正在想怎么回你…"
-    : talking
-      ? "在听你说…松手发出去"
-      : turns === 0
-        ? "按住下面的话筒说话，松手发给 TA"
-        : "继续按住说话，或者挂断";
+
+  const status =
+    phase === "dialing"
+      ? "正在连接…"
+      : talking
+        ? "正在听你说，松手就发出去"
+        : waiting
+          ? `${friend.name} 正在想怎么回你…`
+          : turns === 0
+            ? "免提已开 · 按住话筒说话"
+            : `已聊 ${turns} 轮 · 按住话筒继续说`;
 
   return (
     <div className="w4-call">
+      {/* 模糊背景：把 TA 的头像放大、虚化，作为通话时的氛围底 */}
+      <div className="w4-call-bg" style={{ backgroundImage: `url("${friend.avatar}")` }} />
+      <div className="w4-call-shade" />
+
       <div className="w4-call-top">
         <button className="w4-call-min" onClick={onEnd} aria-label="收起通话">
-          <MoreHorizontal size={18} />
+          <Minimize2 size={18} strokeWidth={1.9} />
         </button>
         <span className="w4-call-label">语音通话</span>
       </div>
-      <Avatar friend={friend} size={96} round className="w4-call-avatar" />
-      <div className="w4-call-name">{friend.name}</div>
-      <div className="w4-call-time">
-        {phase === "dialing" ? "正在接通…" : `通话中 ${mm}:${ss}`}
-      </div>
-      {phase === "live" ? (
-        <div className="w4-call-hint">
-          <span className="w4-call-wave" aria-hidden>
-            <i /><i /><i /><i /><i /><i /><i />
+
+      <div className="w4-call-stage">
+        <div className={`w4-call-cardwrap${waiting ? " is-waiting" : ""}`}>
+          <div className="w4-call-card">
+            <img src={friend.avatar} alt="" />
+          </div>
+          <span className="w4-call-card-badge">
+            <img src={friend.avatar} alt="" />
           </span>
-          {hint}
         </div>
-      ) : null}
-      <div className="w4-call-transcript">
-        {userText ? <div className="w4-call-line is-me">你：{userText}</div> : null}
-        {friendText ? <div className="w4-call-line">{friendText}</div> : null}
+
+        <div className="w4-call-dots" aria-label={`通话进行中，已聊 ${turns} 轮`}>
+          <i className={phase === "live" ? "on" : ""} />
+          <i className={talking ? "on" : ""} />
+          <i className={turns > 0 ? "on" : ""} />
+        </div>
+
+        <div className="w4-call-name">{friend.name}</div>
+        <div className="w4-call-time">
+          {phase === "dialing" ? "正在接通…" : `通话中 ${mm}:${ss}`}
+        </div>
+
+        <div className="w4-call-sub">
+          {userText ? <div className="w4-call-line is-me">你：{userText}</div> : null}
+          {friendText ? <div className="w4-call-line">{friendText}</div> : null}
+          {talking || waiting ? (
+            <span className="w4-call-wave" aria-hidden>
+              <i /><i /><i /><i /><i /><i /><i />
+            </span>
+          ) : null}
+        </div>
+
+        <div className="w4-call-status">{status}</div>
       </div>
-      <div className="w4-call-actions">
-        <button
-          className={`w4-call-btn is-talk ${talking ? "is-rec" : ""}`}
-          onPointerDown={() => void onTalkStart()}
-          onPointerUp={onTalkEnd}
-          onPointerCancel={onTalkEnd}
-          onPointerLeave={() => talking && onTalkEnd()}
-          aria-label="按住说话"
-        >
-          <Phone size={20} strokeWidth={1.8} />
-        </button>
-        <button className="w4-call-btn is-danger" onClick={onEnd} aria-label="挂断">
-          <Phone size={20} strokeWidth={1.8} style={{ transform: "rotate(135deg)" }} />
-        </button>
+
+      <div className="w4-call-keys">
+        <div className="w4-call-key">
+          <button
+            className={`w4-call-keybtn is-talk${talking ? " is-rec" : ""}`}
+            onPointerDown={() => void onTalkStart()}
+            onPointerUp={onTalkEnd}
+            onPointerCancel={onTalkEnd}
+            onPointerLeave={() => talking && onTalkEnd()}
+            aria-label="按住说话"
+          >
+            <Mic size={27} strokeWidth={1.9} />
+          </button>
+          <span>{talking ? "松开发送" : "按住说话"}</span>
+        </div>
+
+        <div className="w4-call-key">
+          <button className="w4-call-keybtn is-hangup" onClick={onEnd} aria-label="挂断">
+            <Phone size={27} strokeWidth={1.9} style={{ transform: "rotate(135deg)" }} />
+          </button>
+          <span>挂断</span>
+        </div>
+
+        <div className="w4-call-key">
+          <button
+            className={`w4-call-keybtn is-speaker${speakerOn ? "" : " is-off"}`}
+            onClick={onToggleSpeaker}
+            aria-label={speakerOn ? "关闭声音" : "打开声音"}
+          >
+            {speakerOn ? <Volume2 size={27} strokeWidth={1.9} /> : <VolumeX size={27} strokeWidth={1.9} />}
+          </button>
+          <span>{speakerOn ? "声音已开" : "声音已关"}</span>
+        </div>
       </div>
-      <div className="w4-call-foot">免提对话 · 松手即发送 · 结束后会存一条摘要</div>
     </div>
   );
 }

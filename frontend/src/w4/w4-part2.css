@@ -875,3 +875,276 @@
     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ===========================================================================
+   通话界面（重做）：参考微信语音通话
+   - 背景：TA 的头像放大 + 高斯模糊 + 暗角渐变
+   - 中间：圆角封面卡 + 头像角标 + 三点进度
+   - 底部：按住说话（白）/ 挂断（红）/ 声音开关（半透明）三键
+   =========================================================================== */
+.w4-root .w4-call {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 20px
+    calc(22px + env(safe-area-inset-bottom, 0px));
+  color: #fff;
+  background: #17130f;
+}
+.w4-root .w4-call-bg {
+  position: absolute;
+  inset: -12%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(52px) saturate(1.25) brightness(0.5);
+  transform: scale(1.3);
+  opacity: 0.95;
+}
+.w4-root .w4-call-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(16, 12, 9, 0.55) 0%,
+    rgba(16, 12, 9, 0.22) 32%,
+    rgba(12, 9, 7, 0.55) 68%,
+    rgba(10, 8, 6, 0.92) 100%
+  );
+}
+.w4-root .w4-call-top {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.w4-root .w4-call-min {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+.w4-root .w4-call-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.w4-root .w4-call-stage {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 13vh;
+}
+.w4-root .w4-call-card {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  border-radius: 26px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 26px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.w4-root .w4-call-card > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.w4-root .w4-call-card-badge {
+  position: absolute;
+  left: 50%;
+  bottom: -13px;
+  transform: translateX(-50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.w4-root .w4-call-card-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.w4-root .w4-call-dots {
+  display: flex;
+  gap: 7px;
+  margin-top: 30px;
+}
+.w4-root .w4-call-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.24);
+  transition: background 0.2s var(--w-ease);
+}
+.w4-root .w4-call-dots i.on {
+  background: rgba(255, 255, 255, 0.88);
+}
+.w4-root .w4-call-name {
+  margin-top: 16px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.w4-root .w4-call-time {
+  margin-top: 5px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+.w4-root .w4-call-sub {
+  margin-top: 20px;
+  width: 100%;
+  max-width: 440px;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.w4-root .w4-call-line {
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.86);
+  max-height: 66px;
+  overflow: hidden;
+}
+.w4-root .w4-call-line.is-me {
+  color: rgba(255, 255, 255, 0.5);
+}
+.w4-root .w4-call-status {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding: 0 16px 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.42);
+  min-height: 22px;
+}
+.w4-root .w4-call-keys {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 54px;
+  width: 100%;
+  padding-bottom: 6px;
+}
+.w4-root .w4-call-key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.w4-root .w4-call-key span {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.w4-root .w4-call-keybtn {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.12s var(--w-ease), background 0.15s var(--w-ease);
+}
+.w4-root .w4-call-keybtn.is-talk {
+  background: rgba(255, 255, 255, 0.94);
+  color: #1b1714;
+}
+.w4-root .w4-call-keybtn.is-talk.is-rec {
+  background: #fa5151;
+  color: #fff;
+  transform: scale(1.06);
+  box-shadow: 0 0 0 8px rgba(250, 81, 81, 0.2);
+}
+.w4-root .w4-call-keybtn.is-hangup {
+  background: #f5453d;
+  color: #fff;
+}
+.w4-root .w4-call-keybtn.is-hangup:hover {
+  background: #e0392f;
+}
+.w4-root .w4-call-keybtn.is-speaker {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.w4-root .w4-call-keybtn.is-speaker.is-off {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 899.98px) {
+  .w4-root .w4-call-stage {
+    margin-top: 11vh;
+  }
+  .w4-root .w4-call-keys {
+    gap: 44px;
+  }
+}
+
+/* 封面卡外层：让角标能露到卡片下沿外（卡片本身仍是 overflow:hidden 保持圆角） */
+.w4-root .w4-call-cardwrap {
+  position: relative;
+  width: 168px;
+  height: 168px;
+}
+.w4-root .w4-call-cardwrap .w4-call-card {
+  width: 100%;
+  height: 100%;
+}
+.w4-root .w4-call-cardwrap .w4-call-card-badge {
+  bottom: -15px;
+}
+/* 等待回复时：头像卡片轻微呼吸，提示「TA 正在想」 */
+@keyframes w4-call-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+.w4-root .w4-call-cardwrap.is-waiting .w4-call-card {
+  animation: w4-call-breathe 2.2s ease-in-out infinite;
+}
+
+/* 通话信息层级收敛：卡片区自上而下排列，三键固定贴底 */
+.w4-root .w4-call-stage {
+  margin-top: 10vh;
+}
+.w4-root .w4-call-status {
+  margin-top: 20px;
+  padding: 0;
+  min-height: 0;
+}
+.w4-root .w4-call-keys {
+  margin-top: auto;
+  padding-top: 28px;
+}
+.w4-root .w4-call-sub .w4-call-wave {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.7);
+}
+@media (max-width: 899.98px) {
+  .w4-root .w4-call-stage {
+    margin-top: 9vh;
+  }
+}

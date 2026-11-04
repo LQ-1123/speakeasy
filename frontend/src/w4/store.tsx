@@ -580,7 +580,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       scheduleReply(friendId);
       if (trimmed.split(/\s+/).length >= 3) attachSuggestion(id);
     },
-    [attachSuggestion, scheduleReply],
+    [attachSuggestion, scheduleReply, live],
   );
 
   /** 真实语音：先放一条占位气泡，等后端返回后整体替换 */

@@ -71,6 +71,7 @@ class MemoryUpdate(BaseModel):
     native_language: str | None = None
     target_languages: list[str] | None = None
     fact_sheet: dict | None = None
+    birthday: str | None = None
 
 
 class FriendMemoryBody(BaseModel):

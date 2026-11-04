@@ -33,6 +33,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import zlib
 from typing import Any
@@ -473,6 +474,32 @@ class PersonaSpawner:
             f"支持的语种：{', '.join(languages)}。"
         )
 
+    def _user_age(self) -> int | None:
+        """从画像生日算用户年龄；没填返回 None。"""
+        try:
+            profile = self.db.get_profile() or {}
+        except Exception:  # noqa: BLE001
+            return None
+        raw = str(profile.get("birthday") or "").strip()
+        if not raw:
+            return None
+        try:
+            born = _dt.date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+        today = _dt.date.today()
+        return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+    @staticmethod
+    def _age_near(archetype: dict[str, Any], age: int) -> bool:
+        """原型年龄区间与用户年龄相差 ≤ 6 岁。"""
+        try:
+            rng = (archetype.get("vibe_constraints") or {}).get("age_range") or [24, 32]
+            lo, hi = int(rng[0]), int(rng[1])
+        except (TypeError, ValueError, IndexError):
+            return True
+        return lo - 6 <= age <= hi + 6
+
     def pick_archetype(
         self,
         *,
@@ -480,6 +507,7 @@ class PersonaSpawner:
         language: Any = None,
         gender: Any = None,
         strict: bool = False,
+        age: int | None = None,
     ) -> dict[str, Any]:
         """挑一个未被使用过的声线原型。
 
@@ -516,6 +544,9 @@ class PersonaSpawner:
                 detail = self._not_found_detail(country, lang, gend, archetypes)
                 log.warning("严格筛选无匹配原型: %s", detail)
                 raise ArchetypeNotFound(detail)
+            if age is not None:
+                near = [a for a in pool if self._age_near(a, age)]
+                pool = near or pool
             free = [a for a in pool if str(a.get("archetype_id") or "") not in used]
             return dict((free or pool)[0])
 
@@ -537,6 +568,9 @@ class PersonaSpawner:
             pool = [a for a in archetypes if self._matches(a, *stage)]
             if not pool:
                 continue
+            if age is not None:
+                near = [a for a in pool if self._age_near(a, age)]
+                pool = near or pool
             free = [a for a in pool if str(a.get("archetype_id") or "") not in used]
             return dict((free or pool)[0])
 
@@ -594,6 +628,7 @@ class PersonaSpawner:
             language=language,
             gender=gender,
             strict=strict_filters,
+            age=self._user_age(),
         )
         reply_language = self._resolve_reply_language(nationality, language, archetype)
         fallback = self._fallback_persona(archetype)

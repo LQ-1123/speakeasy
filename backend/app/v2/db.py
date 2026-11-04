@@ -135,6 +135,7 @@ class DB:
                     nickname TEXT DEFAULT 'Traveler',
                     native_language TEXT DEFAULT 'zh-CN',
                     target_languages JSON DEFAULT '["en"]',
+                    birthday TEXT DEFAULT '',
                     fact_sheet JSON NOT NULL DEFAULT '{}',
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -244,6 +245,13 @@ class DB:
                 log.info("migrated friends table: added gender column")
                 log.info("migrated friends table: added fish_voice_id column")
 
+            profile_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(user_profile)").fetchall()
+            }
+            if profile_columns and "birthday" not in profile_columns:
+                conn.execute("ALTER TABLE user_profile ADD COLUMN birthday TEXT DEFAULT ''")
+                log.info("migrated user_profile: added birthday column")
+
             msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
             if msg_columns and "image_path" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
@@ -307,7 +315,7 @@ class DB:
         return data
 
     def update_profile(self, **fields: Any) -> dict:
-        allowed = {"nickname", "native_language", "target_languages", "fact_sheet"}
+        allowed = {"nickname", "native_language", "target_languages", "fact_sheet", "birthday"}
         payload = {k: v for k, v in fields.items() if k in allowed}
         if "target_languages" in payload:
             payload["target_languages"] = _json_dumps(payload["target_languages"])

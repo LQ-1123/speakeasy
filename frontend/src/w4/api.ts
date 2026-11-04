@@ -261,6 +261,7 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
       ? (rawProfile.target_languages as string[])
       : ["en"],
     interests: Array.isArray(fact.interests) ? (fact.interests as string[]) : undefined,
+    birthday: String(rawProfile.birthday ?? ""),
   } as Partial<Profile>;
 
   const requests = ((boot.requests as RawFriend[]) ?? []).map((r) => ({
@@ -345,11 +346,17 @@ export async function discover(language?: string): Promise<DiscoverResult | null
 }
 
 /** 保存「我在练」 */
-export async function saveProfile(nickname: string, targets: string[]): Promise<boolean> {
+export async function saveProfile(
+  nickname: string,
+  targets: string[],
+  birthday?: string,
+): Promise<boolean> {
+  const body: Record<string, unknown> = { nickname, target_languages: targets };
+  if (birthday !== undefined) body.birthday = birthday;
   const r = await getJson(`${BASE}/memories`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nickname, target_languages: targets }),
+    body: JSON.stringify(body),
   });
   return r !== null;
 }

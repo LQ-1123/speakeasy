@@ -23,11 +23,12 @@ import {
 
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
+import { saveProfile as apiSaveProfile } from "../api";
 import { useApp } from "../store";
 import { Avatar, Dialog, Icon } from "../ui";
 
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
-  const { profile, friends, expressions, updateProfile, settings } = useApp();
+  const { profile, friends, expressions, updateProfile, settings, showToast } = useApp();
   const [editOpen, setEditOpen] = useState(false);
 
   const mastered = expressions.filter((e) => e.status === "mastered").length;
@@ -50,6 +51,7 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
               <div className="w4-me-name">{profile.name}</div>
               <div className="w4-me-sub">
                 {profile.city} · {profile.job} · {profile.level}
+                {ageOf(profile.birthday) ? ` · ${ageOf(profile.birthday)} 岁` : ""}
               </div>
               <div className="w4-chips" style={{ marginTop: 7 }}>
                 {profile.targets.map((t) => {
@@ -144,6 +146,10 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
           onSave={(patch) => {
             updateProfile(patch);
             setEditOpen(false);
+            void (async () => {
+              const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday);
+              if (!ok) showToast("资料没保存成功，稍后再试");
+            })();
           }}
         />
       ) : null}
@@ -156,7 +162,14 @@ function EditProfileDialog({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (patch: { name: string; city: string; job: string; targets: string[]; level: "刚开始" | "能聊几句" | "日常对话" | "比较流利" }) => void;
+  onSave: (patch: {
+    name: string;
+    city: string;
+    job: string;
+    targets: string[];
+    level: "刚开始" | "能聊几句" | "日常对话" | "比较流利";
+    birthday: string;
+  }) => void;
 }) {
   const { profile } = useApp();
   const [name, setName] = useState(profile.name);
@@ -164,6 +177,7 @@ function EditProfileDialog({
   const [job, setJob] = useState(profile.job);
   const [targets, setTargets] = useState<string[]>(profile.targets);
   const [level, setLevel] = useState(profile.level);
+  const [birthday, setBirthday] = useState(profile.birthday ?? "");
 
   return (
     <Dialog
@@ -176,7 +190,16 @@ function EditProfileDialog({
           </button>
           <button
             className="w4-btn is-primary"
-            onClick={() => onSave({ name: name.trim() || profile.name, city, job, targets, level })}
+            onClick={() =>
+              onSave({
+                name: name.trim() || profile.name,
+                city,
+                job,
+                targets,
+                level,
+                birthday,
+              })
+            }
           >
             保存
           </button>
@@ -196,6 +219,17 @@ function EditProfileDialog({
           <div className="w4-field-label">在做什么</div>
           <input className="w4-input" value={job} onChange={(e) => setJob(e.target.value)} />
         </div>
+      </div>
+      <div className="w4-field">
+        <div className="w4-field-label">生日</div>
+        <input
+          className="w4-input"
+          type="date"
+          value={birthday}
+          max="2020-12-31"
+          onChange={(e) => setBirthday(e.target.value)}
+        />
+        <div className="w4-field-hint">填了之后，偶遇和自动匹配会优先找年龄相仿的人</div>
       </div>
       <div className="w4-field">
         <div className="w4-field-label">在练</div>
@@ -236,4 +270,16 @@ function EditProfileDialog({
       </div>
     </Dialog>
   );
+}
+
+/** 生日 → 年龄（没填/非法返回 null） */
+function ageOf(birthday?: string): number | null {
+  if (!birthday) return null;
+  const d = new Date(birthday);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age > 0 && age < 120 ? age : null;
 }

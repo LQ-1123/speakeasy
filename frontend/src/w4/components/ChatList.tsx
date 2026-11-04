@@ -139,17 +139,19 @@ function previewOf(last: { kind: string; text: string; from: string } | undefine
   const isMe = last.from === "me";
   switch (last.kind) {
     case "voice":
-      return isMe ? "[语音] 我说了一句" : "[语音] " + truncate(last.text, 22);
+      return isMe ? "[语音] 我说了一句" : "[语音] " + truncate(last.text, 0);
     case "image":
       return "[图片]";
     case "call":
       return "[通话] 已结束";
     default:
-      return (isMe ? "我：" : "") + truncate(last.text, 24);
+      return (isMe ? "我：" : "") + truncate(last.text, 0);
   }
 }
 
+/** n<=0 表示不截断：宽度交给 CSS ellipsis，能撑满整行 */
 function truncate(s: string, n: number) {
   const t = (s || "").replace(/\s+/g, " ").trim();
+  if (n <= 0) return t;
   return t.length > n ? t.slice(0, n) + "…" : t;
 }

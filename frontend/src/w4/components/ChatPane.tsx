@@ -998,6 +998,7 @@ function MessageRow({
       )}
       <div className="w4-msg-col">
         <div className="w4-bubble-row">
+          <div className="w4-bubble-stack">
           <div
             className={`w4-bubble ${isImage ? "is-image" : ""}`}
             title={clockTime(message.time)}
@@ -1042,6 +1043,12 @@ function MessageRow({
           )}
           </div>
 
+          {/* 译文（消息下方，跟原文区分开） */}
+          {zhShown && message.translation ? (
+            <div className="w4-translation">{message.translation}</div>
+          ) : null}
+          </div>
+
           {/* 语音消息的两个操作放气泡右侧（自己的消息由 CSS 翻到左侧） */}
           {isVoice ? (
             <div className="w4-bubble-side">
@@ -1052,11 +1059,6 @@ function MessageRow({
             </div>
           ) : null}
         </div>
-
-        {/* 译文（消息下方，跟原文区分开） */}
-        {zhShown && message.translation ? (
-          <div className="w4-translation">{message.translation}</div>
-        ) : null}
 
         {/* 润色建议 */}
         {message.suggestion ? (

@@ -1322,3 +1322,36 @@
   line-height: 1.65;
   color: var(--w-text-3);
 }
+
+/* 气泡与译文：同一个纵向 stack，宽度严格对齐 */
+.w4-root .w4-bubble-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.w4-root .w4-msg.is-me .w4-bubble-stack {
+  align-items: flex-end;
+}
+.w4-root .w4-bubble-stack .w4-translation {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 会话列表：时间不要贴着右边界 */
+.w4-root .w4-row {
+  padding-right: 18px;
+}
+.w4-root .w4-row-time {
+  margin-left: 8px;
+  padding-right: 2px;
+}
+
+/* 资料：字段小提示 */
+.w4-root .w4-field-hint {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--w-text-3);
+}

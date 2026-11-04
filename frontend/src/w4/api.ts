@@ -7,7 +7,7 @@
  * 任何一步失败都返回 null，让 store 继续用 mock —— 原型永远能打开。
  */
 
-import type { Friend, Message, Profile } from "./model";
+import type { Expression, Friend, Message, Moment, Profile } from "./model";
 import { avatarRegionOf, diceAvatar } from "./avatar";
 
 /* ------------------------------------------------------------ 常量与工具 */
@@ -302,4 +302,179 @@ export async function saveProfile(nickname: string, targets: string[]): Promise<
     body: JSON.stringify({ nickname, target_languages: targets }),
   });
   return r !== null;
+}
+
+/* ========================================================================== */
+/* 设置                                                                        */
+/* ========================================================================== */
+
+export type LiveSettings = {
+  llm: Record<string, any>;
+  stt: Record<string, any>;
+  tts: Record<string, any>;
+};
+
+/** 读真实设置（LLM / 语音识别 / 语音合成） */
+export async function loadSettings(): Promise<LiveSettings | null> {
+  const r = await getJson<LiveSettings>(`${BASE}/settings`);
+  if (!r || !r.llm) return null;
+  return r;
+}
+
+/** 保存 TTS（只传有变化的字段，后端按部分更新处理） */
+export async function saveTts(body: Record<string, string | undefined>) {
+  return getJson(`${BASE}/settings/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function resetTts() {
+  return getJson(`${BASE}/settings/tts/reset`, { method: "POST" });
+}
+
+export async function testTts() {
+  return getJson(`${BASE}/settings/tts/test`, { method: "POST" });
+}
+
+export async function saveStt(body: Record<string, string | undefined>) {
+  return getJson(`${BASE}/settings/stt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function testStt() {
+  return getJson(`${BASE}/settings/stt/test`, { method: "POST" });
+}
+
+/* ========================================================================== */
+/* 朋友圈                                                                      */
+/* ========================================================================== */
+
+function mapMoment(raw: Record<string, any>): Moment {
+  const comments = (raw.comments ?? []).map((c: Record<string, any>) => ({
+    id: String(c.id ?? ""),
+    friendId: String(c.friend_id ?? ""),
+    text: String(c.text ?? ""),
+    time: String(c.created_at ?? ""),
+  }));
+  return {
+    id: String(raw.id ?? ""),
+    authorId: String(raw.friend_id ?? ""),
+    images: [],
+    text: String(raw.content ?? ""),
+    translation: raw.content_zh ? String(raw.content_zh) : undefined,
+    mood: String(raw.mood_tag ?? ""),
+    time: String(raw.created_at ?? ""),
+    comments,
+    likedBy: [],
+  };
+}
+
+/** 今天的朋友圈（为空时调用 generateMoments 生成一批） */
+export async function loadMoments(): Promise<Moment[] | null> {
+  const r = await getJson<{ moments?: Record<string, any>[] }>(`${BASE}/moments`);
+  if (!r) return null;
+  return (r.moments ?? []).map(mapMoment);
+}
+
+/** 让 AI 好友按今天的日期生成一批动态（同一天幂等） */
+export async function generateMoments(): Promise<Moment[] | null> {
+  const r = await getJson<{ moments?: Record<string, any>[] }>(`${BASE}/moments/generate`, {
+    method: "POST",
+  });
+  if (!r) return null;
+  return (r.moments ?? []).map(mapMoment);
+}
+
+/** 我发一条动态；AI 评论由后端后台生成，稍后重拉列表 */
+export async function publishMomentToServer(text: string, mood: string) {
+  return getJson(`${BASE}/moments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: text, mood_tag: mood }),
+  });
+}
+
+/** 让好友对这条动态评论（AI 生成一条评论） */
+export async function commentMomentOnServer(momentId: string, text: string) {
+  return getJson(`${BASE}/moments/${momentId}/comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+/* ========================================================================== */
+/* 表达本                                                                      */
+/* ========================================================================== */
+
+function mapExpression(raw: Record<string, any>): Expression {
+  const mastery = Number(raw.mastery_count ?? 1);
+  return {
+    id: String(raw.id ?? ""),
+    original: String(raw.original_text ?? ""),
+    better: String(raw.better_expression ?? ""),
+    why: String(raw.explanation ?? ""),
+    sourceFriendId: String(raw.source_friend_id ?? ""),
+    createdAt: String(raw.created_at ?? ""),
+    status: raw.status === "mastered" ? "mastered" : "learning",
+    mastery: Math.max(1, Math.min(3, mastery)),
+    due: raw.status === "mastered" ? 0 : 60,
+    lastPracticed: raw.last_practiced_at ? String(raw.last_practiced_at) : undefined,
+  };
+}
+
+export async function loadExpressions(): Promise<Expression[] | null> {
+  const r = await getJson<{ expressions?: Record<string, any>[] }>(`${BASE}/expressions`);
+  if (!r) return null;
+  return (r.expressions ?? []).map(mapExpression);
+}
+
+export async function addExpression(
+  better: string,
+  original = "",
+  explanation = "",
+): Promise<Expression | null> {
+  const r = await getJson<{ expression?: Record<string, any> }>(`${BASE}/expressions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      original_text: original,
+      better_expression: better,
+      explanation,
+    }),
+  });
+  return r?.expression ? mapExpression(r.expression) : null;
+}
+
+export async function patchExpression(id: string, fields: Record<string, unknown>) {
+  return getJson(`${BASE}/expressions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export async function deleteExpressionOnServer(id: string) {
+  return getJson(`${BASE}/expressions/${id}`, { method: "DELETE" });
+}
+
+/* ========================================================================== */
+/* 好友状态（申请的接受/拒绝、删除）                                            */
+/* ========================================================================== */
+
+export async function acceptFriend(id: string) {
+  return getJson(`${BASE}/friends/${id}/accept`, { method: "POST" });
+}
+
+export async function declineFriend(id: string) {
+  return getJson(`${BASE}/friends/${id}/decline`, { method: "POST" });
+}
+
+export async function removeFriend(id: string) {
+  return getJson(`${BASE}/friends/${id}`, { method: "DELETE" });
 }

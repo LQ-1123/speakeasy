@@ -3401,3 +3401,35 @@
   opacity: 1;
   object-fit: contain;
 }
+
+/* 朋友圈空态 */
+.w4-root .w4-feed-empty {
+  padding: 56px 24px 64px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.w4-root .w4-feed-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--w-fill, #f2f2f2);
+  color: var(--w-text-3);
+  margin-bottom: 2px;
+}
+.w4-root .w4-feed-empty-title {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--w-text-2);
+}
+.w4-root .w4-feed-empty-text {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--w-text-3);
+  max-width: 300px;
+  margin-bottom: 6px;
+}

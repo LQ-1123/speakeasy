@@ -109,6 +109,7 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
     addComment,
     publishMoment,
     showToast,
+    generateMoments,
   } = useApp();
   const [publishOpen, setPublishOpen] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
@@ -171,6 +172,21 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
               </span>
             </div>
           </div>
+
+          {moments.length === 0 ? (
+            <div className="w4-feed-empty">
+              <div className="w4-feed-empty-icon">
+                <ImagePlus size={22} strokeWidth={1.6} />
+              </div>
+              <div className="w4-feed-empty-title">今天还没人发动态</div>
+              <div className="w4-feed-empty-text">
+                让好友们发几条，你就能看到他们此刻在做什么 —— 也可以直接评论，聊起来。
+              </div>
+              <button className="w4-btn is-primary" onClick={() => void generateMoments()}>
+                让好友们发几条
+              </button>
+            </div>
+          ) : null}
 
           {moments.map((m) => {
             const author = personOf(m.authorId);

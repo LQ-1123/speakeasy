@@ -29,7 +29,22 @@ import {
   REQUESTS,
   type DiscoverCandidate,
 } from "./mock";
-import { loadAll as apiLoadAll, sendText as apiSendText, fetchMessages as apiFetchMessages } from "./api";
+import {
+  loadAll as apiLoadAll,
+  sendText as apiSendText,
+  fetchMessages as apiFetchMessages,
+  acceptFriend as apiAcceptFriend,
+  declineFriend as apiDeclineFriend,
+  removeFriend as apiRemoveFriend,
+  deleteExpressionOnServer as apiDeleteExpression,
+  generateMoments as apiGenerateMoments,
+  loadExpressions as apiLoadExpressions,
+  loadMoments as apiLoadMoments,
+  loadSettings as apiLoadSettings,
+  patchExpression as apiPatchExpression,
+  publishMomentToServer as apiPublishMoment,
+  saveTts as apiSaveTts,
+} from "./api";
 import { ensureBaseline } from "./components/ChatList";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
@@ -91,6 +106,10 @@ interface Store {
   likeMoment: (momentId: string) => void;
   addComment: (momentId: string, text: string) => void;
   publishMoment: (text: string, images: string[], mood: string) => void;
+  /** 重新拉一次朋友圈（发布后 AI 评论是后台生成的） */
+  refreshMoments: () => Promise<void>;
+  /** 让 AI 好友生成今天的朋友圈 */
+  generateMoments: () => Promise<void>;
   acceptRequest: (friendId: string) => void;
   declineRequest: (friendId: string) => void;
   addDiscovered: (candidate: DiscoverCandidate) => Friend;
@@ -124,6 +143,41 @@ function sanitizeMoment(m: Moment): Moment {
     commentsPending: false,
     likedBy: mineLiked ? ["me"] : [],
     liked: mineLiked,
+  };
+}
+
+/** 后端 /settings + /settings/tts → store 里的 Settings（只做展示需要的映射） */
+function mapLiveSettings(
+  core: { llm?: Record<string, any>; stt?: Record<string, any>; tts?: Record<string, any> },
+  tts: Record<string, any> | null,
+): Partial<Settings> {
+  const llmCfg = (core.llm?.config ?? {}) as Record<string, any>;
+  const sttCfg = (core.stt?.config ?? {}) as Record<string, any>;
+  const ttsCfg = (tts ?? core.tts ?? {}) as Record<string, any>;
+  const provider = String(ttsCfg.provider ?? "");
+  return {
+    llm: {
+      preset: "deepseek",
+      baseUrl: String(llmCfg.base_url ?? ""),
+      model: String(llmCfg.model ?? ""),
+      keyMasked: String(llmCfg.api_key_masked ?? ""),
+      hasKey: Boolean(llmCfg.api_key_set),
+    },
+    stt: {
+      provider: (sttCfg.provider === "local" || sttCfg.provider === "siliconflow"
+        ? sttCfg.provider
+        : "auto") as Settings["stt"]["provider"],
+      model: String(sttCfg.model ?? ""),
+      keyMasked: String(sttCfg.api_key_masked ?? ""),
+      hasKey: Boolean(sttCfg.api_key_set),
+    },
+    tts: {
+      provider: provider === "fish" ? "fish" : "system",
+      emotion: Boolean(ttsCfg.fish_reference_id || ttsCfg.emotion),
+      keyMasked: String(ttsCfg.fish_api_key ?? ""),
+      hasKey: Boolean(ttsCfg.fish_api_key),
+      cloned: Boolean(ttsCfg.fish_reference_id),
+    },
   };
 }
 
@@ -335,6 +389,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setMessages(snap.messages);
       /* 首屏不留满屏红点：把当前会话记为已读基线 */
       ensureBaseline(snap.friends.map((f) => f.id));
+
+      /* 设置 / 朋友圈 / 表达本 也换成真数据（接口失败就保持 mock） */
+      const [core, tts, momentsLive, expressionsLive] = await Promise.all([
+        apiLoadSettings(),
+        fetch("/api/v2/settings/tts")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => (j?.tts ?? null))
+          .catch(() => null),
+        apiLoadMoments(),
+        apiLoadExpressions(),
+      ]);
+      if (cancelled) return;
+      if (core) setSettings((prev) => ({ ...prev, ...mapLiveSettings(core, tts) }));
+      /* 真后端返回空就是空：朋友圈会显示「让好友们发几条」，不再拿 mock 冒充 */
+      if (momentsLive) setMoments(momentsLive);
+      if (expressionsLive) setExpressions(expressionsLive);
       setProfile((prev) => ({ ...prev, ...snap.profile }));
       setLive(true);
     })();
@@ -630,6 +700,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const publishMoment = useCallback(
     (text: string, images: string[], mood: string) => {
       const id = nextId("mo");
+      /* 真后端：先落库，AI 好友评论由后端后台生成，稍后拉回 */
+      void apiPublishMoment(text, mood).then(() => {
+        later(() => {
+          void apiLoadMoments().then((fresh) => {
+            if (fresh && fresh.length) setMoments(fresh);
+          });
+        }, 6000);
+      });
       setMoments((list) => [
         { id, authorId: "me", images, text, mood, time: "刚刚", comments: [], likedBy: [], commentsPending: true },
         ...list,
@@ -688,6 +766,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
       ]);
       showToast(`已添加 ${req.name}`, "success");
+      void apiAcceptFriend(friendId);
     },
     [requests, showToast],
   );
@@ -695,6 +774,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const declineRequest = useCallback((friendId: string) => {
     setRequests((list) => list.filter((r) => r.id !== friendId));
     showToast("已忽略");
+    void apiDeclineFriend(friendId);
   }, [showToast]);
 
   const addDiscovered = useCallback(
@@ -749,6 +829,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const practiceExpression = useCallback((id: string, remembered: boolean) => {
+    const cur = expressions.find((e) => e.id === id);
+    const nextMastery = Math.min(3, (cur?.mastery ?? 1) + (remembered ? 1 : 0));
+    void apiPatchExpression(id, {
+      mastery_count: nextMastery,
+      status: nextMastery >= 3 ? "mastered" : "learning",
+    });
     setExpressions((list) =>
       list.map((e) => {
         if (e.id !== id) return e;
@@ -762,9 +848,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
       }),
     );
-  }, []);
+  }, [expressions]);
 
   const toggleMastered = useCallback((id: string) => {
+    const cur = expressions.find((e) => e.id === id);
+    const toMastered = cur?.status !== "mastered";
     setExpressions((list) =>
       list.map((e) =>
         e.id === id
@@ -774,10 +862,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : e,
       ),
     );
-  }, []);
+    void apiPatchExpression(id, {
+      status: toMastered ? "mastered" : "learning",
+      mastery_count: toMastered ? 3 : 1,
+    });
+  }, [expressions]);
 
   const removeExpression = useCallback((id: string) => {
     setExpressions((list) => list.filter((e) => e.id !== id));
+    void apiDeleteExpression(id);
   }, []);
 
   const updateProfile = useCallback((patch: Partial<Profile>) => {
@@ -786,6 +879,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((s) => ({ ...s, ...patch }));
+    // 只同步后端真正支持的字段（TTS provider）；密钥类不在这里回写
+    if (patch.tts) {
+      void apiSaveTts({ provider: patch.tts.provider === "fish" ? "fish" : "system" });
+    }
   }, []);
 
   const updateFriendVoice = useCallback((friendId: string, voice: string, voiceLabel: string) => {
@@ -795,7 +892,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteFriend = useCallback((friendId: string) => {
     setFriends((list) => list.filter((f) => f.id !== friendId));
     setMessages((list) => list.filter((m) => m.friendId !== friendId));
+    void apiRemoveFriend(friendId);
   }, []);
+
+  const refreshMoments = useCallback(async () => {
+    const fresh = await apiLoadMoments();
+    if (fresh && fresh.length) setMoments(fresh);
+  }, []);
+
+  const generateMoments = useCallback(async () => {
+    showToast("正在让好友们发动态…");
+    const fresh = await apiGenerateMoments();
+    if (fresh && fresh.length) {
+      setMoments(fresh);
+      showToast("今天的朋友圈来了", "success");
+    } else {
+      showToast("生成失败，稍后再试", "error");
+    }
+  }, [showToast]);
 
   const callSummary = useCallback(
     (friendId: string, seconds: number) => {
@@ -845,6 +959,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       likeMoment,
       addComment,
       publishMoment,
+      refreshMoments,
+      generateMoments,
       acceptRequest,
       declineRequest,
       addDiscovered,
@@ -885,6 +1001,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       likeMoment,
       addComment,
       publishMoment,
+      refreshMoments,
+      generateMoments,
       acceptRequest,
       declineRequest,
       addDiscovered,

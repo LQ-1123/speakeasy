@@ -5,7 +5,7 @@
  * 每一组都只做真实存在的事，没有「敬请期待」。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -113,6 +113,13 @@ function LlmSection({
   const [model, setModel] = useState(settings.llm.model);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+
+  /* store 里的设置是异步从后端拉回来的：到了要同步进输入框，
+     否则页面永远停在 mock 的 deepseek-chat */
+  useEffect(() => {
+    setBaseUrl(settings.llm.baseUrl);
+    setModel(settings.llm.model);
+  }, [settings.llm.baseUrl, settings.llm.model]);
 
   const applyPreset = (id: string) => {
     setPreset(id);

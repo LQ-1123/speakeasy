@@ -1387,6 +1387,19 @@ async def create_user_moment(request: Request, body: UserMomentIn) -> dict:
     }
 
 
+@router.delete("/moments/{moment_id}")
+async def delete_user_moment(request: Request, moment_id: str) -> dict:
+    """只能删自己发的动态；好友发的动态不允许删。"""
+    services = _services(request)
+    moment = await _thread(services.db.get_user_moment, moment_id)
+    if moment is None:
+        raise HTTPException(status_code=404, detail="只能删除自己发的动态")
+    ok = await _thread(services.db.delete_user_moment, moment_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="动态不存在")
+    return {"deleted": moment_id}
+
+
 @router.post("/moments/photo")
 async def create_user_moment_photo(
     request: Request,

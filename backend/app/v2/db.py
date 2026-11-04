@@ -584,6 +584,12 @@ class DB:
             ).fetchone()
         return dict(row) if row else {"id": mid}
 
+    def delete_user_moment(self, mid: str) -> bool:
+        """删除用户自己发的动态（评论表 ON DELETE CASCADE 一起清）。"""
+        with self._lock, self.conn:
+            cur = self.conn.execute("DELETE FROM user_moments WHERE id=?", (mid,))
+            return cur.rowcount > 0
+
     def list_user_moments(self, limit: int = 30) -> list[dict]:
         return self._fetch_all(
             "user_moments",

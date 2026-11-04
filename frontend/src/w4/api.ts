@@ -711,3 +711,11 @@ export async function discoverLanguages(): Promise<string[] | null> {
   if (!r || !Array.isArray(r.languages)) return null;
   return r.languages.filter((x): x is string => typeof x === "string" && !!x);
 }
+
+/** 删除自己发的动态 */
+export async function deleteMoment(momentId: string): Promise<boolean> {
+  const r = await getJson<{ deleted?: string }>(`${BASE}/moments/${momentId}`, {
+    method: "DELETE",
+  });
+  return !!r?.deleted;
+}

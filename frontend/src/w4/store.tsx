@@ -49,6 +49,7 @@ import {
   publishMomentToServer as apiPublishMoment,
   saveTts as apiSaveTts,
   translate as apiTranslate,
+  deleteMoment as apiDeleteMoment,
 } from "./api";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
@@ -113,6 +114,8 @@ interface Store {
   dismissSuggestion: (messageId: string) => void;
   likeMoment: (momentId: string) => void;
   addComment: (momentId: string, text: string) => void;
+  /** 删除自己发的动态 */
+  deleteMoment: (momentId: string) => Promise<void>;
   publishMoment: (text: string, images: string[], mood: string) => void;
   /** 重新拉一次朋友圈（发布后 AI 评论是后台生成的） */
   refreshMoments: () => Promise<void>;
@@ -778,6 +781,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const deleteMoment = useCallback(
+    async (momentId: string) => {
+      const ok = await apiDeleteMoment(momentId);
+      if (!ok) {
+        showToast("删除失败，稍后再试");
+        return;
+      }
+      setMoments((list) => list.filter((m) => m.id !== momentId));
+      showToast("已删除");
+    },
+    [showToast],
+  );
+
   const addComment = useCallback((momentId: string, text: string) => {
     const comment: MomentComment = { id: nextId("cm"), friendId: "me", text, time: "刚刚" };
     setMoments((list) =>
@@ -1064,6 +1080,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissSuggestion,
       likeMoment,
       addComment,
+      deleteMoment,
       publishMoment,
       refreshMoments,
       generateMoments,

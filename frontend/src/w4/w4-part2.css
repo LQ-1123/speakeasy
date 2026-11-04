@@ -1296,3 +1296,29 @@
   flex-direction: column;
   height: 100%;
 }
+
+/* 动态：评论翻译 + 删除按钮 */
+.w4-root .w4-moment-act.is-danger {
+  color: #d14343;
+}
+.w4-root .w4-moment-act.is-danger:hover {
+  background: rgba(209, 67, 67, 0.08);
+}
+.w4-root .w4-comment-tr {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  color: var(--w-green-ink, #0f7f4a);
+  cursor: pointer;
+}
+.w4-root .w4-comment-tr:hover {
+  text-decoration: underline;
+}
+.w4-root .w4-comment-zh {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--w-text-3);
+}

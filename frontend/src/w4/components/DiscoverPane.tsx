@@ -17,6 +17,7 @@ import {
   Languages,
   MessageSquare,
   Plus,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -137,11 +138,35 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
     translateAllMoments,
     likeMoment,
     addComment,
+    deleteMoment,
     publishMoment,
     showToast,
     generateMoments,
   } = useApp();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [deleteFor, setDeleteFor] = useState<string | null>(null);
+  /** 评论翻译：key = momentId:commentId */
+  const [commentZh, setCommentZh] = useState<Record<string, string>>({});
+  const [commentZhOpen, setCommentZhOpen] = useState<Record<string, boolean>>({});
+  const [commentZhLoading, setCommentZhLoading] = useState<Record<string, boolean>>({});
+
+  const toggleCommentZh = async (momentId: string, commentId: string, text: string, friendId: string) => {
+    const key = `${momentId}:${commentId}`;
+    if (commentZhOpen[key]) {
+      setCommentZhOpen((m) => ({ ...m, [key]: false }));
+      return;
+    }
+    if (commentZh[key]) {
+      setCommentZhOpen((m) => ({ ...m, [key]: true }));
+      return;
+    }
+    setCommentZhLoading((m) => ({ ...m, [key]: true }));
+    const out = await apiTranslate(text, friendId).catch(() => null);
+    setCommentZhLoading((m) => ({ ...m, [key]: false }));
+    if (!out) return;
+    setCommentZh((m) => ({ ...m, [key]: out }));
+    setCommentZhOpen((m) => ({ ...m, [key]: true }));
+  };
   const [zoom, setZoom] = useState<string | null>(null);
   const [commentFor, setCommentFor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -270,6 +295,12 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
                       <MessageSquare size={13} strokeWidth={1.8} />
                       评论
                     </button>
+                    {mine ? (
+                      <button className="w4-moment-act is-danger" onClick={() => setDeleteFor(m.id)}>
+                        <Trash2 size={13} strokeWidth={1.8} />
+                        删除
+                      </button>
+                    ) : null}
                   </div>
 
                   {m.likedBy.length > 0 || m.comments.length > 0 || m.commentsPending ? (
@@ -290,13 +321,29 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
                       ) : null}
                       {m.comments.length || m.commentsPending ? (
                         <div className="w4-moment-comments">
-                          {m.comments.map((c) => (
-                            <div key={c.id} className={`w4-moment-comment ${c.friendId === "me" ? "is-me" : ""}`}>
-                              <b>{personOf(c.friendId).name}</b>
-                              {c.friendId === "me" ? "" : "："}
-                              {c.text}
-                            </div>
-                          ))}
+                          {m.comments.map((c) => {
+                            const key = `${m.id}:${c.id}`;
+                            const canTranslate = c.friendId !== "me";
+                            const zh = commentZh[key];
+                            const open = !!commentZhOpen[key];
+                            const loading = !!commentZhLoading[key];
+                            return (
+                              <div key={c.id} className={`w4-moment-comment ${c.friendId === "me" ? "is-me" : ""}`}>
+                                <b>{personOf(c.friendId).name}</b>
+                                {c.friendId === "me" ? "" : "："}
+                                {c.text}
+                                {canTranslate ? (
+                                  <button
+                                    className="w4-comment-tr"
+                                    onClick={() => void toggleCommentZh(m.id, c.id, c.text, c.friendId)}
+                                  >
+                                    {loading ? "翻译中…" : open ? "收起翻译" : "翻译"}
+                                  </button>
+                                ) : null}
+                                {open && zh ? <div className="w4-comment-zh">{zh}</div> : null}
+                              </div>
+                            );
+                          })}
                           {m.commentsPending ? (
                             <div className="w4-comment-pending">
                               <span className="w4-typing">
@@ -360,6 +407,34 @@ function MomentsView({ navigate, onBack }: { navigate: (r: Route) => void; onBac
             showToast("已发布，好友们会来评论", "success");
           }}
         />
+      ) : null}
+
+      {deleteFor ? (
+        <Dialog
+          title="删除这条动态？"
+          onClose={() => setDeleteFor(null)}
+          footer={
+            <>
+              <button className="w4-btn" onClick={() => setDeleteFor(null)}>
+                取消
+              </button>
+              <button
+                className="w4-btn is-primary"
+                onClick={() => {
+                  const id = deleteFor;
+                  setDeleteFor(null);
+                  void deleteMoment(id);
+                }}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--w-text-2)" }}>
+            删除后这条动态和下面的评论一起消失，无法恢复。
+          </div>
+        </Dialog>
       ) : null}
     </div>
   );

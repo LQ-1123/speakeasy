@@ -726,3 +726,22 @@ export async function deleteMoment(momentId: string): Promise<boolean> {
   });
   return !!r?.deleted;
 }
+
+/** 轻量刷新：只拉好友列表 + 好友申请（不拉历史消息），用于轮询 */
+export async function loadFriendList(): Promise<{
+  friends: Friend[];
+  requests: Friend[];
+} | null> {
+  const r = await getJson<{ friends?: RawFriend[]; requests?: RawFriend[] }>(
+    `${BASE}/friends?limit=50`,
+  );
+  if (!r) return null;
+  return {
+    friends: ((r.friends as RawFriend[]) ?? []).map(mapFriend),
+    requests: ((r.requests as RawFriend[]) ?? []).map((x) => ({
+      ...mapFriend(x),
+      isRequest: true,
+      requestNote: String((x as Record<string, unknown>).request_message ?? ""),
+    })),
+  };
+}

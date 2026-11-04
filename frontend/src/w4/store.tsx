@@ -50,6 +50,7 @@ import {
   saveTts as apiSaveTts,
   translate as apiTranslate,
   deleteMoment as apiDeleteMoment,
+  loadFriendList as apiLoadFriendList,
 } from "./api";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
@@ -436,6 +437,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const timers = useRef<number[]>([]);
+
+  /* 好友/申请轮询：别人来加你好友、好友裂变推荐，不用刷新页面就能看到 */
+  useEffect(() => {
+    let stopped = false;
+    const refresh = async () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      const snap = await apiLoadFriendList();
+      if (stopped || !snap) return;
+      setFriends(snap.friends);
+      setRequests(snap.requests);
+    };
+    const timer = window.setInterval(() => void refresh(), 12_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
   const toastTimer = useRef<number | null>(null);
   useEffect(() => {
     const list = timers.current;

@@ -834,3 +834,26 @@
     justify-content: flex-end;
   }
 }
+
+/* ===========================================================================
+   手机端主内容列：必须重新绝对定位铺满
+   背景：空态修复时加过 `.w4-main { position: relative; width: 100% }`，
+   它的优先级与移动端规则相同但更靠后 → 手机上 .w4-main 变成 flex 子项，
+   被 width:100% 的列表列挤成 0 宽并推到屏幕外 → 点进聊天白屏。
+   这里在最后重新声明，确保手机端仍然是「主内容覆盖在列表上」。
+   =========================================================================== */
+@media (max-width: 899.98px) {
+  .w4-root .w4-main {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    transform: translateX(100%);
+  }
+  .w4-root .w4-app[data-mobile-view="main"] .w4-main {
+    transform: none;
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.12);
+  }
+  .w4-root .w4-app[data-mobile-view="main"] .w4-listcol {
+    visibility: hidden;
+  }
+}

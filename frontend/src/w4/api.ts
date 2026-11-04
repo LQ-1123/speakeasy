@@ -184,8 +184,26 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
   if (raw.audio_url) mapped.audio = String(raw.audio_url);
   if (raw.image_url) mapped.image = String(raw.image_url);
   if (raw.suggestion) {
-    const s = String(raw.suggestion);
-    mapped.suggestion = { better: s, why: "", tag: "地道", saved: false };
+    const rawSug = raw.suggestion as unknown;
+    if (typeof rawSug === "string") {
+      mapped.suggestion = { better: rawSug, why: "", tag: "地道", saved: false };
+    } else if (rawSug && typeof rawSug === "object") {
+      const s = rawSug as Record<string, any>;
+      mapped.suggestion = {
+        better: String(s.better_version ?? s.better ?? s.text ?? ""),
+        why: String(s.explanation ?? s.why ?? ""),
+        tag: ((): "地道" | "自然" | "礼貌" | "语法" => {
+          const map: Record<string, "地道" | "自然" | "礼貌" | "语法"> = {
+            grammar: "语法",
+            natural: "自然",
+            polite: "礼貌",
+            idiomatic: "地道",
+          };
+          return map[String(s.tag ?? "")] ?? "地道";
+        })(),
+        saved: Boolean(s.is_saved ?? s.saved),
+      };
+    }
   }
   return mapped;
 }

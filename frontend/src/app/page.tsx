@@ -1,14 +1,12 @@
 "use client";
 
 /**
- * SpeakEasy 2.0 主界面：移动端三 Tab 单页（消息 / 动态·偶遇 / 表达本·画像）。
- *
- * 深链：`/?tab=chats|discover|notes`、`/?tab=chats&friend=<id>`。
- * 1.0 的旧界面保留在 `/classic`，不再从新界面链接过去，避免误触。
+ * 入口：v3 界面（面向「只想练口语、不想懂 AI」的人）。
+ * 旧的 v2 界面保留在 /v2，随时可回退对比。
  */
 
-import { SpeakEasyApp } from "@/components/v2/SpeakEasyApp";
+import { V3App } from "@/components/v3/V3App";
 
 export default function Page() {
-  return <SpeakEasyApp />;
+  return <V3App />;
 }

@@ -818,7 +818,7 @@ export function ChatPane({
             className="w4-ctx-menu"
             style={(() => {
               const W = 132;
-              const H = 46;
+              const H = 82;
               const pad = 8;
               const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
               const vh = typeof window === "undefined" ? 768 : window.innerHeight;
@@ -839,6 +839,15 @@ export function ChatPane({
               }}
             >
               {msgMenu.message.shownText ? "取消转文字" : "转文字"}
+            </button>
+            <button
+              className="w4-ctx-item"
+              onClick={() => {
+                void translateMessage(msgMenu.message.id);
+                setMsgMenu(null);
+              }}
+            >
+              {msgMenu.message.translation && zhOpen[msgMenu.message.id] ? "收起翻译" : "翻译"}
             </button>
           </div>
         </>

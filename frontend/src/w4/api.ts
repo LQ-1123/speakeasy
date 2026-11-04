@@ -702,3 +702,10 @@ export function ttsSampleUrl(text: string, voice: string): string {
   const q = new URLSearchParams({ text: text.slice(0, 200), voice: voice || "en-GB-RyanNeural" });
   return `${BASE}/tts/sample?${q.toString()}`;
 }
+
+/** 偶遇可选语言：后端只返回「真实声线能说」的语言 */
+export async function discoverLanguages(): Promise<string[] | null> {
+  const r = await getJson<{ languages?: string[] }>(`${BASE}/discover/languages`);
+  if (!r || !Array.isArray(r.languages)) return null;
+  return r.languages.filter((x): x is string => typeof x === "string" && !!x);
+}

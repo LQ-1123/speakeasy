@@ -36,7 +36,7 @@ export function DiscoverIndex({
   ];
 
   return (
-    <div className="w4-listcol w4-disc-col">
+    <div className="w4-disc-col">
       <div className="w4-list-head">
         <div className="w4-head-main">
           <div className="w4-head-title">发现</div>

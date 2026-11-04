@@ -23,7 +23,7 @@ import {
   acceptFriend as apiAcceptFriend,
   declineFriend as apiDeclineFriend,
   discover as apiDiscover,
-  loadArchetypes,
+  discoverLanguages as apiDiscoverLanguages,
   translate as apiTranslate,
 } from "../api";
 import { LANGUAGES } from "../format";
@@ -456,20 +456,18 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
     LANGUAGES.map((l) => ({ code: l.code, label: l.label })),
   );
 
-  /* 语言列表来自后端 archetypes（之前写死只显示 6 个） */
+  /* 语言列表来自后端 /discover/languages：只列真实声线能说的语言 */
   useEffect(() => {
     void (async () => {
-      const list = await loadArchetypes();
-      const codes = [...new Set(list.map((a) => a.native_lang).filter(Boolean))];
-      if (!codes.length) return;
+      const codes = await apiDiscoverLanguages();
+      if (!codes || !codes.length) return;
       const known = new Map(LANGUAGES.map((l) => [l.code, l.label]));
       const EXTRA: Record<string, string> = { zh: "中文", en: "英语", de: "德语" };
       setLangOptions(
-        codes
-          /* 中文是母语，不作为「偶遇练习」的目标语言 */
-          .filter((code) => code !== "zh")
-          .map((code) => ({ code, label: known.get(code) ?? EXTRA[code] ?? code.toUpperCase() }))
-          .sort((a, b) => a.label.localeCompare(b.label, "zh")),
+        codes.map((code) => ({
+          code,
+          label: known.get(code) ?? EXTRA[code] ?? code.toUpperCase(),
+        })),
       );
     })();
   }, []);

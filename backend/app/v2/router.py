@@ -482,18 +482,63 @@ def _pick_onboarding_picks(services: Any) -> tuple[dict[str, Any], ...]:
 
 
 async def _run_onboarding(services: Any) -> None:
-    """PRD §3.2.1：默认 2 位性格反差明显的好友。
+    """好友为空时：按画像目标语言，主动来 1~3 个人加你（好友申请形式）。
 
-    第 1 位：英音（温和、语速适中，适合破冰）；
-    第 2 位：带鲜明口音/文化的跨文化朋友（意大利，Multilingual 声线）。
-    spawner 的过滤是分级放宽的，池子不够时不会失败。
+    语言只用真实声线能说的（Fish ∩ 原型库），保证第一条招呼语音能正常生成。
     """
-    picks = _pick_onboarding_picks(services)
     try:
-        for pick in picks:
-            friend = await services.spawner.spawn(**pick)
-            await _send_icebreaker(services, friend)
-            log.info("onboarding: 已生成好友 %s (%s)", friend.get("name"), friend.get("city"))
+        supported = await _discover_languages(services)
+        profile: dict = {}
+        try:
+            profile = services.db.get_profile() or {}
+        except Exception:  # noqa: BLE001 - 读画像失败就随机
+            profile = {}
+        targets = [
+            str(x).strip()
+            for x in (profile.get("target_languages") or [])
+            if str(x or "").strip()
+        ]
+        langs = [lang for lang in targets if not supported or lang in supported]
+        if not langs:
+            langs = list(supported) or ["en"]
+
+        rows = load_archetypes()
+        countries_by_lang: dict[str, list[str]] = {}
+        for a in rows:
+            li = a.get("locale_info") or {}
+            lang = str(li.get("native_lang") or "").strip()
+            country = str(li.get("country") or "").strip()
+            if lang and country:
+                countries_by_lang.setdefault(lang, []).append(country)
+
+        count = random.randint(1, 3)
+        picks = random.sample(langs, k=min(count, len(langs)))
+        while len(picks) < count:
+            picks.append(random.choice(langs))
+
+        for lang in picks:
+            countries = countries_by_lang.get(lang)
+            friend = await services.spawner.spawn(
+                nationality=random.choice(countries) if countries else None,
+                language=lang,
+                status="pending_request",
+                strict_filters=False,
+            )
+            message = await _send_icebreaker(services, friend)
+            try:
+                await _thread(
+                    services.db.update_friend,
+                    friend["id"],
+                    request_message=str(message.get("transcript") or "")[:160],
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            log.info(
+                "onboarding: 好友申请 %s (%s, %s)",
+                friend.get("name"),
+                friend.get("city"),
+                lang,
+            )
     except Exception as exc:  # noqa: BLE001
         log.warning("onboarding 失败: %s: %s", type(exc).__name__, exc)
     finally:
@@ -623,9 +668,18 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
 
     # 用户没显式筛语种 → 用自画像的目标语言做「为主 + 偶发其他」。
     # 注意仍保持 strict_filters=False，抽不到时 spawner 会放宽而不是报 422。
+    supported_langs = await _discover_languages(services)
     pick_language = body.language
+    if body.language and supported_langs and body.language not in supported_langs:
+        raise HTTPException(
+            status_code=422,
+            detail="这个语言暂时没有可用的真人声线，换一个试试",
+        )
     if not has_filters:
         pick_language = _weighted_target_language(services)
+        # 画像里的目标语言如果没声线，就退回有声线的语言
+        if pick_language and supported_langs and pick_language not in supported_langs:
+            pick_language = random.choice(supported_langs)
 
     try:
         friend = await services.spawner.spawn(
@@ -1578,6 +1632,57 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"合成失败: {exc}") from exc
     return FileResponse(path, media_type="audio/wav", filename=os.path.basename(path))
+
+
+async def _fish_languages(services: Any) -> set[str]:
+    """Fish 账号里实际可用的音色语言（读不到就返回空集 = 不限制）。"""
+    try:
+        from app.config import get_settings as _gs  # noqa: PLC0415
+        from app.voice import fish_tts as _ft  # noqa: PLC0415
+        from app.voice.tts_config import TTSConfigStore as _TCS  # noqa: PLC0415
+
+        cfg = _TCS(str(_gs().data_path)).load()
+        if cfg.provider != "fish" or not cfg.fish_api_key.strip():
+            return set()
+        rows = await _ft.list_models(
+            api_key=cfg.fish_api_key,
+            base_url=cfg.fish_base_url,
+            page_number=1,
+            page_size=100,
+        )
+        langs: set[str] = set()
+        for r in rows:
+            for lang in r.get("languages") or []:
+                code = str(lang).strip().lower()
+                if code:
+                    langs.add(code)
+        return langs
+    except Exception as exc:  # noqa: BLE001 - 拿不到就不限制
+        log.warning("读取 Fish 支持语言失败: %s", exc)
+        return set()
+
+
+def _archetype_languages() -> list[str]:
+    """原型库里的语言（中文是母语，不作为练习目标）。"""
+    langs = sorted({str(a.get("locale_info", {}).get("native_lang") or "") for a in load_archetypes()})
+    return [lang for lang in langs if lang and lang != "zh"]
+
+
+async def _discover_languages(services: Any) -> list[str]:
+    """能被真实声线说出来的语言：原型库 ∩ Fish 音色语言。"""
+    arch = _archetype_languages()
+    fish = await _fish_languages(services)
+    if not fish:
+        return arch
+    supported = [lang for lang in arch if lang in fish]
+    return supported or arch
+
+
+@router.get("/discover/languages")
+async def discover_languages(request: Request) -> dict:
+    """偶遇可选语言：只列真实声线能说的。"""
+    services = _services(request)
+    return {"languages": await _discover_languages(services)}
 
 
 @router.get("/archetypes")

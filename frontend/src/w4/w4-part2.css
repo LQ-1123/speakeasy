@@ -1216,3 +1216,41 @@
     padding-bottom: 6px;
   }
 }
+
+/* ===========================================================================
+   指针位置弹出的消息菜单（右键 / 长按）—— 像微信那样贴着指针展开
+   =========================================================================== */
+.w4-root .w4-ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 69;
+  background: transparent;
+}
+.w4-root .w4-ctx-menu {
+  position: fixed;
+  z-index: 71;
+  background: #fff;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  animation: w4-ctx-in 0.12s ease-out;
+}
+@keyframes w4-ctx-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.w4-root .w4-ctx-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--w-text);
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.w4-root .w4-ctx-item:hover {
+  background: var(--w-hover, #f2f2f2);
+}

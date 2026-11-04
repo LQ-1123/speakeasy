@@ -123,8 +123,11 @@ export function ChatPane({
   const [mobileInfo, setMobileInfo] = useState(false);
   const [wide, setWide] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
-  const [msgMenu, setMsgMenu] = useState<Message | null>(null);
-  const msgMenuOpenedAt = useRef(0);
+  const [msgMenu, setMsgMenu] = useState<{
+    message: Message;
+    x: number;
+    y: number;
+  } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [calling, setCalling] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
@@ -556,10 +559,9 @@ export function ChatPane({
                       onSave={() => saveSuggestion(m.id)}
                       onDismiss={() => dismissSuggestion(m.id)}
                       onZoom={setZoom}
-                      onLongPress={() => {
-                        msgMenuOpenedAt.current = Date.now();
-                        setMsgMenu(m);
-                      }}
+                      onLongPress={(pos) =>
+                        setMsgMenu({ message: m, x: pos.x, y: pos.y })
+                      }
                     />
                   ))}
                 </div>
@@ -809,37 +811,37 @@ export function ChatPane({
       </div>
 
       {msgMenu ? (
-        <div
-          className="w4-msg-menu"
-          onClick={() => {
-            if (Date.now() - msgMenuOpenedAt.current > 280) setMsgMenu(null);
-          }}
-        >
-          <div className="w4-msg-menu-card" onClick={(e) => e.stopPropagation()}>
-            <div className="w4-msg-menu-title">语音消息</div>
+        <>
+          {/* 透明遮罩：点别处关掉菜单（不做全屏变暗，跟微信一样） */}
+          <div className="w4-ctx-backdrop" onClick={() => setMsgMenu(null)} />
+          <div
+            className="w4-ctx-menu"
+            style={(() => {
+              const W = 132;
+              const H = 46;
+              const pad = 8;
+              const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
+              const vh = typeof window === "undefined" ? 768 : window.innerHeight;
+              /* 从指针位置展开；贴边时翻到另一侧，保证不出屏 */
+              const clampX = (v: number) => Math.max(pad, Math.min(v, vw - W - pad));
+              const clampY = (v: number) => Math.max(pad, Math.min(v, vh - H - pad));
+              const x = clampX(msgMenu.x + 6);
+              /* 下方放不下就翻到指针上方 */
+              const y = msgMenu.y + H + 12 > vh ? clampY(msgMenu.y - H - 6) : clampY(msgMenu.y + 8);
+              return { left: x, top: y, width: W };
+            })()}
+          >
             <button
-              className="w4-msg-menu-item"
+              className="w4-ctx-item"
               onClick={() => {
-                toggleShownText(msgMenu.id);
+                toggleShownText(msgMenu.message.id);
                 setMsgMenu(null);
               }}
             >
-              {msgMenu.shownText ? "取消转文字" : "转文字"}
-            </button>
-            <button
-              className="w4-msg-menu-item"
-              onClick={() => {
-                void translateMessage(msgMenu.id);
-                setMsgMenu(null);
-              }}
-            >
-              {msgMenu.translation && zhOpen[msgMenu.id] ? "收起翻译" : "翻译"}
-            </button>
-            <button className="w4-msg-menu-item is-cancel" onClick={() => setMsgMenu(null)}>
-              取消
+              {msgMenu.message.shownText ? "取消转文字" : "转文字"}
             </button>
           </div>
-        </div>
+        </>
       ) : null}
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
@@ -923,13 +925,14 @@ function MessageRow({
   onSave: () => void;
   onDismiss: () => void;
   onZoom: (src: string) => void;
-  onLongPress?: () => void;
+  onLongPress?: (pos: { x: number; y: number }) => void;
 }) {
   const { profile } = useApp();
   const mine = message.from === "me";
 
-  /* 长按语音消息 → 弹出「转文字 / 翻译」菜单（手机端主要入口） */
+  /* 长按/右键语音消息 → 在指针位置弹出「转文字」菜单 */
   const pressTimer = useRef<number | null>(null);
+  const pressPos = useRef({ x: 0, y: 0 });
   const longPressed = useRef(false);
 
   const cancelPress = () => {
@@ -946,12 +949,14 @@ function MessageRow({
     if (longPressed.current) e.preventDefault();
   };
 
-  const startPress = () => {
+  const startPress = (e: React.TouchEvent) => {
     longPressed.current = false;
     cancelPress();
+    const t = e.touches?.[0];
+    pressPos.current = { x: t ? t.clientX : 0, y: t ? t.clientY : 0 };
     pressTimer.current = window.setTimeout(() => {
       longPressed.current = true;
-      onLongPress?.();
+      onLongPress?.(pressPos.current);
     }, 420);
   };
 
@@ -987,7 +992,7 @@ function MessageRow({
           <div
             className={`w4-bubble ${isImage ? "is-image" : ""}`}
             title={clockTime(message.time)}
-            onTouchStart={isVoice ? startPress : undefined}
+            onTouchStart={isVoice ? (e) => startPress(e) : undefined}
             onTouchEnd={isVoice ? endPress : undefined}
             onTouchMove={isVoice ? cancelPress : undefined}
             onTouchCancel={isVoice ? cancelPress : undefined}
@@ -995,7 +1000,7 @@ function MessageRow({
               isVoice
                 ? (e) => {
                     e.preventDefault();
-                    onLongPress?.();
+                    onLongPress?.({ x: e.clientX, y: e.clientY });
                   }
                 : undefined
             }
@@ -1034,9 +1039,7 @@ function MessageRow({
               <button className="w4-mini-btn" onClick={onToggleText}>
                 {message.shownText ? "取消转文字" : "转文字"}
               </button>
-              <button className="w4-mini-btn" onClick={onToggleZh}>
-                {message.translation && zhShown ? "收起翻译" : "翻译"}
-              </button>
+
             </div>
           ) : null}
         </div>

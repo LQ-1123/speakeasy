@@ -54,6 +54,8 @@ export interface Friend {
   /** 一句话招呼，加好友前试听用 */
   greeting: string;
   greetingZh: string;
+  /** 招呼语音的静态地址：有就直接播，不用现场合成 */
+  greetingAudio?: string;
   isRequest?: boolean;
   requestNote?: string;
   requestedAt?: string;

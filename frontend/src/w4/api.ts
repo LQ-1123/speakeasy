@@ -158,6 +158,7 @@ function mapFriend(raw: RawFriend): Friend {
     /* 好友申请会带一句 request_message（偶遇捏人时写入的招呼语） */
     greeting: String(raw.request_message ?? ""),
     greetingZh: "",
+    greetingAudio: raw.greeting_audio ? String(raw.greeting_audio) : undefined,
   };
 }
 

@@ -192,6 +192,12 @@ async def _friend_public(services: Any, friend: dict) -> dict:
             "last_message": _public_preview(last),
         }
     )
+    # 好友申请试听：直接用 TA 那条招呼语音的文件，前端点开即播，不用现场合成
+    last_audio = (last or {}).get("audio_path")
+    data["greeting"] = str((last or {}).get("transcript") or "")
+    data["greeting_audio"] = (
+        f"/api/v2/audio/{os.path.basename(str(last_audio))}" if last_audio else None
+    )
     return data
 
 

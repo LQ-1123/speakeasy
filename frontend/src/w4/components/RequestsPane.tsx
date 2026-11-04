@@ -2,7 +2,7 @@
 
 /** 新的朋友：好友申请列表，可以试听 TA 的声音再决定。 */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Play, X } from "lucide-react";
 
 import { ttsSampleUrl } from "../api";
@@ -16,9 +16,35 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  /** 试听：让后端按 TA 的招呼语 + 声线现合成（真实 TTS，不是假动画） */
+  /* 预取：把每条申请的招呼语音提前加载好，点下去直接响 */
+  useEffect(() => {
+    const warmed: HTMLAudioElement[] = [];
+    for (const r of requests) {
+      if (!r.greetingAudio) continue;
+      const a = new Audio(r.greetingAudio);
+      a.preload = "auto";
+      try {
+        a.load();
+      } catch {
+        /* 忽略 */
+      }
+      warmed.push(a);
+    }
+    return () => {
+      warmed.forEach((a) => {
+        try {
+          a.src = "";
+        } catch {
+          /* 忽略 */
+        }
+      });
+    };
+  }, [requests]);
+
+  /** 试听：有预生成的语音文件就直接播（即时）；没有才现场合成兜底 */
   const playPreview = (friend: Friend) => {
-    if (!friend.greeting) return;
+    const src = friend.greetingAudio || (friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice) : "");
+    if (!src) return;
     if (playingId === friend.id) {
       audioRef.current?.pause();
       audioRef.current = null;
@@ -26,10 +52,11 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
       return;
     }
     audioRef.current?.pause();
-    const a = new Audio(ttsSampleUrl(friend.greeting, friend.voice));
-    audioRef.current = a;
+    const a = new Audio(src);
+    a.preload = "auto";
     a.onended = () => setPlayingId(null);
     a.onerror = () => setPlayingId(null);
+    audioRef.current = a;
     a.play()
       .then(() => setPlayingId(friend.id))
       .catch(() => setPlayingId(null));

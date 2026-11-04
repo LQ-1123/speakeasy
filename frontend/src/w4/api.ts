@@ -674,3 +674,8 @@ export async function callTurnStream(
   }
   return true;
 }
+
+/** 告诉后端这条会话已读（红点才会真的消失，刷新后不再回来） */
+export async function markThreadRead(friendId: string) {
+  return getJson(`${BASE}/friends/${friendId}/read`, { method: "POST" });
+}

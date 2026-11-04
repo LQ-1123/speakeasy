@@ -18,36 +18,6 @@ import { listTime } from "../format";
  * 若直接渲染，进来就是满屏红点，像没清理的测试数据。
  * 这里用 localStorage 记账：点开过的人不再亮红点。
  */
-function seen(friendId: string): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem("w4.seen." + friendId) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function markSeen(friendId: string) {
-  try {
-    window.localStorage.setItem("w4.seen." + friendId, "1");
-  } catch {
-    /* 隐私模式下忽略 */
-  }
-}
-
-/**
- * 首次打开时建立基线：把「当时看到的所有会话」记为已读。
- * 这样第一屏是干净的（跟微信一致），此后只有新消息才亮红点。
- */
-export function ensureBaseline(friendIds: string[]) {
-  try {
-    if (window.localStorage.getItem("w4.baseline") === "1") return;
-    friendIds.forEach((id) => window.localStorage.setItem("w4.seen." + id, "1"));
-    window.localStorage.setItem("w4.baseline", "1");
-  } catch {
-    /* 忽略 */
-  }
-}
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { Avatar, Icon } from "../ui";
@@ -131,10 +101,7 @@ export function ChatList({
             <button
               key={friend.id}
               className={`w4-row ${activeId === friend.id ? "on" : ""}`}
-              onClick={() => {
-                markSeen(friend.id);
-                navigate({ name: "chat", friendId: friend.id });
-              }}
+              onClick={() => navigate({ name: "chat", friendId: friend.id })}
             >
               <Avatar friend={friend} size={40} online={friend.online} />
               <span className="w4-row-body">
@@ -153,7 +120,7 @@ export function ChatList({
                       <span className={last?.from === "me" ? "w4-prev-me" : ""}>{preview}</span>
                     )}
                   </span>
-                  {friend.unread && !seen(friend.id) ? (
+                  {friend.unread > 0 ? (
                     <span className="w4-unread">{friend.unread > 99 ? "99+" : friend.unread}</span>
                   ) : null}
                 </span>

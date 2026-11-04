@@ -36,6 +36,7 @@ import {
   fetchMessages as apiFetchMessages,
   acceptFriend as apiAcceptFriend,
   callWarmup as apiCallWarmup,
+  markThreadRead as apiMarkThreadRead,
   saveCallSummary as apiSaveCallSummary,
   declineFriend as apiDeclineFriend,
   removeFriend as apiRemoveFriend,
@@ -48,7 +49,6 @@ import {
   publishMomentToServer as apiPublishMoment,
   saveTts as apiSaveTts,
 } from "./api";
-import { ensureBaseline } from "./components/ChatList";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
 export interface Settings {
@@ -388,14 +388,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      /* 旧版用 localStorage 记「已看过」，现在红点直接跟后端 unread 走，清掉遗留键 */
+      try {
+        Object.keys(window.localStorage)
+          .filter((k) => k.startsWith("w4.seen.") || k === "w4.baseline")
+          .forEach((k) => window.localStorage.removeItem(k));
+      } catch {
+        /* 隐私模式忽略 */
+      }
+
       const snap = await apiLoadAll();
       if (cancelled || !snap) return;
       setFriends(snap.friends);
       setMessages(snap.messages);
       setRequests(snap.requests ?? []);
       setProfile((prev) => ({ ...prev, ...snap.profile }));
-      /* 首屏不留满屏红点：把当前会话记为已读基线 */
-      ensureBaseline(snap.friends.map((f) => f.id));
 
       /* 设置 / 朋友圈 / 表达本 也换成真数据（接口失败就保持 mock） */
       const [core, tts, momentsLive, expressionsLive] = await Promise.all([
@@ -458,6 +465,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback((friendId: string) => {
     setFriends((list) => list.map((f) => (f.id === friendId && f.unread ? { ...f, unread: 0 } : f)));
     setMessages((list) => list.map((m) => (m.friendId === friendId && !m.read ? { ...m, read: true } : m)));
+    /* 同步到后端：否则刷新一次红点又回来了，看起来就像假红点 */
+    void apiMarkThreadRead(friendId);
   }, []);
 
   const scheduleReply = useCallback(

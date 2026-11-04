@@ -48,6 +48,7 @@ import {
   patchExpression as apiPatchExpression,
   publishMomentToServer as apiPublishMoment,
   saveTts as apiSaveTts,
+  translate as apiTranslate,
 } from "./api";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
@@ -103,6 +104,8 @@ interface Store {
   sendImage: (friendId: string, image: string) => void;
   markRead: (friendId: string) => void;
   toggleZh: (key: string) => void;
+  /** 单条消息翻译：没有译文就现翻，有就收起/展开 */
+  translateMessage: (messageId: string) => Promise<void>;
   translateAll: (friendId: string) => void;
   translateAllMoments: () => void;
   toggleShownText: (messageId: string) => void;
@@ -672,6 +675,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setZhOpen((open) => ({ ...open, [key]: !open[key] }));
   }, []);
 
+  const translateMessage = useCallback(
+    async (messageId: string) => {
+      const msg = messages.find((m) => m.id === messageId);
+      if (!msg) return;
+      /* 已有译文：只切换显示 */
+      if (msg.translation) {
+        setZhOpen((open) => ({ ...open, [messageId]: !open[messageId] }));
+        return;
+      }
+      showToast("正在翻译…");
+      const zh = await apiTranslate(msg.text, msg.friendId);
+      if (!zh) {
+        showToast("翻译失败，稍后再试", "error");
+        return;
+      }
+      setMessages((list) =>
+        list.map((m) => (m.id === messageId ? { ...m, translation: zh } : m)),
+      );
+      setZhOpen((open) => ({ ...open, [messageId]: true }));
+    },
+    [messages, showToast],
+  );
+
   const translateAll = useCallback(
     (friendId: string) => {
       setZhOpen((open) => {
@@ -1020,6 +1046,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendImage,
       markRead,
       toggleZh,
+      translateMessage,
       translateAll,
       translateAllMoments,
       toggleShownText,

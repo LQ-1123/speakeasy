@@ -72,6 +72,7 @@ export function ChatPane({
     sendImage,
     zhOpen,
     toggleZh,
+  translateMessage,
     toggleShownText,
     saveSuggestion,
     dismissSuggestion,
@@ -122,6 +123,8 @@ export function ChatPane({
   const [mobileInfo, setMobileInfo] = useState(false);
   const [wide, setWide] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [msgMenu, setMsgMenu] = useState<Message | null>(null);
+  const msgMenuOpenedAt = useRef(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [calling, setCalling] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
@@ -502,7 +505,7 @@ export function ChatPane({
           <button
             className="w4-icon-btn"
             aria-label="翻译最近消息"
-            title="把最近的对方消息都译成中文"
+            title="把最近的对方消息都翻译成中文"
             onClick={() => translateAll(friend.id)}
           >
             <Languages size={17} strokeWidth={1.8} />
@@ -548,11 +551,15 @@ export function ChatPane({
                       zhShown={!!zhOpen[m.id]}
                       playing={playingId === m.id}
                       onPlay={() => togglePlay(m)}
-                      onToggleZh={() => toggleZh(m.id)}
+                      onToggleZh={() => void translateMessage(m.id)}
                       onToggleText={() => toggleShownText(m.id)}
                       onSave={() => saveSuggestion(m.id)}
                       onDismiss={() => dismissSuggestion(m.id)}
                       onZoom={setZoom}
+                      onLongPress={() => {
+                        msgMenuOpenedAt.current = Date.now();
+                        setMsgMenu(m);
+                      }}
                     />
                   ))}
                 </div>
@@ -801,6 +808,40 @@ export function ChatPane({
         ) : null}
       </div>
 
+      {msgMenu ? (
+        <div
+          className="w4-msg-menu"
+          onClick={() => {
+            if (Date.now() - msgMenuOpenedAt.current > 280) setMsgMenu(null);
+          }}
+        >
+          <div className="w4-msg-menu-card" onClick={(e) => e.stopPropagation()}>
+            <div className="w4-msg-menu-title">语音消息</div>
+            <button
+              className="w4-msg-menu-item"
+              onClick={() => {
+                toggleShownText(msgMenu.id);
+                setMsgMenu(null);
+              }}
+            >
+              {msgMenu.shownText ? "取消转文字" : "转文字"}
+            </button>
+            <button
+              className="w4-msg-menu-item"
+              onClick={() => {
+                void translateMessage(msgMenu.id);
+                setMsgMenu(null);
+              }}
+            >
+              {msgMenu.translation && zhOpen[msgMenu.id] ? "收起翻译" : "翻译"}
+            </button>
+            <button className="w4-msg-menu-item is-cancel" onClick={() => setMsgMenu(null)}>
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
 
       {voiceOpen ? (
@@ -870,6 +911,7 @@ function MessageRow({
   onSave,
   onDismiss,
   onZoom,
+  onLongPress,
 }: {
   message: Message;
   friend: Friend;
@@ -881,9 +923,46 @@ function MessageRow({
   onSave: () => void;
   onDismiss: () => void;
   onZoom: (src: string) => void;
+  onLongPress?: () => void;
 }) {
   const { profile } = useApp();
   const mine = message.from === "me";
+
+  /* 长按语音消息 → 弹出「转文字 / 翻译」菜单（手机端主要入口） */
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+
+  const cancelPress = () => {
+    if (pressTimer.current) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  };
+
+  /* 长按触发后，手指抬起会补发一次 click —— 它落在刚出现的菜单遮罩上会把菜单立刻关掉，
+     所以在 touchend 上 preventDefault，把这次 click 掐掉 */
+  const endPress = (e: React.TouchEvent) => {
+    cancelPress();
+    if (longPressed.current) e.preventDefault();
+  };
+
+  const startPress = () => {
+    longPressed.current = false;
+    cancelPress();
+    pressTimer.current = window.setTimeout(() => {
+      longPressed.current = true;
+      onLongPress?.();
+    }, 420);
+  };
+
+  /* 长按之后浏览器还会补一次 click，这里把它吃掉，避免顺手播放语音 */
+  const handlePlay = () => {
+    if (longPressed.current) {
+      longPressed.current = false;
+      return;
+    }
+    onPlay();
+  };
 
   if (message.from === "system") {
     return (
@@ -908,6 +987,18 @@ function MessageRow({
           <div
             className={`w4-bubble ${isImage ? "is-image" : ""}`}
             title={clockTime(message.time)}
+            onTouchStart={isVoice ? startPress : undefined}
+            onTouchEnd={isVoice ? endPress : undefined}
+            onTouchMove={isVoice ? cancelPress : undefined}
+            onTouchCancel={isVoice ? cancelPress : undefined}
+            onContextMenu={
+              isVoice
+                ? (e) => {
+                    e.preventDefault();
+                    onLongPress?.();
+                  }
+                : undefined
+            }
           >
           {isVoice ? (
             <>
@@ -915,7 +1006,7 @@ function MessageRow({
                 id={message.id}
                 durationMs={message.durationMs ?? 3000}
                 playing={playing}
-                onToggle={onPlay}
+                onToggle={handlePlay}
               />
               {message.shownText ? (
                 <div className="w4-voice-text">{message.text}</div>
@@ -941,13 +1032,11 @@ function MessageRow({
           {isVoice ? (
             <div className="w4-bubble-side">
               <button className="w4-mini-btn" onClick={onToggleText}>
-                {message.shownText ? "收文字" : "看文字"}
+                {message.shownText ? "取消转文字" : "转文字"}
               </button>
-              {message.translation ? (
-                <button className="w4-mini-btn" onClick={onToggleZh}>
-                  {zhShown ? "收起中文" : "译成中文"}
-                </button>
-              ) : null}
+              <button className="w4-mini-btn" onClick={onToggleZh}>
+                {message.translation && zhShown ? "收起翻译" : "翻译"}
+              </button>
             </div>
           ) : null}
         </div>
@@ -968,10 +1057,10 @@ function MessageRow({
 
         {/* 操作条 */}
         <div className="w4-bubble-tools">
-          {/* 语音的「看文字 / 译成中文」已经在气泡右侧，这里不再重复 */}
+          {/* 语音的「转文字 / 翻译」已经在气泡右侧，这里不再重复 */}
           {!isVoice && message.translation ? (
             <button className="w4-mini-btn" onClick={onToggleZh}>
-              {zhShown ? "收起中文" : "译成中文"}
+              {zhShown ? "收起翻译" : "翻译"}
             </button>
           ) : null}
           <span className="w4-msg-meta" style={{ padding: 0, marginLeft: 2 }}>

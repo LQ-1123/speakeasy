@@ -1148,3 +1148,71 @@
     margin-top: 9vh;
   }
 }
+
+/* ===========================================================================
+   语音消息长按菜单（手机端主要入口）
+   =========================================================================== */
+.w4-root .w4-bubble { -webkit-touch-callout: none; }
+.w4-root .w4-msg-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+  animation: w4-fade-in 0.14s var(--w-ease);
+}
+@keyframes w4-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.w4-root .w4-msg-menu-card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--w-surface);
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: w4-sheet-up 0.18s var(--w-ease);
+}
+@keyframes w4-sheet-up {
+  from { transform: translateY(12px); }
+  to { transform: none; }
+}
+.w4-root .w4-msg-menu-title {
+  padding: 12px 16px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--w-text-3);
+}
+.w4-root .w4-msg-menu-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 14px 16px;
+  font-size: 15px;
+  color: var(--w-text);
+  text-align: center;
+  cursor: pointer;
+}
+.w4-root .w4-msg-menu-item:active,
+.w4-root .w4-msg-menu-item:hover {
+  background: var(--w-hover, #f5f5f5);
+}
+.w4-root .w4-msg-menu-item.is-cancel {
+  margin-top: 6px;
+  border-top: 1px solid var(--w-line-soft);
+  color: var(--w-text-2);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 900px) {
+  .w4-root .w4-msg-menu {
+    align-items: center;
+  }
+  .w4-root .w4-msg-menu-card {
+    border-radius: 12px;
+    max-width: 320px;
+    padding-bottom: 6px;
+  }
+}

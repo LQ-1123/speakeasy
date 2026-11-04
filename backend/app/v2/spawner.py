@@ -491,14 +491,42 @@ class PersonaSpawner:
         return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
     @staticmethod
-    def _age_near(archetype: dict[str, Any], age: int) -> bool:
-        """原型年龄区间与用户年龄相差 ≤ 6 岁。"""
+    def _age_gap(archetype: dict[str, Any], age: int) -> int:
+        """用户年龄距原型年龄区间的差值（0 = 落在区间内）。"""
         try:
             rng = (archetype.get("vibe_constraints") or {}).get("age_range") or [24, 32]
             lo, hi = int(rng[0]), int(rng[1])
         except (TypeError, ValueError, IndexError):
-            return True
-        return lo - 6 <= age <= hi + 6
+            return 0
+        if age < lo:
+            return lo - age
+        if age > hi:
+            return age - hi
+        return 0
+
+    @classmethod
+    def _age_best(
+        cls,
+        pool: list[dict[str, Any]],
+        age: int | None,
+        lang: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """年龄差距最小的一档；同档内优先母语就是目标语言的原型。"""
+        if age is None or not pool:
+            return pool
+        gaps = {id(a): cls._age_gap(a, age) for a in pool}
+        best = min(gaps.values())
+        # 放宽 2 岁：避免只剩一个「同龄但母语不对」的原型（例如 21 岁只剩中文原型）
+        same = [a for a in pool if gaps[id(a)] <= best + 2]
+        if lang:
+            native = [
+                a
+                for a in same
+                if str((a.get("locale_info") or {}).get("native_lang") or "").lower() == lang
+            ]
+            if native:
+                return native
+        return same
 
     def pick_archetype(
         self,
@@ -544,9 +572,7 @@ class PersonaSpawner:
                 detail = self._not_found_detail(country, lang, gend, archetypes)
                 log.warning("严格筛选无匹配原型: %s", detail)
                 raise ArchetypeNotFound(detail)
-            if age is not None:
-                near = [a for a in pool if self._age_near(a, age)]
-                pool = near or pool
+            pool = self._age_best(pool, age, lang)
             free = [a for a in pool if str(a.get("archetype_id") or "") not in used]
             return dict((free or pool)[0])
 
@@ -568,9 +594,7 @@ class PersonaSpawner:
             pool = [a for a in archetypes if self._matches(a, *stage)]
             if not pool:
                 continue
-            if age is not None:
-                near = [a for a in pool if self._age_near(a, age)]
-                pool = near or pool
+            pool = self._age_best(pool, age, lang)
             free = [a for a in pool if str(a.get("archetype_id") or "") not in used]
             return dict((free or pool)[0])
 
@@ -623,17 +647,36 @@ class PersonaSpawner:
         - 返回 dict 额外带 ``initial_context`` / ``personality_traits``（DB 无此列，
           供 API/调用方直接使用；``personality_prompt`` 内已包含它们）。
         """
+        user_age = self._user_age()
         archetype = self.pick_archetype(
             nationality=nationality,
             language=language,
             gender=gender,
             strict=strict_filters,
-            age=self._user_age(),
+            age=user_age,
         )
+        age_lo = age_hi = None
+        if user_age is not None:
+            # 原型的年龄区间整体偏大（22~36）：直接覆盖成「用户年龄 ±4」，
+            # 让 LLM 和兜底都只能生成相近的年龄。
+            age_lo = max(18, user_age - 4)
+            age_hi = max(age_lo, user_age + 4)
+            archetype = dict(archetype)
+            vibe = dict(archetype.get("vibe_constraints") or {})
+            vibe["age_range"] = [age_lo, age_hi]
+            archetype["vibe_constraints"] = vibe
         reply_language = self._resolve_reply_language(nationality, language, archetype)
         fallback = self._fallback_persona(archetype)
         llm_persona = await self._llm_persona(archetype, fallback, reply_language)
         persona = self._merge_persona(archetype, llm_persona, fallback, reply_language)
+        if age_lo is not None and age_hi is not None:
+            try:
+                age_val = int(persona.get("age") or 0)
+            except (TypeError, ValueError):
+                age_val = 0
+            if age_val:
+                persona["age"] = max(age_lo, min(age_hi, age_val))
+            fallback["age"] = max(age_lo, min(age_hi, int(fallback.get("age") or age_lo)))
 
         locale = archetype.get("locale_info") or {}
         effective_status = self._effective_status(status, referred_by_friend_id)

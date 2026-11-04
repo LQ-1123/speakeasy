@@ -1,0 +1,481 @@
+"use client";
+
+/**
+ * 设置。分五组：对话模型 / 声音 / 语音识别 / 提醒 / 隐私与关于。
+ * 每一组都只做真实存在的事，没有「敬请期待」。
+ */
+
+import { useState } from "react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  CircleAlert,
+  Copy,
+  KeyRound,
+  Mic,
+  Play,
+  Sparkles,
+  Volume2,
+} from "lucide-react";
+
+import type { Route } from "../model";
+import { useApp, type Settings } from "../store";
+import { Icon, Segmented, Switch } from "../ui";
+
+const SECTIONS = [
+  { key: "llm", label: "对话模型" },
+  { key: "voice", label: "声音" },
+  { key: "stt", label: "语音识别" },
+  { key: "notify", label: "提醒" },
+  { key: "privacy", label: "隐私与数据" },
+  { key: "about", label: "关于" },
+] as const;
+
+export function SettingsPane({
+  section,
+  navigate,
+}: {
+  section?: string;
+  navigate: (r: Route) => void;
+}) {
+  const { settings, updateSettings, showToast } = useApp();
+  const [active, setActive] = useState<string>(section ?? "llm");
+  const [playing, setPlaying] = useState(false);
+
+  return (
+    <div className="w4-main">
+      <div className="w4-head">
+        <button className="w4-icon-btn" onClick={() => navigate({ name: "me" })} aria-label="返回">
+          <ChevronLeft size={18} />
+        </button>
+        <div className="w4-head-main">
+          <div className="w4-head-title">设置</div>
+        </div>
+      </div>
+
+      <div className="w4-settings-layout">
+        <div className="w4-settings-nav">
+          {SECTIONS.map((s) => (
+            <button key={s.key} className={active === s.key ? "on" : ""} onClick={() => setActive(s.key)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="w4-settings-main">
+          <div className="w4-settings-inner">
+            {/* 手机上分组导航折叠成下拉 */}
+            <div className="w4-only-mobile" style={{ marginBottom: 16 }}>
+              <select className="w4-select" value={active} onChange={(e) => setActive(e.target.value)}>
+                {SECTIONS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {active === "llm" ? <LlmSection settings={settings} update={updateSettings} toast={showToast} /> : null}
+            {active === "voice" ? (
+              <VoiceSection settings={settings} update={updateSettings} toast={showToast} playing={playing} setPlaying={setPlaying} />
+            ) : null}
+            {active === "stt" ? <SttSection settings={settings} update={updateSettings} toast={showToast} /> : null}
+            {active === "notify" ? <NotifySection settings={settings} update={updateSettings} /> : null}
+            {active === "privacy" ? <PrivacySection toast={showToast} /> : null}
+            {active === "about" ? <AboutSection /> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- 对话模型 */
+
+const PRESETS = [
+  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", note: "便宜、中文好" },
+  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", note: "最稳，略贵" },
+  { id: "siliconflow", name: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-72B-Instruct", note: "国内直连" },
+  { id: "custom", name: "自定义", baseUrl: "", model: "", note: "任何 OpenAI 兼容接口" },
+];
+
+function LlmSection({
+  settings,
+  update,
+  toast,
+}: {
+  settings: Settings;
+  update: (p: Partial<Settings>) => void;
+  toast: (t: string, tone?: "success" | "error") => void;
+}) {
+  const [preset, setPreset] = useState(settings.llm.preset);
+  const [baseUrl, setBaseUrl] = useState(settings.llm.baseUrl);
+  const [model, setModel] = useState(settings.llm.model);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const applyPreset = (id: string) => {
+    setPreset(id);
+    const p = PRESETS.find((x) => x.id === id);
+    if (p && id !== "custom") {
+      setBaseUrl(p.baseUrl);
+      setModel(p.model);
+    }
+  };
+
+  const save = () => {
+    setBusy(true);
+    window.setTimeout(() => {
+      setBusy(false);
+      update({
+        llm: {
+          preset,
+          baseUrl,
+          model,
+          keyMasked: key.trim()
+            ? key.trim().slice(0, 3) + "••••••••" + key.trim().slice(-4)
+            : settings.llm.keyMasked,
+          hasKey: key.trim() ? true : settings.llm.hasKey,
+        },
+      });
+      setKey("");
+      toast("已保存，下一条消息就会用新的模型", "success");
+    }, 700);
+  };
+
+  return (
+    <section>
+      <SectionTitle title="对话模型" desc="好友的性格、记忆和回复都由它生成。" />
+
+      <div className="w4-field">
+        <div className="w4-field-label">用哪家</div>
+        <div className="w4-provider-grid">
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              className={`w4-provider ${preset === p.id ? "on" : ""}`}
+              onClick={() => applyPreset(p.id)}
+            >
+              <span className="w4-provider-name">{p.name}</span>
+              <span className="w4-provider-note">{p.note}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="w4-field">
+        <div className="w4-field-label">接口地址</div>
+        <input className="w4-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://…/v1" />
+      </div>
+      <div className="w4-field">
+        <div className="w4-field-label">模型名</div>
+        <input className="w4-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat" />
+      </div>
+      <div className="w4-field">
+        <div className="w4-field-label">API Key</div>
+        <input
+          className="w4-input"
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder={settings.llm.hasKey ? settings.llm.keyMasked : "粘贴你的 Key"}
+          autoComplete="off"
+        />
+        <div className="w4-field-hint">
+          <KeyRound size={11} style={{ verticalAlign: -1 }} /> Key 只存在这台设备上，接口不会回传明文。
+        </div>
+      </div>
+
+      <div className="w4-save-row">
+        <button className="w4-btn is-primary" onClick={save} disabled={busy}>
+          {busy ? "正在验证…" : "保存并验证"}
+        </button>
+        <span className={`w4-status ${settings.llm.hasKey ? "ok" : "warn"}`}>
+          {settings.llm.hasKey ? (
+            <>
+              <CheckCircle2 size={12} /> 已配置
+            </>
+          ) : (
+            <>
+              <CircleAlert size={12} /> 未配置，当前演示模式
+            </>
+          )}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 声音 */
+
+function VoiceSection({
+  settings,
+  update,
+  toast,
+  playing,
+  setPlaying,
+}: {
+  settings: Settings;
+  update: (p: Partial<Settings>) => void;
+  toast: (t: string, tone?: "success" | "error") => void;
+  playing: boolean;
+  setPlaying: (v: boolean) => void;
+}) {
+  return (
+    <section>
+      <SectionTitle title="声音" desc="好友说话用哪种合成方式，以及要不要带情绪。" />
+
+      <div className="w4-field">
+        <div className="w4-field-label">合成方式</div>
+        <Segmented
+          value={settings.tts.provider}
+          options={[
+            { value: "fish", label: "Fish Audio（自然）" },
+            { value: "system", label: "系统朗读（免费）" },
+          ]}
+          onChange={(v) => update({ tts: { ...settings.tts, provider: v } })}
+        />
+        <div className="w4-field-hint">
+          Fish Audio 会带语气和停顿，听起来像真人；系统朗读稳定但偏机械。
+        </div>
+      </div>
+
+      {settings.tts.provider === "fish" ? (
+        <>
+          <div className="w4-field">
+            <div className="w4-field-label">服务密钥</div>
+            <input
+              className="w4-input"
+              type="password"
+              placeholder={settings.tts.hasKey ? settings.tts.keyMasked : "粘贴 Fish Audio Key"}
+            />
+          </div>
+          <div className="w4-settings-row">
+            <div>
+              <div className="w4-settings-row-title">带情绪</div>
+              <div className="w4-settings-row-desc">好友会根据聊天内容调整语气，偶尔叹气、笑一下。</div>
+            </div>
+            <Switch
+              on={settings.tts.emotion}
+              onChange={(v) => update({ tts: { ...settings.tts, emotion: v } })}
+            />
+          </div>
+        </>
+      ) : null}
+
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">我的音色克隆</div>
+          <div className="w4-settings-row-desc">
+            {settings.tts.cloned
+              ? "好友会用你的声音说外语。可以随时关掉。"
+              : "上传 30 秒录音，让好友用你的声音说外语。"}
+          </div>
+        </div>
+        <button
+          className="w4-btn"
+          onClick={() => {
+            update({ tts: { ...settings.tts, cloned: !settings.tts.cloned } });
+            toast(settings.tts.cloned ? "已关闭音色克隆" : "已开启（原型演示）", "success");
+          }}
+        >
+          {settings.tts.cloned ? "已开启" : "去设置"}
+        </button>
+      </div>
+
+      <div className="w4-field" style={{ marginTop: 18 }}>
+        <div className="w4-field-label">试听</div>
+        <div className="w4-try-card">
+          <button className="w4-try-play" onClick={() => setPlaying(!playing)} aria-label="试听">
+            <Play size={14} fill="currentColor" strokeWidth={0} />
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="w4-try-text">“Morning! Right — the flat white guy. I remember you.”</div>
+            <div className="w4-try-meta">{playing ? "正在播放 · Callum · 布里斯托" : "Callum · 布里斯托口音 · 0:04"}</div>
+          </div>
+          <Volume2 size={15} style={{ color: "var(--w-text-3)" }} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 语音识别 */
+
+function SttSection({
+  settings,
+  update,
+  toast,
+}: {
+  settings: Settings;
+  update: (p: Partial<Settings>) => void;
+  toast: (t: string, tone?: "success" | "error") => void;
+}) {
+  return (
+    <section>
+      <SectionTitle title="语音识别" desc="你按住说话时，把声音转成文字用哪套服务。" />
+      <div className="w4-field">
+        <div className="w4-field-label">识别方式</div>
+        <Segmented
+          value={settings.stt.provider}
+          options={[
+            { value: "auto", label: "自动" },
+            { value: "local", label: "本地" },
+            { value: "siliconflow", label: "云端" },
+          ]}
+          onChange={(v) => update({ stt: { ...settings.stt, provider: v } })}
+        />
+        <div className="w4-field-hint">
+          自动：能用云端就用云端（更快），失败时回退到本地。本地模式不联网，稍慢一点。
+        </div>
+      </div>
+
+      {settings.stt.provider !== "local" ? (
+        <div className="w4-field">
+          <div className="w4-field-label">云端密钥</div>
+          <input
+            className="w4-input"
+            type="password"
+            placeholder={settings.stt.hasKey ? settings.stt.keyMasked : "硅基流动的 API Key"}
+          />
+          <div className="w4-field-hint">用 SenseVoiceSmall，中文和几种小语种都识别得不错。</div>
+        </div>
+      ) : null}
+
+      <div className="w4-field">
+        <div className="w4-field-label">识别语言</div>
+        <select className="w4-select">
+          <option>自动判断</option>
+          <option>英语</option>
+          <option>日语</option>
+          <option>韩语</option>
+          <option>西班牙语</option>
+        </select>
+      </div>
+
+      <div className="w4-save-row">
+        <button className="w4-btn is-primary" onClick={() => toast("设置已保存", "success")}>
+          保存
+        </button>
+        <button className="w4-btn" onClick={() => toast("开始录音后说一句话，就能看到识别结果", "success")}>
+          <Mic size={14} />
+          录一句试试
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 提醒 */
+
+function NotifySection({
+  settings,
+  update,
+}: {
+  settings: Settings;
+  update: (p: Partial<Settings>) => void;
+}) {
+  return (
+    <section>
+      <SectionTitle title="提醒" desc="只在你允许的范围内推送。" />
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">好友发来新语音</div>
+          <div className="w4-settings-row-desc">离开页面时，好友的回复会推送到系统通知。</div>
+        </div>
+        <Switch
+          on={settings.notify.messages}
+          onChange={(v) => update({ notify: { ...settings.notify, messages: v } })}
+        />
+      </div>
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">该练表达了</div>
+          <div className="w4-settings-row-desc">每天固定时间提醒你复习这几条，不再频繁打扰。</div>
+        </div>
+        <Switch
+          on={settings.notify.practice}
+          onChange={(v) => update({ notify: { ...settings.notify, practice: v } })}
+        />
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 隐私 */
+
+function PrivacySection({ toast }: { toast: (t: string, t2?: "success") => void }) {
+  return (
+    <section>
+      <SectionTitle title="隐私与数据" desc="这里做过的所有事，都只存这台设备。" />
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">聊天记录</div>
+          <div className="w4-settings-row-desc">包含语音原文、译文和好友记住的事情。</div>
+        </div>
+        <button className="w4-btn is-danger" onClick={() => toast("原型里不会真的删除", "success")}>
+          全部清除
+        </button>
+      </div>
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">导出数据</div>
+          <div className="w4-settings-row-desc">把聊天、表达本导出成一个文件，随时带走。</div>
+        </div>
+        <button className="w4-btn" onClick={() => toast("已生成下载（原型演示）", "success")}>
+          导出
+        </button>
+      </div>
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">好友能记住什么</div>
+          <div className="w4-settings-row-desc">只记你主动说过的信息，不收集通讯录、位置和相册。</div>
+        </div>
+        <button className="w4-btn" onClick={() => toast("所有记忆条目都可以逐条删除", "success")}>
+          查看
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function AboutSection() {
+  return (
+    <section>
+      <SectionTitle title="关于 SpeakEasy" desc="一款用来把「不敢开口」变成「顺口说出来」的工具。" />
+      <div className="w4-about">
+        <div className="w4-about-row">
+          <span>版本</span>
+          <span>2.4.0（原型）</span>
+        </div>
+        <div className="w4-about-row">
+          <span>创作者</span>
+          <span>SpeakEasy 团队</span>
+        </div>
+        <div className="w4-about-row">
+          <span>数据</span>
+          <span>全部本地</span>
+        </div>
+        <div className="w4-about-row">
+          <span>头像素材</span>
+          <span>Personas by Draftbit（CC BY 4.0）· DiceBear 生成</span>
+        </div>
+      </div>
+      <p className="w4-about-text">
+        你缺的不是词汇量，是在真实压力下用另一种语言反应的条件反射。
+        所以这里没有评分、没有打卡、没有排行榜——只有一群会等你把话说完的语伴。
+      </p>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- 小组件 */
+
+function SectionTitle({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: "var(--w-text-3)", marginTop: 3 }}>{desc}</div>
+    </div>
+  );
+}

@@ -13,11 +13,14 @@ export const metadata: Metadata = {
     title: "SpeakEasy",
   },
   icons: {
+    /* 用新文件名（brand-*），避开浏览器对旧 favicon 的强缓存 */
     icon: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icons/brand-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/brand-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/brand-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: [{ url: "/icons/brand-180.png", sizes: "180x180", type: "image/png" }],
   },
 };
 

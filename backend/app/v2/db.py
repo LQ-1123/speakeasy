@@ -59,6 +59,7 @@ _FRIEND_DEFAULTS: dict[str, Any] = {
     "voice_rate": "+0%",
     "voice_pitch": "+0Hz",
     "fish_voice_id": "",
+    "gender": "",
     "language_mix_mode": "en_only",
     "reply_language": "en",
     "age": 25,
@@ -234,6 +235,13 @@ class DB:
                 log.info("migrated friends table: added reply_language column")
             if "fish_voice_id" not in columns:
                 conn.execute("ALTER TABLE friends ADD COLUMN fish_voice_id TEXT DEFAULT ''")
+
+
+            if "gender" not in columns:
+                conn.execute(
+                    "ALTER TABLE friends ADD COLUMN gender TEXT DEFAULT ''"
+                )
+                log.info("migrated friends table: added gender column")
                 log.info("migrated friends table: added fish_voice_id column")
 
             msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}

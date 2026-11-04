@@ -602,8 +602,22 @@ class PersonaSpawner:
 
         locale = archetype.get("locale_info") or {}
         effective_status = self._effective_status(status, referred_by_friend_id)
+
+        # 性别：优先 archetype 的约束，其次 LLM 产出的 persona
+        _vibe_gender = ""
+        try:
+            _vibe_gender = str(
+                (archetype or {}).get("vibe_constraints", {}).get("gender") or ""
+            )
+        except Exception:  # noqa: BLE001
+            _vibe_gender = ""
+        _persona_gender = _canonical_gender(_vibe_gender) or _canonical_gender(
+            (persona or {}).get("gender")
+        ) or _canonical_gender((llm_persona or {}).get("gender")) or ""
+
         data: dict[str, Any] = {
             "name": persona["name"],
+            "gender": _persona_gender,
             "archetype_id": str(archetype.get("archetype_id") or ""),
             "voice_id": str(archetype.get("voice_id") or ""),
             "voice_rate": persona["voice_rate"],
@@ -633,13 +647,8 @@ class PersonaSpawner:
 
             _cfg = _TCS(str(_gs().data_path)).load()
             if _cfg.provider == "fish" and _cfg.fish_api_key.strip():
-                _gender = ""
-                try:
-                    _gender = str(
-                        (archetype or {}).get("vibe_constraints", {}).get("gender") or ""
-                    )
-                except Exception:  # noqa: BLE001
-                    _gender = ""
+                # 用与头像一致的那份性别去挑音色
+                _gender = _persona_gender
                 data["fish_voice_id"] = await _ft.pick_voice_for(
                     language=str(data.get("reply_language") or "en"),
                     gender=_gender,

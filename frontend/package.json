@@ -11,6 +11,8 @@
     "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});require('fs').rmSync('out',{recursive:true,force:true})\""
   },
   "dependencies": {
+    "@dicebear/collection": "^9.4.2",
+    "@dicebear/core": "^9.4.3",
     "lucide-react": "^0.577.0",
     "next": "15.5.28",
     "react": "19.2.4",

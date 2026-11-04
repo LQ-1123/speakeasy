@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Central Solid Circle -->
+  <circle cx="512" cy="512" r="50" fill="#B0B7C3" />
+  
+  <!-- Concentric Acoustic Soundwave Arcs -->
+  <path d="M 598.00 512.00 A 86.00 86.00 0 1 1 572.81 451.19" fill="none" stroke="#B0B7C3" stroke-width="16" stroke-linecap="round" /><path d="M 516.26 633.93 A 122.00 122.00 0 1 1 581.98 412.06" fill="none" stroke="#B0B7C3" stroke-width="16" stroke-linecap="round" /><circle cx="625.12" cy="557.70" r="8" fill="#B0B7C3" /><circle cx="601.23" cy="595.20" r="8" fill="#B0B7C3" /><circle cx="565.48" cy="621.65" r="8" fill="#B0B7C3" /><path d="M 660.35 571.94 A 160.00 160.00 0 1 1 525.94 352.61" fill="none" stroke="#B0B7C3" stroke-width="24" stroke-linecap="round" /><path d="M 491.09 710.90 A 200.00 200.00 0 0 1 505.02 312.12" fill="none" stroke="#B0B7C3" stroke-width="18" stroke-linecap="round" />
+  
+  <!-- Satellite Aperture -->
+  <path d="M 697.44 586.92 A 200.00 200.00 0 0 1 532.91 710.90" fill="none" stroke="#B0B7C3" stroke-width="18" stroke-linecap="round" /><path d="M 741.89 573.60 A 238.00 238.00 0 1 1 503.69 274.14" fill="none" stroke="#B0B7C3" stroke-width="18" stroke-linecap="round" /><circle cx="696" cy="512" r="30" fill="#B0B7C3" />
+  
+  <!-- Stem & Leaves -->
+  <path d="M 729.94 545.94 A 48.00 48.00 0 1 1 729.94 478.06" fill="none" stroke="#B0B7C3" stroke-width="16" stroke-linecap="round" /><line x1="640" y1="512" x2="666" y2="512" stroke="#B0B7C3" stroke-width="14" stroke-linecap="round" /><path d="M 512 274 C 550 274, 580 300, 595 340 C 605 365, 608 410, 608 445" fill="none" stroke="#B0B7C3" stroke-width="18" stroke-linecap="round" /><path d="M 585 330 C 585 285, 625 265, 665 265 C 665 305, 635 345, 585 330 Z" fill="#B0B7C3" /><path d="M 605 345 C 630 305, 695 295, 745 295 C 745 345, 680 375, 605 345 Z" fill="#B0B7C3" /><path d="M 610 380 C 640 360, 700 370, 740 395 C 700 430, 640 420, 610 380 Z" fill="#B0B7C3" />
+</svg>

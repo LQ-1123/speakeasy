@@ -125,7 +125,8 @@ async def pick_voice_for(
             return False
         return True
 
-    for need_lang, need_gender in ((True, True), (True, False), (False, False)):
+    # 性别优先于语言：宁可口音不完美，也不能男声配女角色
+    for need_lang, need_gender in ((True, True), (False, True), (False, False)):
         cands = [v["id"] for v in pool if ok(v, need_lang, need_gender) and v.get("id")]
         if cands:
             return _random.choice(cands)

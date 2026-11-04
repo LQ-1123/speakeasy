@@ -300,6 +300,7 @@ function Shell() {
             {TAB_ITEMS.map((t) => {
               const badge =
                 t.key === "chats" ? unread : t.key === "contacts" ? requests.length : 0;
+              const isDot = t.key === "contacts";
               return (
                 <button
                   key={t.key}
@@ -308,7 +309,17 @@ function Shell() {
                 >
                   {t.icon}
                   {t.label}
-                  {badge ? <span className="w4-tabbar-badge">{badge > 99 ? "99+" : badge}</span> : null}
+                  {badge ? (
+                    isDot ? (
+                      <span
+                        className="w4-tabbar-dot"
+                        aria-label={`${badge} 条待处理`}
+                        title={`${badge} 条待处理`}
+                      />
+                    ) : (
+                      <span className="w4-tabbar-badge">{badge > 99 ? "99+" : badge}</span>
+                    )
+                  ) : null}
                 </button>
               );
             })}

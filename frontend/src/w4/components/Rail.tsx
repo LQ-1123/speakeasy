@@ -36,6 +36,7 @@ export function Rail({
     icon: React.ReactNode;
     route: Route;
     badge?: number;
+    dot?: boolean;
   }> = [
     {
       key: "chats",
@@ -50,6 +51,7 @@ export function Rail({
       icon: <UsersRound size={21} strokeWidth={1.7} />,
       route: { name: "contacts" },
       badge: requests,
+      dot: true,
     },
     {
       key: "discover",
@@ -79,7 +81,15 @@ export function Rail({
           {active === item.key ? <span className="w4-rail-pip" /> : null}
           {item.icon}
           {item.badge ? (
-            <span className="w4-rail-badge">{item.badge > 99 ? "99+" : item.badge}</span>
+            item.dot ? (
+              <span
+                className="w4-rail-dot"
+                aria-label={`${item.badge} 条待处理`}
+                title={`${item.badge} 条待处理`}
+              />
+            ) : (
+              <span className="w4-rail-badge">{item.badge > 99 ? "99+" : item.badge}</span>
+            )
           ) : null}
           <span className="w4-rail-tip">{item.label}</span>
         </button>

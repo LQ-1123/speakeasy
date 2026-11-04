@@ -1355,3 +1355,23 @@
   line-height: 1.6;
   color: var(--w-text-3);
 }
+
+/* 好友申请：不带数字的小红点（消息未读仍用数字气泡） */
+.w4-root .w4-rail-dot,
+.w4-root .w4-tabbar-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fa5151;
+  box-shadow: 0 0 0 2px var(--w-surface);
+}
+.w4-root .w4-rail-dot {
+  top: 11px;
+  right: 12px;
+}
+.w4-root .w4-tabbar-dot {
+  top: 4px;
+  right: 50%;
+  margin-right: -16px;
+}

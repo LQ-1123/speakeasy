@@ -35,6 +35,8 @@ import {
   sendVoiceBlob as apiSendVoiceBlob,
   fetchMessages as apiFetchMessages,
   acceptFriend as apiAcceptFriend,
+  callWarmup as apiCallWarmup,
+  saveCallSummary as apiSaveCallSummary,
   declineFriend as apiDeclineFriend,
   removeFriend as apiRemoveFriend,
   deleteExpressionOnServer as apiDeleteExpression,
@@ -964,6 +966,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (friendId: string, seconds: number) => {
       const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
       const ss = String(seconds % 60).padStart(2, "0");
+      /* 先本地落一条，保证 UI 立刻可见 */
       setMessages((list) => [
         ...list,
         {
@@ -971,11 +974,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           friendId,
           from: "system",
           kind: "call",
-          text: `通话 ${mm}:${ss}｜${CALL_LINES.join(" ")}`,
+          text: `通话 ${mm}:${ss}｜聊了几句`,
           time: new Date().toISOString(),
-          read: true,
         },
       ]);
+      /* 后端把摘要写进聊天记录；成功后用真实数据替换这一栏 */
+      void apiSaveCallSummary(friendId, seconds, 1).then(async (ok) => {
+        if (!ok) return;
+        const fresh = await apiFetchMessages(friendId);
+        if (fresh?.length) {
+          setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...fresh]);
+        }
+      });
     },
     [],
   );

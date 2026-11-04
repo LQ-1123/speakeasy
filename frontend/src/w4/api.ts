@@ -515,3 +515,81 @@ export async function sendVoiceBlob(
   }
   return fetchMessages(friendId);
 }
+
+/* ========================================================================== */
+/* 对话模型设置                                                                */
+/* ========================================================================== */
+
+/** 保存对话模型（后端会重建客户端，下一条消息即生效） */
+export async function saveLlm(body: {
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  temperature?: number;
+  max_tokens?: number;
+  verify?: boolean;
+}) {
+  return getJson(`${BASE}/settings/llm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ verify: true, ...body }),
+  });
+}
+
+/* ========================================================================== */
+/* 好友口音                                                                    */
+/* ========================================================================== */
+
+export type ArchetypeLite = {
+  archetype_id: string;
+  display_name: string;
+  accent_label: string;
+  voice_id: string;
+  native_lang: string;
+  country: string;
+};
+
+let ARCHETYPES_CACHE: ArchetypeLite[] | null = null;
+
+/** 可选口音列表（按原生语言过滤用） */
+export async function loadArchetypes(): Promise<ArchetypeLite[]> {
+  if (ARCHETYPES_CACHE) return ARCHETYPES_CACHE;
+  const r = await getJson<{ archetypes?: Record<string, any>[] }>(`${BASE}/archetypes`);
+  if (!r) return [];
+  ARCHETYPES_CACHE = (r.archetypes ?? []).map((a) => ({
+    archetype_id: String(a.archetype_id ?? ""),
+    display_name: String(a.display_name ?? ""),
+    accent_label: String(a.accent_label ?? ""),
+    voice_id: String(a.voice_id ?? ""),
+    native_lang: String((a.locale_info ?? {}).native_lang ?? ""),
+    country: String((a.locale_info ?? {}).country ?? ""),
+  }));
+  return ARCHETYPES_CACHE;
+}
+
+/** 给好友换口音：后端按 archetype 的 voice_id + prosody 一起改 */
+export async function changeFriendVoice(friendId: string, archetypeId: string) {
+  return getJson(`${BASE}/friends/${friendId}/voice`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archetype_id: archetypeId }),
+  });
+}
+
+/* ========================================================================== */
+/* 打电话                                                                      */
+/* ========================================================================== */
+
+/** 接通前的预热：后端加载本地 STT + 预热 LLM，减少第一句的等待 */
+export async function callWarmup(friendId: string) {
+  return getJson(`${BASE}/chat/${friendId}/call/warmup`);
+}
+
+/** 挂断后把通话摘要落进聊天记录（时长 + 轮数） */
+export async function saveCallSummary(friendId: string, durationS: number, turns: number) {
+  return getJson(`${BASE}/chat/${friendId}/call/summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ duration_s: Math.round(durationS), turns }),
+  });
+}

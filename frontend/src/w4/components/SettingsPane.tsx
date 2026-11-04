@@ -18,6 +18,7 @@ import {
   Volume2,
 } from "lucide-react";
 
+import { saveLlm, saveStt, saveTts } from "../api";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
 import { Icon, Segmented, Switch } from "../ui";
@@ -130,24 +131,30 @@ function LlmSection({
     }
   };
 
-  const save = () => {
+  const save = async () => {
     setBusy(true);
-    window.setTimeout(() => {
-      setBusy(false);
-      update({
-        llm: {
-          preset,
-          baseUrl,
-          model,
-          keyMasked: key.trim()
-            ? key.trim().slice(0, 3) + "••••••••" + key.trim().slice(-4)
-            : settings.llm.keyMasked,
-          hasKey: key.trim() ? true : settings.llm.hasKey,
-        },
-      });
-      setKey("");
-      toast("已保存，下一条消息就会用新的模型", "success");
-    }, 700);
+    const res = await saveLlm({
+      base_url: baseUrl.trim(),
+      model: model.trim(),
+      api_key: key.trim() || undefined,
+    });
+    setBusy(false);
+    if (!res) {
+      toast("保存失败：检查接口地址和 Key", "error");
+      return;
+    }
+    const cfg = (res as Record<string, any>).config ?? {};
+    update({
+      llm: {
+        preset,
+        baseUrl: String(cfg.base_url ?? baseUrl),
+        model: String(cfg.model ?? model),
+        keyMasked: String(cfg.api_key_masked ?? settings.llm.keyMasked),
+        hasKey: Boolean(cfg.api_key_set ?? settings.llm.hasKey),
+      },
+    });
+    setKey("");
+    toast("已保存，下一条消息就会用新的模型", "success");
   };
 
   return (
@@ -228,6 +235,26 @@ function VoiceSection({
   playing: boolean;
   setPlaying: (v: boolean) => void;
 }) {
+  const [fishKey, setFishKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+
+  const saveKey = async () => {
+    if (!fishKey.trim()) {
+      toast("先把 Fish Audio 的 Key 粘进来", "error");
+      return;
+    }
+    setSavingKey(true);
+    const res = await saveTts({ api_key: fishKey.trim() });
+    setSavingKey(false);
+    if (!res) {
+      toast("保存失败，Key 可能不对", "error");
+      return;
+    }
+    update({ tts: { ...settings.tts, hasKey: true, keyMasked: "已保存" } });
+    setFishKey("");
+    toast("密钥已保存", "success");
+  };
+
   return (
     <section>
       <SectionTitle title="声音" desc="好友说话用哪种合成方式，以及要不要带情绪。" />
@@ -254,8 +281,15 @@ function VoiceSection({
             <input
               className="w4-input"
               type="password"
+              value={fishKey}
+              onChange={(e) => setFishKey(e.target.value)}
               placeholder={settings.tts.hasKey ? settings.tts.keyMasked : "粘贴 Fish Audio Key"}
             />
+            <div className="w4-field-hint" style={{ marginTop: 8 }}>
+              <button className="w4-btn" onClick={() => void saveKey()} disabled={savingKey}>
+                {savingKey ? "保存中…" : "保存密钥"}
+              </button>
+            </div>
           </div>
           <div className="w4-settings-row">
             <div>
@@ -318,6 +352,26 @@ function SttSection({
   update: (p: Partial<Settings>) => void;
   toast: (t: string, tone?: "success" | "error") => void;
 }) {
+  const [sttKey, setSttKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+
+  const saveKey = async () => {
+    if (!sttKey.trim()) {
+      toast("先粘贴云端识别的 Key", "error");
+      return;
+    }
+    setSavingKey(true);
+    const res = await saveStt({ api_key: sttKey.trim() });
+    setSavingKey(false);
+    if (!res) {
+      toast("保存失败，Key 可能不对", "error");
+      return;
+    }
+    update({ stt: { ...settings.stt, hasKey: true, keyMasked: "已保存" } });
+    setSttKey("");
+    toast("密钥已保存", "success");
+  };
+
   return (
     <section>
       <SectionTitle title="语音识别" desc="你按住说话时，把声音转成文字用哪套服务。" />
@@ -343,9 +397,16 @@ function SttSection({
           <input
             className="w4-input"
             type="password"
+            value={sttKey}
+            onChange={(e) => setSttKey(e.target.value)}
             placeholder={settings.stt.hasKey ? settings.stt.keyMasked : "硅基流动的 API Key"}
           />
           <div className="w4-field-hint">用 SenseVoiceSmall，中文和几种小语种都识别得不错。</div>
+          <div className="w4-field-hint" style={{ marginTop: 8 }}>
+            <button className="w4-btn" onClick={() => void saveKey()} disabled={savingKey}>
+              {savingKey ? "保存中…" : "保存密钥"}
+            </button>
+          </div>
         </div>
       ) : null}
 

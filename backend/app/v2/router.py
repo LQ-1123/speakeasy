@@ -226,7 +226,8 @@ def _engines_obj(request: Request) -> Any:
     return engines
 
 
-def _llm_config_payload(engines: Any) -> dict:
+def _llm_store(engines: Any) -> Any:
+    """取（并懒创建）运行时 LLM 配置 store。"""
     store = getattr(engines, "llm_config", None)
     if store is None:
         settings = engines.settings
@@ -242,6 +243,11 @@ def _llm_config_payload(engines: Any) -> dict:
             },
         )
         engines.llm_config = store
+    return store
+
+
+def _llm_config_payload(engines: Any) -> dict:
+    store = _llm_store(engines)
     try:
         health = engines.llm.health()
     except Exception as exc:  # noqa: BLE001
@@ -318,6 +324,43 @@ async def get_settings(request: Request) -> dict:
 @router.get("/settings/stt")
 async def get_stt_settings(request: Request) -> dict:
     return _stt_payload(_engines_obj(request))
+
+
+@router.post("/settings/llm")
+async def save_llm_settings(request: Request, body: LLMConfigIn) -> dict:
+    """保存对话模型配置：写文件 → 应用 → 重建 LLM 客户端（立即生效）。"""
+    engines = _engines_obj(request)
+    store = _llm_store(engines)
+    changes = body.model_dump(exclude_none=True, exclude={"verify"})
+    if not changes:
+        raise HTTPException(status_code=422, detail="没有要更新的字段")
+    try:
+        cfg = await asyncio.to_thread(store.save, **changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # 应用新配置并重建客户端，下一条消息就生效
+    from app.llm.client import LLMClient  # noqa: PLC0415
+
+    llm_runtime.apply_to_settings(engines.settings.llm, cfg)
+    engines.llm = LLMClient(engines.settings.llm)
+    suggestions = getattr(engines, "suggestions", None)
+    if suggestions is not None and hasattr(suggestions, "llm"):
+        suggestions.llm = engines.llm
+
+    verified: dict[str, Any] | None = None
+    if body.verify:
+        try:
+            verified = await asyncio.to_thread(engines.llm.health)
+        except Exception as exc:  # noqa: BLE001
+            verified = {"configured": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    return {
+        "ok": True,
+        "config": cfg.public(),
+        "health": _llm_config_payload(engines)["health"],
+        "verified": verified,
+    }
 
 
 @router.post("/settings/stt")
@@ -656,6 +699,18 @@ async def change_friend_voice(request: Request, friend_id: str, body: VoiceChang
         "accent_label": target.get("accent_label") or "",
         "voice_id": updated.get("voice_id"),
     }
+
+
+class LLMConfigIn(BaseModel):
+    """保存对话模型配置；只传想改的字段。"""
+
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    suggestion_model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    verify: bool = True
 
 
 class TTSConfigBody(BaseModel):

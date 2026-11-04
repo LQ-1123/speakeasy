@@ -632,7 +632,7 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
             nationality=body.nationality,
             language=pick_language,
             gender=body.gender,
-            status="active",
+            status="pending_request",
             strict_filters=has_filters,
         )
     except Exception as exc:  # noqa: BLE001
@@ -647,6 +647,16 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
         log.exception("discover 失败")
         raise HTTPException(status_code=502, detail=f"捏人失败: {exc}") from exc
     message = await _send_icebreaker(services, friend)
+    # 把招呼语写进 request_message：好友申请列表里也能看到/试听这句话
+    try:
+        await _thread(
+            services.db.update_friend,
+            friend["id"],
+            request_message=str(message.get("transcript") or "")[:160],
+        )
+    except Exception:  # noqa: BLE001 - 写不进去不影响偶遇
+        pass
+    friend = await _thread(services.db.get_friend, friend["id"]) or friend
     return {
         "friend": await _friend_public(services, friend),
         "message": _message_public(message),
@@ -858,6 +868,13 @@ async def accept_friend(request: Request, friend_id: str) -> dict:
         raise HTTPException(status_code=404, detail="好友不存在")
     if friend.get("status") != "active":
         friend = await _thread(services.db.update_friend, friend_id, status="active")
+    existing = await _thread(services.db.recent_messages, friend_id, 1)
+    if existing:
+        # 偶遇时已经说过第一句了：接受时不再补一条，避免出现两条招呼
+        return {
+            "friend": await _friend_public(services, friend),
+            "message": _message_public(existing[-1]),
+        }
     message = await _send_icebreaker(services, friend)
     return {"friend": await _friend_public(services, friend), "message": _message_public(message)}
 

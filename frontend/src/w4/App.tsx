@@ -204,13 +204,33 @@ function Shell() {
     return Number.isFinite(v) && v >= 240 && v <= 480 ? v : 300;
   });
 
+  /* 窗口宽度：分栏要随窗口收缩，不能把主内容挤成 0 宽 */
+  const [vw, setVw] = useState<number>(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    onResize();
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const RAIL_W = 80;
+  const MIN_MAIN_W = 380;
+  const maxListW = Math.max(240, Math.min(480, vw - RAIL_W - MIN_MAIN_W));
+  const effListW = Math.max(240, Math.min(listW, maxListW));
+
   /** 拖动分隔条调整列表宽度（微信桌面版没有，但桌面端普遍需要） */
   const startDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     const startX = e.clientX;
     const startW = listW;
     const onMove = (ev: PointerEvent) => {
-      const next = Math.min(480, Math.max(240, startW + (ev.clientX - startX)));
+      const limit = Math.max(
+        240,
+        Math.min(480, window.innerWidth - 80 - 380),
+      );
+      const next = Math.min(limit, Math.max(240, startW + (ev.clientX - startX)));
       setListW(next);
     };
     const onUp = () => {
@@ -245,7 +265,7 @@ function Shell() {
             <>
               <div
                 className="w4-listcol"
-                style={mobile ? undefined : { width: listW, flex: "none" }}
+                style={mobile ? undefined : { width: effListW, flex: "none" }}
               >
                 {section === "contacts" ? (
                   <ContactsList route={route} navigate={navigate} requestsCount={requests.length} />

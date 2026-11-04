@@ -19,7 +19,13 @@ import {
   Plus,
 } from "lucide-react";
 
-import { discover as apiDiscover, translate as apiTranslate } from "../api";
+import {
+  acceptFriend as apiAcceptFriend,
+  declineFriend as apiDeclineFriend,
+  discover as apiDiscover,
+  loadArchetypes,
+  translate as apiTranslate,
+} from "../api";
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import type { DiscoverCandidate } from "../mock";
@@ -445,6 +451,28 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const seq = useRef(0);
+  const pendingRef = useRef<string | null>(null);
+  const [langOptions, setLangOptions] = useState<{ code: string; label: string }[]>(
+    LANGUAGES.map((l) => ({ code: l.code, label: l.label })),
+  );
+
+  /* 语言列表来自后端 archetypes（之前写死只显示 6 个） */
+  useEffect(() => {
+    void (async () => {
+      const list = await loadArchetypes();
+      const codes = [...new Set(list.map((a) => a.native_lang).filter(Boolean))];
+      if (!codes.length) return;
+      const known = new Map(LANGUAGES.map((l) => [l.code, l.label]));
+      const EXTRA: Record<string, string> = { zh: "中文", en: "英语", de: "德语" };
+      setLangOptions(
+        codes
+          /* 中文是母语，不作为「偶遇练习」的目标语言 */
+          .filter((code) => code !== "zh")
+          .map((code) => ({ code, label: known.get(code) ?? EXTRA[code] ?? code.toUpperCase() }))
+          .sort((a, b) => a.label.localeCompare(b.label, "zh")),
+      );
+    })();
+  }, []);
 
   const stopAudio = () => {
     audioRef.current?.pause();
@@ -459,6 +487,11 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
     setError("");
     setCandidate(null);
     stopAudio();
+    /* 上一个没接受的偶遇：从好友申请里撤掉，避免越攒越多 */
+    if (pendingRef.current) {
+      void apiDeclineFriend(pendingRef.current);
+      pendingRef.current = null;
+    }
     try {
       const res = await apiDiscover(lang || undefined);
       if (seq.current !== my) return;
@@ -468,6 +501,7 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
       if (res.greeting) {
         zh = (await apiTranslate(res.greeting, f.id).catch(() => null)) ?? "";
       }
+      pendingRef.current = f.id;
       if (seq.current !== my) return;
       setCandidate({
         id: f.id,
@@ -501,6 +535,11 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
     return () => {
       seq.current += 1;
       audioRef.current?.pause();
+      /* 离开偶遇页还没接受的，不要留在好友申请里 */
+      if (pendingRef.current) {
+        void apiDeclineFriend(pendingRef.current);
+        pendingRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -523,9 +562,12 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
 
   const already = candidate ? friends.some((f) => f.id === candidate.id) : false;
 
+  /** 「认识 TA」：先接受好友申请，再进聊天 */
   const openChat = async () => {
     if (!candidate) return;
     stopAudio();
+    await apiAcceptFriend(candidate.id);
+    pendingRef.current = null;
     await reloadAll();
     navigate({ name: "chat", friendId: candidate.id });
   };
@@ -557,7 +599,7 @@ function PeopleView({ navigate, onBack }: { navigate: (r: Route) => void; onBack
             >
               不限
             </button>
-            {LANGUAGES.slice(0, 6).map((l) => (
+            {langOptions.map((l) => (
               <button
                 key={l.code}
                 className={`w4-filter ${language === l.code ? "on" : ""}`}

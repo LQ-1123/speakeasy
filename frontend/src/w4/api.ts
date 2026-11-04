@@ -155,7 +155,8 @@ function mapFriend(raw: RawFriend): Friend {
     lastActive: relTime(lastAt),
     voice: String(raw.voice_id ?? ""),
     voiceLabel: String(raw.voice_id ?? "").split("-").pop()?.replace("Neural", "") ?? "默认",
-    greeting: "",
+    /* 好友申请会带一句 request_message（偶遇捏人时写入的招呼语） */
+    greeting: String(raw.request_message ?? ""),
     greetingZh: "",
   };
 }
@@ -694,4 +695,10 @@ export async function callTurnStream(
 /** 告诉后端这条会话已读（红点才会真的消失，刷新后不再回来） */
 export async function markThreadRead(friendId: string) {
   return getJson(`${BASE}/friends/${friendId}/read`, { method: "POST" });
+}
+
+/** 「新的朋友」试听：让后端按这句话 + 这个声线现合成一段 wav */
+export function ttsSampleUrl(text: string, voice: string): string {
+  const q = new URLSearchParams({ text: text.slice(0, 200), voice: voice || "en-GB-RyanNeural" });
+  return `${BASE}/tts/sample?${q.toString()}`;
 }

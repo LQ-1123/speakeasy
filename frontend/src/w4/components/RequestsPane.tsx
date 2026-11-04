@@ -2,9 +2,10 @@
 
 /** 新的朋友：好友申请列表，可以试听 TA 的声音再决定。 */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Check, Play, X } from "lucide-react";
 
+import { ttsSampleUrl } from "../api";
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { Avatar, Empty, Icon } from "../ui";
@@ -13,6 +14,26 @@ import type { Friend } from "../model";
 export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
   const { requests, acceptRequest, declineRequest } = useApp();
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /** 试听：让后端按 TA 的招呼语 + 声线现合成（真实 TTS，不是假动画） */
+  const playPreview = (friend: Friend) => {
+    if (!friend.greeting) return;
+    if (playingId === friend.id) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPlayingId(null);
+      return;
+    }
+    audioRef.current?.pause();
+    const a = new Audio(ttsSampleUrl(friend.greeting, friend.voice));
+    audioRef.current = a;
+    a.onended = () => setPlayingId(null);
+    a.onerror = () => setPlayingId(null);
+    a.play()
+      .then(() => setPlayingId(friend.id))
+      .catch(() => setPlayingId(null));
+  };
 
   return (
     <div className="w4-main">
@@ -50,7 +71,7 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
                 key={r.id}
                 friend={r}
                 playing={playingId === r.id}
-                onPlay={() => setPlayingId((p) => (p === r.id ? null : r.id))}
+                onPlay={() => playPreview(r)}
                 onAccept={() => acceptRequest(r.id)}
                 onDecline={() => declineRequest(r.id)}
               />

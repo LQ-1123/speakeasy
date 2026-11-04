@@ -195,6 +195,8 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
 export interface LiveSnapshot {
   friends: Friend[];
   messages: Message[];
+  /** 待处理的好友申请（bootstrap.requests） */
+  requests: Friend[];
   /** 只覆盖后端确实提供的字段 */
   profile: Partial<Profile>;
 }
@@ -228,14 +230,25 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
   messages.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
   const rawProfile = (boot.profile as Record<string, unknown>) ?? {};
+  const fact = (rawProfile.fact_sheet ?? {}) as Record<string, any>;
+  const factProfile = (fact.profile ?? {}) as Record<string, any>;
   const profile: Partial<Profile> = {
     name: String(rawProfile.nickname ?? "我"),
+    city: String(factProfile.city ?? ""),
+    job: String(factProfile.major_or_job ?? ""),
     targets: Array.isArray(rawProfile.target_languages)
       ? (rawProfile.target_languages as string[])
       : ["en"],
-  };
+    interests: Array.isArray(fact.interests) ? (fact.interests as string[]) : undefined,
+  } as Partial<Profile>;
 
-  return { friends, messages, profile };
+  const requests = ((boot.requests as RawFriend[]) ?? []).map((r) => ({
+    ...mapFriend(r),
+    isRequest: true,
+    requestNote: String((r as Record<string, unknown>).request_message ?? ""),
+  }));
+
+  return { friends, messages, profile, requests };
 }
 
 /** 发一条文字；返回该好友的最新消息（用于替换本地状态） */
@@ -477,4 +490,28 @@ export async function declineFriend(id: string) {
 
 export async function removeFriend(id: string) {
   return getJson(`${BASE}/friends/${id}`, { method: "DELETE" });
+}
+
+/**
+ * 发一条真实语音。
+ *
+ * 后端做三件事：语音识别 → LLM 回复 → TTS 合成，返回该好友的最新消息列表。
+ * 这条链路通常要 5–20 秒，调用方要显示「正在听 / 正在想」。
+ */
+export async function sendVoiceBlob(
+  friendId: string,
+  blob: Blob,
+  durationMs: number,
+): Promise<Message[] | null> {
+  const form = new FormData();
+  form.append("audio", blob, blob.type.includes("ogg") ? "voice.ogg" : "voice.webm");
+  form.append("duration_ms", String(Math.round(durationMs)));
+
+  const resp = await fetch(`${BASE}/chat/${friendId}/voice`, { method: "POST", body: form });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    console.warn("[voice] 发送失败", resp.status, detail.slice(0, 200));
+    return null;
+  }
+  return fetchMessages(friendId);
 }

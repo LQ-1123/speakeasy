@@ -32,6 +32,7 @@ import {
 import {
   loadAll as apiLoadAll,
   sendText as apiSendText,
+  sendVoiceBlob as apiSendVoiceBlob,
   fetchMessages as apiFetchMessages,
   acceptFriend as apiAcceptFriend,
   declineFriend as apiDeclineFriend,
@@ -94,6 +95,8 @@ interface Store {
   messagesOf: (friendId: string) => Message[];
   friendById: (id: string) => Friend | undefined;
   sendText: (friendId: string, text: string) => void;
+  /** 真实录音发送（走后端 STT + LLM + TTS） */
+  sendVoiceBlob: (friendId: string, blob: Blob, durationMs: number) => Promise<void>;
   sendVoice: (friendId: string, durationMs: number) => void;
   sendImage: (friendId: string, image: string) => void;
   markRead: (friendId: string) => void;
@@ -387,6 +390,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cancelled || !snap) return;
       setFriends(snap.friends);
       setMessages(snap.messages);
+      setRequests(snap.requests ?? []);
+      setProfile((prev) => ({ ...prev, ...snap.profile }));
       /* 首屏不留满屏红点：把当前会话记为已读基线 */
       ensureBaseline(snap.friends.map((f) => f.id));
 
@@ -562,6 +567,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (trimmed.split(/\s+/).length >= 3) attachSuggestion(id);
     },
     [attachSuggestion, scheduleReply],
+  );
+
+  /** 真实语音：先放一条占位气泡，等后端返回后整体替换 */
+  const sendVoiceBlob = useCallback(
+    async (friendId: string, blob: Blob, durationMs: number) => {
+      const tempId = nextId("u");
+      setMessages((list) => [
+        ...list,
+        {
+          id: tempId,
+          friendId,
+          from: "me",
+          kind: "voice",
+          text: "（正在识别…）",
+          durationMs,
+          time: new Date().toISOString(),
+          read: false,
+          shownText: false,
+        },
+      ]);
+      setTyping((t) => ({ ...t, [friendId]: true }));
+
+      const fresh = await apiSendVoiceBlob(friendId, blob, durationMs);
+      setTyping((t) => ({ ...t, [friendId]: false }));
+
+      if (!fresh) {
+        setMessages((list) => list.filter((m) => m.id !== tempId));
+        showToast("这条没发出去，再试一次", "error");
+        return;
+      }
+      /* 后端返回的是该好友的完整消息列表：用它替换这一栏 */
+      setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...fresh]);
+
+      /* 自动播一下 TA 的回复，省一次点击 */
+      const last = [...fresh].reverse().find((m) => m.from === "friend" && m.audio);
+      if (last?.audio) {
+        try {
+          await new Audio(last.audio).play();
+        } catch {
+          /* 浏览器自动播放限制，忽略 */
+        }
+      }
+    },
+    [showToast],
   );
 
   const sendVoice = useCallback(
@@ -947,6 +996,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       messagesOf,
       friendById,
       sendText,
+      sendVoiceBlob,
       sendVoice,
       sendImage,
       markRead,
@@ -989,6 +1039,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       messagesOf,
       friendById,
       sendText,
+      sendVoiceBlob,
       sendVoice,
       sendImage,
       markRead,

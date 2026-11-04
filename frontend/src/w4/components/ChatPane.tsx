@@ -58,7 +58,7 @@ export function ChatPane({
     typing,
     markRead,
     sendText,
-    sendVoice,
+    sendVoiceBlob,
     sendImage,
     zhOpen,
     toggleZh,
@@ -97,6 +97,9 @@ export function ChatPane({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recTimer = useRef<number | null>(null);
   const recStart = useRef(0);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const recStream = useRef<MediaStream | null>(null);
+  const recChunks = useRef<Blob[]>([]);
   const startY = useRef(0);
   const playingTimer = useRef<number | null>(null);
 
@@ -171,7 +174,8 @@ export function ChatPane({
     inputRef.current?.focus();
   };
 
-  const startRecording = (y: number) => {
+  /** 真录音：按住时开麦，松开把音频交给后端（STT → 回复 → TTS） */
+  const startRecording = async (y: number) => {
     setRecording(true);
     setCancelHint(false);
     setRecSeconds(0);
@@ -180,19 +184,62 @@ export function ChatPane({
     recTimer.current = window.setInterval(() => {
       setRecSeconds(Math.floor((Date.now() - recStart.current) / 1000));
     }, 200);
+
+    try {
+      recStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const rec = new MediaRecorder(recStream.current, { mimeType: mime });
+      recChunks.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size) recChunks.current.push(e.data);
+      };
+      rec.start(200);
+      recRef.current = rec;
+    } catch {
+      stopRecTimer();
+      setRecording(false);
+      showToast("没有麦克风权限，先在浏览器里允许一下", "error");
+    }
+  };
+
+  const stopRecTimer = () => {
+    if (recTimer.current) window.clearInterval(recTimer.current);
+    recTimer.current = null;
   };
 
   const finishRecording = (cancelled: boolean) => {
     if (!recording) return;
-    if (recTimer.current) window.clearInterval(recTimer.current);
+    stopRecTimer();
     const ms = Date.now() - recStart.current;
     setRecording(false);
     setCancelHint(false);
-    if (cancelled || ms < 600) {
-      if (!cancelled) showToast("按住多说一会儿");
+
+    const rec = recRef.current;
+    const stream = recStream.current;
+    if (!rec || cancelled || ms < 600) {
+      if (!cancelled && ms < 600) showToast("按住多说一会儿");
+      rec?.state !== "inactive" && rec?.stop();
+      stream?.getTracks().forEach((t) => t.stop());
+      recRef.current = null;
+      recStream.current = null;
       return;
     }
-    sendVoice(friendId, ms);
+
+    rec.onstop = () => {
+      const blob = new Blob(recChunks.current, { type: rec.mimeType || "audio/webm" });
+      recChunks.current = [];
+      stream?.getTracks().forEach((t) => t.stop());
+      recRef.current = null;
+      recStream.current = null;
+      if (blob.size < 1200) {
+        showToast("没录到声音，再试一次", "error");
+        return;
+      }
+      void sendVoiceBlob(friendId, blob, ms);
+    };
+    rec.stop();
   };
 
   const endCall = (seconds: number) => {

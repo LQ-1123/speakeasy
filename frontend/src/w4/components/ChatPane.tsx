@@ -235,6 +235,7 @@ export function ChatPane({
 
   /** 播放中的消息：只允许一条同时响 */
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [playedIds, setPlayedIds] = useState<Set<string>>(() => new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /* 离开聊天页暂停所有播放 */
   useEffect(
@@ -256,6 +257,9 @@ export function ChatPane({
       }
       /* 真后端给了音频就播真的；mock 数据没有 audio，退回原来的节奏动画 */
       if (m.audio) {
+        if (m.from === "friend" && m.kind === "voice") {
+          setPlayedIds((prev) => { const n = new Set(prev); n.add(m.id); return n; });
+        }
         audioRef.current?.pause();
         const a = new Audio(m.audio);
         audioRef.current = a;
@@ -1503,6 +1507,9 @@ function MessageRow({
                 playing={playing}
                 onToggle={handlePlay}
               />
+              {message.from === "friend" && !playedIds.has(message.id) ? (
+                <span className="w4-voice-dot" aria-label="unplayed" />
+              ) : null}
               {message.shownText ? (
                 <div className="w4-voice-text">{message.text}</div>
               ) : null}

@@ -669,16 +669,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...merged]);
-
-      /* 自动播一下 TA 的回复，省一次点击 */
-      const last = [...fresh].reverse().find((m) => m.from === "friend" && m.audio);
-      if (last?.audio) {
-        try {
-          await new Audio(last.audio).play();
-        } catch {
-          /* 浏览器自动播放限制，忽略 */
-        }
-      }
     },
     [showToast],
   );

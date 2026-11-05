@@ -764,6 +764,13 @@ export function ChatPane({
   if (!friend) {
     return (
       <div className="w4-main">
+      {pendingImage ? (
+        <div className="w4-attach w4-attach-fixed">
+          <img src={pendingUrl} alt="" />
+          <button onClick={clearPendingImage} aria-label="移除图片">×</button>
+        </div>
+      ) : null}
+
         <div className="w4-head">
           <button className="w4-icon-btn" onClick={onBack} aria-label="返回">
             <Icon strokeWidth={2}>
@@ -890,13 +897,6 @@ export function ChatPane({
 
           {/* 输入区 */}
           <div className="w4-composer">
-      {pendingImage ? (
-        <div className="w4-attach">
-          <img src={pendingUrl} alt="" />
-          <button onClick={clearPendingImage} aria-label="移除图片">×</button>
-        </div>
-      ) : null}
-
       {pendingImage ? (
         <div className="w4-attach">
           <img src={pendingUrl} alt="" />

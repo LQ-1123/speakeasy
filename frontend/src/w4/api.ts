@@ -199,7 +199,7 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
   };
   if (typeof raw.duration_ms === "number") mapped.durationMs = raw.duration_ms;
   if (raw.audio_url) mapped.audio = mediaUrl(String(raw.audio_url));
-  if (raw.image_url) mapped.image = String(raw.image_url);
+  if (raw.image_url) mapped.image = mediaUrl(String(raw.image_url));
   if (raw.suggestion) {
     const rawSug = raw.suggestion as unknown;
     if (typeof rawSug === "string") {

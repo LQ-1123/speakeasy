@@ -2144,3 +2144,50 @@
   line-height: 1;
   cursor: pointer;
 }
+
+/* 附件预览（固定一份，贴在输入框上方） */
+.w4-root .w4-attach-fixed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 78px;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.w4-root .w4-attach-fixed img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--w-line);
+}
+.w4-root .w4-attach-fixed button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  align-self: flex-start;
+}
+/* 聊天里的图片：正常尺寸显示，不再是缩略图 */
+.w4-root .w4-bubble.is-image {
+  padding: 4px;
+}
+.w4-root .w4-bubble.is-image img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 240px;
+  max-height: 300px;
+  border-radius: 10px;
+  object-fit: cover;
+}

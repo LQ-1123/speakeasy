@@ -3,6 +3,7 @@
 /** 所有页共用的零件。样式在 w4.css，这里只管结构。 */
 
 import { type CSSProperties, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { avatarTint, durationLabel, initial, voiceBubbleWidth } from "./format";
@@ -162,7 +163,7 @@ export function Overlay({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  const node = (
     <div
       className={`w4-overlay ${className}`}
       onMouseDown={(e) => {
@@ -172,6 +173,9 @@ export function Overlay({
       {children}
     </div>
   );
+  /* 挂到 body：否则手机端 .w4-main 的 transform 会让 position:fixed 相对它定位，
+     弹窗会跑出屏幕（看起来“不居中”） */
+  return typeof document === "undefined" ? node : createPortal(node, document.body);
 }
 
 export function Dialog({

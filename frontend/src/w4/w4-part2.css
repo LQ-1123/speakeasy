@@ -1375,3 +1375,43 @@
   right: 50%;
   margin-right: -16px;
 }
+
+/* 手机端弹窗：垂直居中 + 保证完整显示（原来 align-items:end 会顶到屏幕外、
+   被底部 TabBar 盖住，看起来“不居中”） */
+@media (max-width: 899.98px) {
+  .w4-root .w4-overlay {
+    place-items: center;
+    align-items: center;
+    justify-items: center;
+    padding: 14px;
+    z-index: 90;
+  }
+  .w4-root .w4-dialog {
+    width: 100%;
+    max-height: min(84vh, calc(100vh - 132px));
+    border-radius: 14px;
+  }
+  .w4-root .w4-confirm {
+    max-height: 80vh;
+  }
+}
+
+/* 弹窗已 portal 到 body：用 body 级选择器覆盖 w4.css 里 align-items:end 的手机规则 */
+@media (max-width: 899.98px) {
+  body > .w4-overlay {
+    display: grid;
+    place-items: center;
+    align-items: center;
+    justify-items: center;
+    padding: 14px;
+    z-index: 90;
+  }
+  body > .w4-overlay .w4-dialog {
+    width: 100%;
+    max-height: min(84vh, calc(100vh - 132px));
+    border-radius: 14px;
+  }
+  body > .w4-overlay .w4-confirm {
+    max-height: 80vh;
+  }
+}

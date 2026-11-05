@@ -363,12 +363,12 @@ let seq = 1000;
 const nextId = (prefix: string) => `${prefix}-${(seq += 1)}`;
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [friends, setFriends] = useState<Friend[]>(FRIENDS);
-  const [requests, setRequests] = useState<Friend[]>(REQUESTS);
-  const [messages, setMessages] = useState<Message[]>(MESSAGES);
-  const [moments, setMoments] = useState<Moment[]>(() => MOMENTS.map(sanitizeMoment));
-  const [expressions, setExpressions] = useState<Expression[]>(EXPRESSIONS);
-  const [profile, setProfile] = useState<Profile>(ME);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [requests, setRequests] = useState<Friend[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [moments, setMoments] = useState<Moment[]>(() => []);
+  const [expressions, setExpressions] = useState<Expression[]>([]);
+  const [profile, setProfile] = useState<Profile>({ ...ME, name: '', nickname: '' } as Profile);
   /* 是否已拿到真实后端数据（拿不到就一直用 mock，原型仍可浏览） */
   const [live, setLive] = useState(false);
   const [typing, setTyping] = useState<Record<string, boolean>>({});

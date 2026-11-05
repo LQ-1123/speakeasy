@@ -15,7 +15,75 @@
  */
 
 import { createAvatar } from "@dicebear/core";
-import { personas } from "@dicebear/collection";
+import {
+  adventurer,
+  avataaars,
+  bigSmile,
+  bottts,
+  croodles,
+  funEmoji,
+  lorelei,
+  micah,
+  miniavs,
+  notionists,
+  openPeeps,
+  personas,
+  pixelArt,
+  thumbs,
+} from "@dicebear/collection";
+
+/** 可选头像风格（设置页展示） */
+export const AVATAR_STYLES = [
+  { id: "personas", label: "插画人物", collection: personas },
+  { id: "avataaars", label: "卡通头像", collection: avataaars },
+  { id: "bigSmile", label: "笑脸", collection: bigSmile },
+  { id: "bottts", label: "机器人", collection: bottts },
+  { id: "croodles", label: "涂鸦", collection: croodles },
+  { id: "funEmoji", label: "表情包", collection: funEmoji },
+  { id: "lorelei", label: "手绘", collection: lorelei },
+  { id: "micah", label: "扁平插画", collection: micah },
+  { id: "miniavs", label: "迷你", collection: miniavs },
+  { id: "notionists", label: "线稿", collection: notionists },
+  { id: "openPeeps", label: "线描人物", collection: openPeeps },
+  { id: "adventurer", label: "冒险者", collection: adventurer },
+  { id: "pixelArt", label: "像素", collection: pixelArt },
+  { id: "thumbs", label: "手势", collection: thumbs },
+] as const;
+
+const STYLE_KEY = "w4.avatarStyle";
+let currentStyle =
+  (typeof window !== "undefined" && window.localStorage.getItem(STYLE_KEY)) || "personas";
+
+export function getAvatarStyle(): string {
+  return currentStyle;
+}
+
+export function setAvatarStyle(id: string): void {
+  currentStyle = id;
+  try {
+    window.localStorage.setItem(STYLE_KEY, id);
+  } catch {
+    /* 忽略隐私模式下的存储失败 */
+  }
+}
+
+function styleCollection(id: string) {
+  const found = AVATAR_STYLES.find((x) => x.id === id) || AVATAR_STYLES[0];
+  return found.collection;
+}
+
+/** 指定风格生成头像（设置页预览用） */
+export function avatarWithStyle(seed: string, styleId: string): string {
+  try {
+    const avatar = createAvatar(styleCollection(styleId) as never, {
+      seed: seed || "anonymous",
+      size: 128,
+    } as never);
+    return avatar.toDataUri();
+  } catch {
+    return "";
+  }
+}
 
 /** 女性候选发型（含长发、丸子头、刘海等） */
 const HAIR_FEMALE = [
@@ -65,6 +133,13 @@ export function diceAvatar(
   };
 
   // DiceBear 的 options 类型按画风逐字面量声明，这里值是动态拼的，只能放宽一次
+  if (currentStyle !== "personas") {
+    const avatar = createAvatar(styleCollection(currentStyle) as never, {
+      seed: seed || "anonymous",
+      size: 128,
+    } as never);
+    return avatar.toDataUri();
+  }
   const avatar = createAvatar(personas, options as unknown as Parameters<typeof createAvatar>[1]);
   return avatar.toDataUri();
 }

@@ -270,6 +270,11 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
   const factProfile = (fact.profile ?? {}) as Record<string, any>;
   const profile: Partial<Profile> = {
     name: String(rawProfile.nickname ?? "我"),
+    avatar: diceAvatar(
+      String(rawProfile.nickname ?? "me"),
+      "",
+      avatarRegionOf("China"),
+    ),
     city: String(factProfile.city ?? ""),
     job: String(factProfile.major_or_job ?? ""),
     targets: Array.isArray(rawProfile.target_languages)

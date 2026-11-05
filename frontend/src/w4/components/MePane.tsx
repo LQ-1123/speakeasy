@@ -25,6 +25,7 @@ import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
+import { AVATAR_STYLES, avatarWithStyle, getAvatarStyle, setAvatarStyle } from "../avatar";
 import { Avatar, Dialog, Icon } from "../ui";
 
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
@@ -189,6 +190,7 @@ function EditProfileDialog({
   const [targets, setTargets] = useState<string[]>(profile.targets);
   const [level, setLevel] = useState(profile.level);
   const [birthday, setBirthday] = useState(profile.birthday ?? "");
+  const [styleId, setStyleId] = useState(getAvatarStyle());
 
   return (
     <Dialog
@@ -201,7 +203,8 @@ function EditProfileDialog({
           </button>
           <button
             className="w4-btn is-primary"
-            onClick={() =>
+            onClick={() => {
+              setAvatarStyle(styleId);
               onSave({
                 name: name.trim() || profile.name,
                 city,
@@ -209,14 +212,32 @@ function EditProfileDialog({
                 targets,
                 level,
                 birthday,
-              })
-            }
+              });
+              window.setTimeout(() => window.location.reload(), 350);
+            }}
           >
             保存
           </button>
         </>
       }
     >
+      <div className="w4-field">
+        <div className="w4-field-label">头像风格</div>
+        <div className="w4-avatar-styles">
+          {AVATAR_STYLES.map((st) => (
+            <button
+              key={st.id}
+              className={`w4-avatar-style ${styleId === st.id ? "is-on" : ""}`}
+              onClick={() => setStyleId(st.id)}
+              title={st.label}
+            >
+              <img src={avatarWithStyle(profile.name || "me", st.id)} alt={st.label} />
+              <span>{st.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="w4-field-hint">保存后所有头像会换成这个风格</div>
+      </div>
       <div className="w4-field">
         <div className="w4-field-label">名字</div>
         <input className="w4-input" value={name} onChange={(e) => setName(e.target.value)} />

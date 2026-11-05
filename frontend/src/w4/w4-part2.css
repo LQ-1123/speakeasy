@@ -1921,3 +1921,33 @@
     color: rgba(23, 45, 24, 0.55);
   }
 }
+
+/* ===== 「新的朋友」页面标题居中（手机 + 电脑） ===== */
+.w4-root .w4-head {
+  justify-content: center;
+  text-align: center;
+}
+.w4-root .w4-head-main {
+  flex: 0 1 auto;
+  align-items: center;
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+.w4-root .w4-head-title,
+.w4-root .w4-head-sub {
+  text-align: center;
+}
+
+/* 宽屏下申请列表居中成一列，避免贴左 */
+@media (min-width: 900px) {
+  .w4-root .w4-scroll {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .w4-root .w4-requests {
+    width: 100%;
+    max-width: 560px;
+  }
+}

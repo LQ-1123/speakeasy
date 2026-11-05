@@ -1,9 +1,9 @@
-﻿{
+{
   "appId": "com.speakeasy.app",
   "appName": "SpeakEasy",
   "webDir": "www",
   "server": {
-    "androidScheme": "https",
+    "androidScheme": "http",
     "cleartext": true,
     "allowNavigation": ["*"]
   },

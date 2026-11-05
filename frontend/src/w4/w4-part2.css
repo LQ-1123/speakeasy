@@ -1963,3 +1963,21 @@
   vertical-align: middle;
   flex: 0 0 auto;
 }
+
+/* 聊天页返回按钮未读数字角标 */
+.w4-root .w4-back-badge-wrap { position: relative; }
+.w4-root .w4-back-badge {
+  position: absolute;
+  top: -2px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #fa5151;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 600;
+}

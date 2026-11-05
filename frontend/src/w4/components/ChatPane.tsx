@@ -90,7 +90,7 @@ export function ChatPane({
   onBack: () => void;
   navigate: (r: Route) => void;
 }) {
-  const {
+  const { friends,
     friendById,
     messagesOf,
     typing,
@@ -113,6 +113,7 @@ export function ChatPane({
   } = useApp();
 
   const friend = friendById(friendId);
+  const totalUnread = friends.reduce((n, f) => n + (f.unread || 0), 0);
   const msgs = messagesOf(friendId);
   const isTyping = typing[friendId];
 
@@ -742,10 +743,13 @@ export function ChatPane({
     <div className="w4-main">
       {/* 顶部 */}
       <div className="w4-head">
-        <button className="w4-icon-btn w4-only-mobile" onClick={onBack} aria-label="返回">
+        <button className="w4-icon-btn w4-only-mobile w4-back-badge-wrap" onClick={onBack} aria-label="返回">
           <Icon strokeWidth={2}>
             <path d="M15 5l-7 7 7 7" />
           </Icon>
+          {totalUnread > 0 ? (
+            <span className="w4-back-badge">{totalUnread > 99 ? "99+" : totalUnread}</span>
+          ) : null}
         </button>
         <button
           className="w4-head-person"
@@ -1418,7 +1422,6 @@ function MessageRow({
 }) {
   const { profile } = useApp();
   const mine = message.from === "me";
-  const [played, setPlayed] = useState(false);
 
   /* 长按/右键语音消息 → 在指针位置弹出「转文字」菜单 */
   const pressTimer = useRef<number | null>(null);
@@ -1452,7 +1455,6 @@ function MessageRow({
 
   /* 长按之后浏览器还会补一次 click，这里把它吃掉，避免顺手播放语音 */
   const handlePlay = () => {
-    setPlayed(true);
     if (longPressed.current) {
       longPressed.current = false;
       return;
@@ -1505,9 +1507,6 @@ function MessageRow({
                 playing={playing}
                 onToggle={handlePlay}
               />
-              {!mine && message.kind === "voice" && !played ? (
-                <span className="w4-voice-dot" aria-label="unplayed" />
-              ) : null}
               {message.shownText ? (
                 <div className="w4-voice-text">{message.text}</div>
               ) : null}

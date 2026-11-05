@@ -634,11 +634,10 @@ export function ChatPane({
       }
       const silentFor = v.silenceSince ? now - v.silenceSince : 0;
       const total = now - v.startedAt;
-      if (silentFor >= 420 || total >= 15000) {
+      if (silentFor >= 550 || total >= 15000) {
         const rec = v.rec;
         v.rec = null;
         if (sttReadyRef.current && sttWsRef.current?.readyState === 1) {
-          showToast("检测到停顿，正在收尾识别…");
           sttPartialRef.current = "";
           try {
             sttNodeRef.current?.port.postMessage({ cmd: "flush" });
@@ -649,7 +648,6 @@ export function ChatPane({
           const text = (await waitSttFinal(2200)).trim();
           setCallTalking(false);
           if (text) {
-            showToast(`识别到：${text.slice(0, 30)}`);
             const ok = await sendCallText(text, total);
             if (ok) {
               try {
@@ -888,7 +886,6 @@ export function ChatPane({
       setCallWaiting(false);
       window.setTimeout(() => resumeCallListening(), 350);
     }
-    showToast("回复已开始");
     return true;
   };
 

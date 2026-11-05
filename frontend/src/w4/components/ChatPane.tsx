@@ -843,8 +843,7 @@ export function ChatPane({
 
               {isTyping ? (
                 <div className="w4-msg">
-                  <Avatar friend={friend} size={32} />
-                  <div className="w4-msg-col">
+                        <div className="w4-msg-col">
                     <div className="w4-bubble" style={{ padding: "10px 13px" }}>
                       <span className="w4-typing">
                         <i />

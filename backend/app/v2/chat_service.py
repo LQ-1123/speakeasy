@@ -604,11 +604,19 @@ class ChatService:
         audio_bytes: bytes,
         filename: str,
         duration_ms: int = 0,
+        *,
+        transcript: str | None = None,
+        stt_meta: dict[str, Any] | None = None,
     ):
         self.mark_replying(friend_id)
         try:
             async for event in self._handle_call_turn_stream(
-                friend_id, audio_bytes, filename, duration_ms
+                friend_id,
+                audio_bytes,
+                filename,
+                duration_ms,
+                transcript=transcript,
+                stt_meta=stt_meta,
             ):
                 yield event
         finally:
@@ -620,6 +628,9 @@ class ChatService:
         audio_bytes: bytes,
         filename: str,
         duration_ms: int = 0,
+        *,
+        transcript: str | None = None,
+        stt_meta: dict[str, Any] | None = None,
     ):
         """通话回合流式生成器：STT → LLM 流式 → 按句 TTS → done。
 

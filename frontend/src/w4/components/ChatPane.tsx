@@ -461,10 +461,19 @@ export function ChatPane({
           if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
         });
         setCallFriendSpeaking(true);
-        // 通话语音：忽略后端 audioUrl，统一由前端用 WebAudio 现场合成播放
-        if (ev.text) {
-          const fb = ttsSampleUrl(ev.text, friend.voice || "", friend.id);
-          if (fb) void playWebAudio(fb);
+        // 通话语音：优先用事件里的音频（本地模式是 blob），没有就现场合成
+        if (ev.audioUrl || ev.text) {
+          void (async () => {
+            const url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
+            if (!url) return;
+            callAudioPlaying.current = true;
+            const played = await playVoiceUrl(url);
+            const ms = Math.min(15000, 800 + (ev.text || "").length * 75);
+            window.setTimeout(() => {
+              callAudioPlaying.current = false;
+              if (played) resumeCallListening();
+            }, played ? ms : 200);
+          })();
         }
       } else if (ev.type === "done") {
         setCallWaiting(false);

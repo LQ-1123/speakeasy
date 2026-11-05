@@ -1,7 +1,7 @@
 package com.speakeasy.app;
 
-import android.media.AudioManager;
-import android.media.ToneGenerator;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -12,6 +12,8 @@ import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private final Handler ui = new Handler(Looper.getMainLooper());
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -22,26 +24,42 @@ public class MainActivity extends BridgeActivity {
                 s.setMediaPlaybackRequiresUserGesture(false);
                 s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-                // 原生提示音：荣耀/华为 WebView 对 WebAudio 支持不稳定，改用系统 ToneGenerator
-                final ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 88);
-                final Handler handler = new Handler(Looper.getMainLooper());
+                // 原生提示音：播放内置铃声（比 ToneGenerator 好听、也更响）
                 webView.addJavascriptInterface(new Object() {
                     @JavascriptInterface
                     public void ding() {
-                        tg.startTone(ToneGenerator.TONE_PROP_BEEP, 140);
+                        playRaw(R.raw.notify_message);
                     }
 
                     @JavascriptInterface
                     public void dong() {
-                        tg.startTone(ToneGenerator.TONE_PROP_BEEP, 110);
-                        handler.postDelayed(
-                                () -> tg.startTone(ToneGenerator.TONE_PROP_ACK, 130), 150);
+                        playRaw(R.raw.notify_request);
                     }
                 }, "AndroidTone");
             }
         } catch (Throwable ignored) {
             // 设置失败不影响 App 启动
         }
+    }
+
+    private void playRaw(final int resId) {
+        ui.post(
+                () -> {
+                    try {
+                        MediaPlayer mp = MediaPlayer.create(this, resId);
+                        if (mp == null) return;
+                        mp.setAudioAttributes(
+                                new AudioAttributes.Builder()
+                                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                        .build());
+                        mp.setVolume(1.0f, 1.0f);
+                        mp.setOnCompletionListener(MediaPlayer::release);
+                        mp.start();
+                    } catch (Throwable ignored) {
+                        // 播放失败静默忽略
+                    }
+                });
     }
 
     @Override

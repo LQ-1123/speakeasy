@@ -23,23 +23,40 @@ export function unlockNotifyAudio(): void {
   ensureCtx();
 }
 
-function tone(freqs: number[], duration = 0.12, gap = 0.09, volume = 0.05): void {
+function bell(notes: Array<{ f: number; at: number; dur: number; gain: number }>): void {
   const ac = ensureCtx();
   if (!ac) return;
-  let t = ac.currentTime + 0.01;
-  for (const f of freqs) {
+  const base = ac.currentTime + 0.01;
+  for (const n of notes) {
+    const t = base + n.at;
     const osc = ac.createOscillator();
+    const h2 = ac.createOscillator();
+    const h3 = ac.createOscillator();
     const gain = ac.createGain();
+    const g2 = ac.createGain();
+    const g3 = ac.createGain();
     osc.type = "sine";
-    osc.frequency.value = f;
+    h2.type = "sine";
+    h3.type = "sine";
+    osc.frequency.value = n.f;
+    h2.frequency.value = n.f * 2.01;
+    h3.frequency.value = n.f * 3.02;
+    g2.gain.value = 0.32;
+    g3.gain.value = 0.14;
+    // 指数衰减，接近铃声 / 钢琴质感
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(volume, t + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.02, n.gain), t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + n.dur);
     osc.connect(gain);
+    h2.connect(g2);
+    g2.connect(gain);
+    h3.connect(g3);
+    g3.connect(gain);
     gain.connect(ac.destination);
-    osc.start(t);
-    osc.stop(t + duration + 0.02);
-    t += gap;
+    for (const o of [osc, h2, h3]) {
+      o.start(t);
+      o.stop(t + n.dur + 0.02);
+    }
   }
 }
 
@@ -50,7 +67,7 @@ export function playMessageSound(): void {
     nat.ding();
     return;
   }
-  tone([880], 0.11, 0, 0.05);
+  bell([{ f: 1318.5, at: 0, dur: 0.55, gain: 0.5 }, { f: 2637, at: 0, dur: 0.3, gain: 0.12 }]);
 }
 
 /** 新好友申请：两声上行 */
@@ -60,5 +77,8 @@ export function playRequestSound(): void {
     nat.dong();
     return;
   }
-  tone([660, 990], 0.11, 0.1, 0.06);
+  bell([
+    { f: 880, at: 0, dur: 0.45, gain: 0.5 },
+    { f: 1318.5, at: 0.22, dur: 0.55, gain: 0.48 },
+  ]);
 }

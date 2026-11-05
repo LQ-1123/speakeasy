@@ -56,6 +56,7 @@ import {
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 import { uploadChatImage as apiUploadChatImage } from "./api";
 import { isLocalMode } from "./local/keys";
+import { playMessageSound, playRequestSound, unlockNotifyAudio } from "./notify";
 
 export interface Settings {
   llm: {
@@ -374,6 +375,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], birthday: '' });
   /* 是否已拿到真实后端数据（拿不到就一直用 mock，原型仍可浏览） */
   const [live, setLive] = useState(false);
+  /* 提示音：跟踪未读数 / 好友申请数变化 */
+  const notifyReady = useRef(false);
+  const lastUnread = useRef(0);
+  const lastRequests = useRef(0);
+
+  useEffect(() => {
+    const unlock = () => unlockNotifyAudio();
+    document.addEventListener("pointerdown", unlock, { once: true });
+    return () => document.removeEventListener("pointerdown", unlock);
+  }, []);
   const [typing, setTyping] = useState<Record<string, boolean>>({});
   const [zhOpen, setZhOpen] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<Toast | null>(null);
@@ -419,6 +430,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setFriends(snap.friends);
       setMessages(snap.messages);
       setRequests(snap.requests ?? []);
+      lastUnread.current = snap.friends.reduce((n, f) => n + (f.unread || 0), 0);
+      lastRequests.current = (snap.requests ?? []).length;
       setProfile((prev) => ({ ...prev, ...snap.profile }));
 
       /* 设置 / 朋友圈 / 表达本 也换成真数据（接口失败就保持 mock） */
@@ -453,6 +466,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (stopped || document.visibilityState === "hidden") return;
       const snap = await apiLoadFriendList();
       if (stopped || !snap) return;
+      const unread = snap.friends.reduce((n, f) => n + (f.unread || 0), 0);
+      if (notifyReady.current) {
+        if (snap.requests.length > lastRequests.current) playRequestSound();
+        if (unread > lastUnread.current) playMessageSound();
+      }
+      lastUnread.current = unread;
+      lastRequests.current = snap.requests.length;
+      notifyReady.current = true;
       setFriends(snap.friends);
       setRequests(snap.requests);
     };
@@ -701,6 +722,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const sendImage = useCallback(
     async (friendId: string, file: Blob, text = "") => {
+      setTyping((t) => ({ ...t, [friendId]: true }));
       const localUrl = URL.createObjectURL(file);
       setMessages((list) => [
         ...list,
@@ -717,9 +739,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
       const ok = await apiUploadChatImage(friendId, file, text);
       if (!ok) {
+        setTyping((t) => ({ ...t, [friendId]: false }));
         showToast("图片发送失败，请检查网络", "error");
         return;
       }
+      setTyping((t) => ({ ...t, [friendId]: false }));
       const fresh = await apiFetchMessages(friendId);
       if (fresh && fresh.length) {
         setMessages((list) => [

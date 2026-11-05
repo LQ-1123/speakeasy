@@ -5,9 +5,16 @@
   "server": {
     "androidScheme": "http",
     "cleartext": true,
-    "allowNavigation": ["*"]
+    "allowNavigation": [
+      "*"
+    ]
   },
   "android": {
     "allowMixedContent": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
   }
 }

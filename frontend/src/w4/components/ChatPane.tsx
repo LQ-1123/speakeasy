@@ -31,15 +31,14 @@ import {
 
 import { clockTime, dayOf } from "../format";
 import type { Friend, Message, Route } from "../model";
+import { callTurnStream, type ArchetypeLite } from "../api";
 import {
-  callTurnStream,
   callWarmup,
   changeFriendVoice,
   loadArchetypes,
   translate as apiTranslate,
   ttsSampleUrl,
-  type ArchetypeLite,
-} from "../api";
+} from "../apiFacade";
 import { useApp } from "../store";
 import { Avatar, Confirm, Dialog, Icon, Lightbox, VoiceBar } from "../ui";
 import { FriendInfo } from "./FriendInfo";

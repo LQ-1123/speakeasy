@@ -26,7 +26,7 @@ import {
   discover as apiDiscover,
   discoverLanguages as apiDiscoverLanguages,
   translate as apiTranslate,
-} from "../api";
+} from "../apiFacade";
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import type { DiscoverCandidate } from "../mock";

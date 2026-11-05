@@ -247,7 +247,7 @@ export async function localSaveProfile(
       for (let i = 0; i < 2; i += 1) {
         const p = await generatePersona(lang, made.map((f) => f.name));
         if (!p) continue;
-        const audio = p.greeting ? await fishTts(p.greeting) : null;
+        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
         const f = toFriend(p, { request: true, greetingAudio: audio?.url });
         made.push(f);
         state?.requests.push(f);
@@ -258,15 +258,15 @@ export async function localSaveProfile(
   return true;
 }
 
-export async function localDiscover(language = "en"): Promise<{ friend: Friend; message: string } | null> {
+export async function localDiscover(language = "en"): Promise<{ friend: Friend; message: string; greeting: string; greetingAudio?: string } | null> {
   const s = await getState();
   const p = await generatePersona(language, [...s.requests, ...s.friends].map((f) => f.name));
   if (!p) return null;
-  const audio = p.greeting ? await fishTts(p.greeting) : null;
+  const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
   const friend = toFriend(p, { request: true, greetingAudio: audio?.url });
   s.requests.push(friend);
   await persist();
-  return { friend, message: p.greeting || "" };
+  return { friend, message: p.greeting || "", greeting: p.greeting || "", greetingAudio: audio?.url };
 }
 
 export async function localAcceptFriend(id: string): Promise<boolean> {
@@ -303,7 +303,7 @@ export async function localSendText(friendId: string, text: string): Promise<Mes
   await persist();
   try {
     const reply = await generateReply(friend, text);
-    const audio = await fishTts(reply);
+    const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female" });
     const friendMsg = makeMessage({
       friendId,
       from: "friend",
@@ -349,7 +349,7 @@ export async function localSendVoiceBlob(
   if (text) {
     try {
       const reply = await generateReply(friend, text);
-      const audio = await fishTts(reply);
+      const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female" });
       appendMessage(
         makeMessage({
           friendId,

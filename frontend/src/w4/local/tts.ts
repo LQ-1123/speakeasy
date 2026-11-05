@@ -42,44 +42,84 @@ export async function playUrlWebAudio(url: string): Promise<boolean> {
 
 export type TtsResult = { url: string; durationMs: number } | null;
 
-/** Fish 合成：返回 blob URL（同一条文本+音色会缓存） */
+/** 本地 TTS：SiliconFlow（国内直连）优先，Fish 兜底；同文本+音色缓存 */
 const cache = new Map<string, Promise<TtsResult>>();
 
-export function fishTts(text: string, refId?: string): Promise<TtsResult> {
+export type TtsOptions = { gender?: "male" | "female"; refId?: string };
+
+export function fishTts(text: string, opts: TtsOptions = {}): Promise<TtsResult> {
   const cleaned = (text || "").trim();
   if (!cleaned) return Promise.resolve(null);
   const k = loadKeys();
-  const ref = (refId || k.fishRef || "").trim();
-  const cacheKey = `${ref}|${k.fishModel}|${cleaned.slice(0, 120)}`;
+  const cacheKey = `${opts.gender || "f"}|${cleaned.slice(0, 120)}`;
   const hit = cache.get(cacheKey);
   if (hit) return hit;
+
   const task = (async (): Promise<TtsResult> => {
-    if (!k.fishKey.trim()) return null;
-    try {
-      const resp = await fetch(`${k.fishBase.replace(/\/+$/, "")}/v1/tts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${k.fishKey.trim()}`,
-        },
-        body: JSON.stringify({
-          text: cleaned,
-          format: "mp3",
-          model: k.fishModel || "s2.1-pro-free",
-          ...(ref ? { reference_id: ref } : {}),
-        }),
-      });
-      if (!resp.ok) return null;
-      const bytes = await resp.arrayBuffer();
-      if (!bytes.byteLength) return null;
-      const blob = new Blob([bytes], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      const durationMs = Math.min(60000, Math.max(800, cleaned.length * 65));
-      return { url, durationMs };
-    } catch {
-      return null;
+    // 1) SiliconFlow CosyVoice（国内可直连，无需 VPN）
+    if (k.sttKey.trim()) {
+      try {
+        const voice = `FunAudioLLM/CosyVoice2-0.5B:${opts.gender === "male" ? "alex" : "anna"}`;
+        const resp = await fetch(`${k.sttBase.replace(/\/+$/, "")}/audio/speech`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${k.sttKey.trim()}`,
+          },
+          body: JSON.stringify({
+            model: "FunAudioLLM/CosyVoice2-0.5B",
+            input: cleaned,
+            voice,
+            response_format: "mp3",
+          }),
+        });
+        if (resp.ok) {
+          const bytes = await resp.arrayBuffer();
+          if (bytes.byteLength) {
+            const blob = new Blob([bytes], { type: "audio/mpeg" });
+            return {
+              url: URL.createObjectURL(blob),
+              durationMs: Math.min(60000, Math.max(800, cleaned.length * 65)),
+            };
+          }
+        }
+      } catch {
+        /* 继续尝试 Fish */
+      }
     }
+    // 2) Fish 兜底（需要能访问外网）
+    const ref = (opts.refId || k.fishRef || "").trim();
+    if (k.fishKey.trim()) {
+      try {
+        const resp = await fetch(`${k.fishBase.replace(/\/+$/, "")}/v1/tts`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${k.fishKey.trim()}`,
+          },
+          body: JSON.stringify({
+            text: cleaned,
+            format: "mp3",
+            model: k.fishModel || "s2.1-pro-free",
+            ...(ref ? { reference_id: ref } : {}),
+          }),
+        });
+        if (resp.ok) {
+          const bytes = await resp.arrayBuffer();
+          if (bytes.byteLength) {
+            return {
+              url: URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" })),
+              durationMs: Math.min(60000, Math.max(800, cleaned.length * 65)),
+            };
+          }
+        }
+      } catch {
+        /* 失败返回 null */
+      }
+    }
+    return null;
   })();
+
   cache.set(cacheKey, task);
   return task;
 }

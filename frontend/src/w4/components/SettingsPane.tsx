@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { saveLlm, saveStt, saveTts } from "../api";
+
 import { loadKeys, saveKeys } from "../local/keys";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
@@ -566,7 +567,7 @@ function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "er
       <input className="w4-input" {...bind("fishKey")} placeholder="sk-fish-..." />
       <div className="w4-field-label" style={{ marginTop: 12 }}>Fish 音色 Reference ID（可选）</div>
       <input className="w4-input" {...bind("fishRef")} placeholder="留空则用默认音色" />
-      <div className="w4-field-label" style={{ marginTop: 12 }}>SiliconFlow Key（语音识别）</div>
+      <div className="w4-field-label" style={{ marginTop: 12 }}>SiliconFlow Key（语音识别 + 语音合成）</div>
       <input className="w4-input" {...bind("sttKey")} placeholder="sk-..." />
       <button
         className="w4-btn is-primary"

@@ -23,7 +23,7 @@ import {
 
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
-import { saveProfile as apiSaveProfile } from "../api";
+import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
 import { Avatar, Dialog, Icon } from "../ui";
 

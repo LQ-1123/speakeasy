@@ -121,3 +121,29 @@ export async function deleteMoment(momentId: string) {
   if (isLocalMode()) return null;
   return server.deleteMoment(momentId);
 }
+
+export async function discover(language?: string) {
+  if (isLocalMode()) return (await local()).localDiscover(language);
+  return server.discover(language);
+}
+
+export async function discoverLanguages() {
+  if (isLocalMode()) return ["en", "ja", "ko", "es", "fr", "de", "it", "pt"];
+  return server.discoverLanguages();
+}
+
+export async function loadArchetypes() {
+  if (isLocalMode()) return [];
+  return server.loadArchetypes();
+}
+
+export async function changeFriendVoice(friendId: string, archetypeId: string) {
+  if (isLocalMode()) return null;
+  return server.changeFriendVoice(friendId, archetypeId);
+}
+
+/** 本地模式没有服务器音频 URL（语音由本地 Fish 合成 blob），返回空串 */
+export function ttsSampleUrl(text: string, voice: string, friendId?: string): string {
+  if (isLocalMode()) return "";
+  return server.ttsSampleUrl(text, voice, friendId);
+}

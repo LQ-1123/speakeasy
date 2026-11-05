@@ -527,7 +527,16 @@ export function ChatPane({
             const url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
             if (!url) return;
             callAudioPlaying.current = true;
-            const played = await playVoiceUrl(url);
+            const nat = (window as unknown as { AndroidTone?: { playUrl?: (u: string) => void } })
+              .AndroidTone;
+            let played = false;
+            if (nat?.playUrl) {
+              // 原生播放：荣耀 WebView 对 <audio>/WebAudio 限制严，原生 MediaPlayer 最稳
+              nat.playUrl(url);
+              played = true;
+            } else {
+              played = await playVoiceUrl(url);
+            }
             if (!played) showToast("通话语音加载失败", "error");
             const ms = Math.min(15000, 800 + (ev.text || "").length * 75);
             window.setTimeout(() => {

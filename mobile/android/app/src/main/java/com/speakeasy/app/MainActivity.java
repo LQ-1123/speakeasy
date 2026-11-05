@@ -35,6 +35,38 @@ public class MainActivity extends BridgeActivity {
                     public void dong() {
                         playRaw(R.raw.notify_request);
                     }
+
+                    /** 原生播放在线音频（通话语音用；绕开 WebView 的音频限制） */
+                    @JavascriptInterface
+                    public void playUrl(final String url) {
+                        if (url == null) return;
+                        if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+                        ui.post(
+                                () -> {
+                                    try {
+                                        MediaPlayer mp = new MediaPlayer();
+                                        mp.setAudioAttributes(
+                                                new AudioAttributes.Builder()
+                                                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                                                        .setContentType(
+                                                                AudioAttributes
+                                                                        .CONTENT_TYPE_SPEECH)
+                                                        .build());
+                                        mp.setDataSource(url);
+                                        mp.setVolume(1.0f, 1.0f);
+                                        mp.setOnPreparedListener(MediaPlayer::start);
+                                        mp.setOnCompletionListener(MediaPlayer::release);
+                                        mp.setOnErrorListener(
+                                                (m, what, extra) -> {
+                                                    m.release();
+                                                    return true;
+                                                });
+                                        mp.prepareAsync();
+                                    } catch (Throwable ignored) {
+                                        // 播放失败静默忽略
+                                    }
+                                });
+                    }
                 }, "AndroidTone");
             }
         } catch (Throwable ignored) {

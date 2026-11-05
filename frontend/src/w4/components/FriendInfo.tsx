@@ -4,14 +4,41 @@
 
 import { Clock, MapPin, Sparkles } from "lucide-react";
 
+import { previewVoice, playVoiceUrl, setFriendVoice as apiSetFriendVoice } from "../apiFacade";
 import { CLOSENESS, languageLabel } from "../format";
+import { isLocalMode } from "../local/keys";
 import type { Friend } from "../model";
 import { useApp } from "../store";
 import { Avatar, Icon } from "../ui";
 
 export function FriendInfo({ friend }: { friend: Friend }) {
-  const { expressions } = useApp();
+  const { expressions, updateFriendVoice, showToast } = useApp();
   const fromThisFriend = expressions.filter((e) => e.sourceFriendId === friend.id).length;
+
+  const switchVoice = async (voice: "anna" | "alex") => {
+    const ok = await apiSetFriendVoice(friend.id, voice);
+    if (!ok) {
+      showToast("切换失败，稍后再试", "error");
+      return;
+    }
+    updateFriendVoice(friend.id, voice, voice === "alex" ? "男声" : "女声");
+    showToast(voice === "alex" ? "已换成男声" : "已换成女声");
+  };
+
+  const previewCurrent = async () => {
+    const voice: "anna" | "alex" =
+      friend.voice === "alex" || friend.voice === "anna"
+        ? friend.voice
+        : friend.gender === "male"
+          ? "alex"
+          : "anna";
+    const url = await previewVoice("Hi! This is how I sound when we talk.", voice);
+    if (!url) {
+      showToast("试听失败：检查 SiliconFlow Key", "error");
+      return;
+    }
+    await playVoiceUrl(url);
+  };
 
   return (
     <>
@@ -72,6 +99,29 @@ export function FriendInfo({ friend }: { friend: Friend }) {
           </div>
         ) : null}
       </div>
+
+      {isLocalMode() ? (
+        <div className="w4-info-section">
+          <div className="w4-info-label">TA 的声音</div>
+          <div className="w4-chips">
+            <button className="w4-chip" onClick={() => void switchVoice("anna")}>
+              女声
+            </button>
+            <button className="w4-chip" onClick={() => void switchVoice("alex")}>
+              男声
+            </button>
+            <button className="w4-chip" onClick={() => void switchVoice(Math.random() < 0.5 ? "alex" : "anna")}>
+              随机
+            </button>
+            <button className="w4-chip" onClick={() => void previewCurrent()}>
+              试听
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--w-text-3)", marginTop: 4 }}>
+            换完发一条消息或打一次电话就能听到。
+          </div>
+        </div>
+      ) : null}
 
       <div className="w4-info-section">
         <div className="w4-info-label">说话方式</div>

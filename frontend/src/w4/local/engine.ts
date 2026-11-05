@@ -67,8 +67,11 @@ type Persona = {
   fish_reference_id?: string;
 };
 
-async function generatePersona(language: string, avoid: string[]): Promise<Persona | null> {
+async function generatePersona(language: string, avoid: string[], preferredGender?: "male" | "female"): Promise<Persona | null> {
   const avoidText = avoid.length ? `不要使用这些名字：${avoid.join(", ")}。` : "";
+  const genderHint = preferredGender
+    ? `The gender MUST be "${preferredGender}".`
+    : "Pick gender randomly (male or female).";
   const prompt = `You create a realistic conversation partner for a language learner.
 Target language code: ${language}.
 Return STRICT JSON only with keys:
@@ -76,7 +79,7 @@ name, age (20-35), gender ("male"|"female"), nationality, city, occupation,
 native_lang (ISO code), reply_language (same as target), bio (1 short sentence),
 personality_prompt (2nd-person instructions for how this person texts: tone, quirks, topics),
 greeting (one casual opening message in the target language, max 18 words).
-${avoidText}`;
+${avoidText}\n${genderHint}`;
   const data = await llmJson<Persona>(
     [
       { role: "system", content: "You output valid JSON only. No markdown." },
@@ -89,7 +92,9 @@ ${avoidText}`;
     ...data,
     name: sanitizeName(data.name),
     age: Number(data.age) || 24,
-    gender: data.gender === "male" ? "male" : "female",
+    gender:
+      preferredGender ||
+      (data.gender === "male" ? "male" : data.gender === "female" ? "female" : Math.random() < 0.5 ? "male" : "female"),
     native_lang: (data.native_lang || language).toLowerCase(),
     reply_language: (data.reply_language || language).toLowerCase(),
   };
@@ -256,10 +261,12 @@ export async function localSaveProfile(
     void (async () => {
       const lang = (targets[0] || "en").slice(0, 2);
       const made: Friend[] = [];
+      const firstGender: "male" | "female" = Math.random() < 0.5 ? "male" : "female";
       for (let i = 0; i < 2; i += 1) {
-        const p = await generatePersona(lang, made.map((f) => f.name));
+        const pref: "male" | "female" = i === 0 ? firstGender : firstGender === "male" ? "female" : "male";
+        const p = await generatePersona(lang, made.map((f) => f.name), pref);
         if (!p) continue;
-        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voiceForFriend("", p.gender) }) : null;
+        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
         const f = toFriend(p, { request: true, greetingAudio: audio?.url });
         made.push(f);
         state?.requests.push(f);
@@ -315,7 +322,7 @@ export async function localSendText(friendId: string, text: string): Promise<Mes
   await persist();
   try {
     const reply = await generateReply(friend, text);
-    const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female", voiceId: voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female") });
+    const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female", voiceId: friend.voice || voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female") });
     const friendMsg = makeMessage({
       friendId,
       from: "friend",
@@ -454,7 +461,7 @@ export async function localCallTurnStream(
     for (let i = 0; i < sentences.length; i += 1) {
       const audio = await fishTts(sentences[i], {
         gender: friend.gender === "male" ? "male" : "female",
-        voiceId: voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female"),
+        voiceId: friend.voice || voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female"),
       });
       if (i === 0) firstAudio = audio?.url;
       onEvent({ type: "sentence", index: i, text: sentences[i], audioUrl: audio?.url ?? "" });
@@ -820,4 +827,17 @@ No markdown, no emoji.`,
     "Tell me about your day.",
   ];
   return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+}
+
+/** 手动换好友音色（anna 女 / alex 男），持久化到本地 */
+export async function localSetFriendVoice(friendId: string, voice: "anna" | "alex"): Promise<boolean> {
+  const st = await getState();
+  const idx = st.friends.findIndex((f) => f.id === friendId);
+  const target = idx >= 0 ? st.friends[idx] : st.requests.find((f) => f.id === friendId);
+  if (!target) return false;
+  const patched = { ...target, voice, voiceLabel: voice === "alex" ? "男声" : "女声", gender: voice === "alex" ? "male" : "female" } as Friend;
+  if (idx >= 0) st.friends[idx] = patched;
+  else st.requests = st.requests.map((f) => (f.id === friendId ? patched : f));
+  await persist();
+  return true;
 }

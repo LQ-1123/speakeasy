@@ -51,6 +51,7 @@ import {
   translate as apiTranslate,
   deleteMoment as apiDeleteMoment,
   loadFriendList as apiLoadFriendList,
+  setFriendVoice as apiSetFriendVoice,
 } from "./apiFacade";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 import { isLocalMode } from "./local/keys";
@@ -1049,6 +1050,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateFriendVoice = useCallback((friendId: string, voice: string, voiceLabel: string) => {
     setFriends((list) => list.map((f) => (f.id === friendId ? { ...f, voice, voiceLabel } : f)));
+    // 本地模式：音色写回本地引擎，聊天 / 通话都立即生效
+    if (isLocalMode() && (voice === "anna" || voice === "alex")) {
+      void apiSetFriendVoice(friendId, voice);
+    }
   }, []);
 
   const deleteFriend = useCallback((friendId: string) => {

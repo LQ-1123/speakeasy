@@ -229,3 +229,16 @@ export async function callOpening(friendId: string): Promise<string> {
   if (isLocalMode()) return (await local()).localCallOpening(friendId);
   return "Can you hear me?";
 }
+
+export async function setFriendVoice(friendId: string, voice: "anna" | "alex"): Promise<boolean> {
+  if (isLocalMode()) return (await local()).localSetFriendVoice(friendId, voice);
+  return false;
+}
+
+/** 试听某个具体音色（本地模式） */
+export async function previewVoice(text: string, voice: "anna" | "alex"): Promise<string | null> {
+  if (!isLocalMode()) return null;
+  const { fishTts } = await import("./local/tts");
+  const r = await fishTts(text, { gender: voice === "alex" ? "male" : "female", voiceId: voice });
+  return r?.url ?? null;
+}

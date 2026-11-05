@@ -1415,3 +1415,15 @@
     max-height: 80vh;
   }
 }
+
+/* 通话字幕：原文下方的小号中文翻译 */
+.w4-root .w4-call-zh {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.62);
+  font-weight: 400;
+}
+.w4-root .w4-call-line.is-me .w4-call-zh {
+  color: rgba(255, 255, 255, 0.55);
+}

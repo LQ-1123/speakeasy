@@ -196,6 +196,7 @@ class LLMClient:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         """流式产出增量文本。首个 token 到达即 yield。"""
         payload = _normalize_messages(messages)
@@ -219,6 +220,8 @@ class LLMClient:
             "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
             "top_p": self.cfg.top_p,
         }
+        if extra:
+            kwargs.update(extra)
         if self.cfg.extra_headers:
             kwargs["extra_headers"] = dict(self.cfg.extra_headers)
 

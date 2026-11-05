@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import asyncio
 import os
 import re
@@ -26,6 +28,14 @@ from app.v2 import social
 from app.v2.suggestion import generate_suggestion
 
 log = get_logger(__name__)
+
+
+def _write_bytes(path: str, data: bytes) -> None:
+    import os as _os
+
+    _os.makedirs(_os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data)
 
 _MAX_REPLY_CHARS = 420
 _MARKDOWN_RE = re.compile(r"[*_#`>]+")
@@ -550,7 +560,26 @@ class ChatService:
     async def _synth_sentence(self, text: str, friend: dict) -> dict | None:
         """为一句话合成 TTS，返回 {path,url,duration_ms}；失败返回 None。"""
         clean = _strip_emoji(text)
-        if not clean or self.voice is None or self.audio is None:
+        if not clean or self.audio is None:
+            return None
+        # Fish 优先：和聊天气泡同一条链路，延迟 ~1s；edge 兜底（国内约 6s）
+        try:
+            fish_audio = await self._fish_voice(clean, "neutral", friend)
+            if fish_audio is not None:
+                cfg = self.tts_config.load()
+                ext = (cfg.fish_format or "mp3").lower()
+                fname = f"fish_{uuid.uuid4().hex[:12]}.{ext}"
+                path = os.path.join(self.audio.audio_dir, fname)
+                await asyncio.to_thread(_write_bytes, path, fish_audio)
+                duration_ms = max(500, int(len(fish_audio) * 8 / 128_000 * 1000))
+                return {
+                    "path": path,
+                    "url": f"/api/v2/audio/{fname}",
+                    "duration_ms": duration_ms,
+                }
+        except Exception as exc:  # noqa: BLE001 - Fish 失败回落 edge
+            log.warning("通话单句 Fish TTS 失败（%s: %s），回落 edge", type(exc).__name__, exc)
+        if self.voice is None:
             return None
         try:
             path, duration_ms = await self.voice.synth_to_wav(
@@ -692,7 +721,11 @@ class ChatService:
 
         try:
             async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.65, max_tokens=500
+                messages,
+                temperature=0.65,
+                max_tokens=500,
+                # 通话要快：关掉推理模型的思考阶段（省 1~3s）
+                extra={"thinking": {"type": "disabled"}},
             ):
                 if not delta:
                     continue
@@ -717,7 +750,7 @@ class ChatService:
                 # 让用户更早听到声音（剩余部分继续正常按句合成）。
                 if not audio_paths and not fallback_used:
                     clause_match = re.search(r"[,;:，；：]", buffer)
-                    if clause_match is not None and clause_match.start() >= 18:
+                    if clause_match is not None and clause_match.start() >= 6:
                         clause = buffer[: clause_match.end()].strip()
                         if clause and _matches_language(clause, lang):
                             event = await synth_and_event(clause)

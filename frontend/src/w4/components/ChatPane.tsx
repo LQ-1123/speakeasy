@@ -35,6 +35,7 @@ import {
   callWarmup,
   changeFriendVoice,
   loadArchetypes,
+  translate as apiTranslate,
   type ArchetypeLite,
 } from "../api";
 import { useApp } from "../store";
@@ -132,6 +133,8 @@ export function ChatPane({
   const [callListening, setCallListening] = useState(false);
   const [callMuted, setCallMuted] = useState(false);
   const [callFriendSpeaking, setCallFriendSpeaking] = useState(false);
+  const [callUserZh, setCallUserZh] = useState("");
+  const [callFriendZh, setCallFriendZh] = useState("");
 
   /* 关掉声音时立刻停下正在播的那句，而不是等它播完 */
   useEffect(() => {
@@ -368,11 +371,21 @@ export function ChatPane({
     setCallWaiting(true);
     setCallUserText("");
     setCallFriendText("");
+    setCallUserZh("");
+    setCallFriendZh("");
     const ok = await callTurnStream(friend.id, blob, ms, (ev) => {
       if (ev.type === "transcript") {
         setCallUserText(ev.text);
+        if (ev.text) {
+          void apiTranslate(ev.text, friend.id).then((zh) => {
+            if (zh) setCallUserZh(zh);
+          });
+        }
       } else if (ev.type === "sentence") {
         setCallFriendText((t) => (t ? t + " " : "") + ev.text);
+        void apiTranslate(ev.text, friend.id).then((zh) => {
+          if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
+        });
         setCallFriendSpeaking(true);
         if (ev.audioUrl) {
           callAudioQueue.current.push(ev.audioUrl);
@@ -898,7 +911,9 @@ export function ChatPane({
               seconds={callSeconds}
               turns={callTurns}
               userText={callUserText}
+              userZh={callUserZh}
               friendText={callFriendText}
+              friendZh={callFriendZh}
               talking={callTalking}
               waiting={callWaiting}
               listening={callListening}
@@ -1308,7 +1323,9 @@ function CallOverlay({
   seconds,
   turns,
   userText,
+  userZh,
   friendText,
+  friendZh,
   talking,
   waiting,
   listening,
@@ -1324,7 +1341,9 @@ function CallOverlay({
   seconds: number;
   turns: number;
   userText: string;
+  userZh: string;
   friendText: string;
+  friendZh: string;
   talking: boolean;
   waiting: boolean;
   listening: boolean;
@@ -1388,8 +1407,18 @@ function CallOverlay({
         </div>
 
         <div className="w4-call-sub">
-          {userText ? <div className="w4-call-line is-me">你：{userText}</div> : null}
-          {friendText ? <div className="w4-call-line">{friendText}</div> : null}
+          {userText ? (
+            <div className="w4-call-line is-me">
+              你：{userText}
+              {userZh ? <div className="w4-call-zh">{userZh}</div> : null}
+            </div>
+          ) : null}
+          {friendText ? (
+            <div className="w4-call-line">
+              {friendText}
+              {friendZh ? <div className="w4-call-zh">{friendZh}</div> : null}
+            </div>
+          ) : null}
           {talking || waiting || friendSpeaking ? (
             <span className="w4-call-wave" aria-hidden>
               <i /><i /><i /><i /><i /><i /><i />

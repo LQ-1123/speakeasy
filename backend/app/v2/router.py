@@ -333,8 +333,18 @@ async def get_stt_settings(request: Request) -> dict:
     return _stt_payload(_engines_obj(request))
 
 
+def _key_edit_guard() -> None:
+    """线上部署默认锁定 key 编辑（ALLOW_KEY_EDIT=0），避免任何拿到 App 的人改 key。"""
+    import os as _os
+
+    allow = _os.getenv("ALLOW_KEY_EDIT", "1").strip().lower()
+    if allow not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=403, detail="该部署已锁定密钥配置，请在服务器 .env 中修改")
+
+
 @router.post("/settings/llm")
 async def save_llm_settings(request: Request, body: LLMConfigIn) -> dict:
+    _key_edit_guard()
     """保存对话模型配置：写文件 → 应用 → 重建 LLM 客户端（立即生效）。"""
     engines = _engines_obj(request)
     store = _llm_store(engines)
@@ -372,6 +382,7 @@ async def save_llm_settings(request: Request, body: LLMConfigIn) -> dict:
 
 @router.post("/settings/stt")
 async def save_stt_settings(request: Request, body: SttConfigIn) -> dict:
+    _key_edit_guard()
     engines = _engines_obj(request)
     store = _get_stt_store(engines)
     changes = body.model_dump(exclude_none=True, exclude={"verify"})
@@ -420,6 +431,7 @@ async def test_stt_settings(request: Request, body: SttTestIn | None = None) -> 
 
 @router.post("/settings/stt/reset")
 async def reset_stt_settings(request: Request) -> dict:
+    _key_edit_guard()
     engines = _engines_obj(request)
     store = _get_stt_store(engines)
     cfg = await asyncio.to_thread(store.reset)
@@ -810,6 +822,7 @@ async def get_tts_settings(request: Request) -> dict:
 
 @router.post("/settings/tts")
 async def set_tts_settings(request: Request, body: TTSConfigBody) -> dict:
+    _key_edit_guard()
     store = _tts_store(request)
     patch: dict[str, Any] = {}
     if body.provider is not None:
@@ -827,6 +840,7 @@ async def set_tts_settings(request: Request, body: TTSConfigBody) -> dict:
 
 @router.post("/settings/tts/reset")
 async def reset_tts_settings(request: Request) -> dict:
+    _key_edit_guard()
     return {"ok": True, "tts": _tts_store(request).reset().public()}
 
 

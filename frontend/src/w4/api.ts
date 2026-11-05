@@ -99,7 +99,22 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
-const BASE = "/api/v2";
+/**
+ * 后端地址：
+ * - 同源部署（后端顺带发前端静态文件）：留空即可
+ * - 前后端分离：构建时设置 NEXT_PUBLIC_API_BASE=https://你的域名
+ */
+export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
+const BASE = `${API_ORIGIN}/api/v2`;
+
+/** 把后端返回的相对媒体地址（/api/v2/audio/xxx）补成绝对地址 */
+export function mediaUrl(path?: string | null): string | undefined {
+  if (!path) return undefined;
+  const p = String(path).trim();
+  if (!p) return undefined;
+  if (/^(https?:|data:|blob:)/i.test(p)) return p;
+  return `${API_ORIGIN}${p.startsWith("/") ? p : `/${p}`}`;
+}
 
 /* ------------------------------------------------------------ 字段映射 */
 
@@ -158,7 +173,7 @@ function mapFriend(raw: RawFriend): Friend {
     /* 好友申请会带一句 request_message（偶遇捏人时写入的招呼语） */
     greeting: String(raw.request_message ?? ""),
     greetingZh: "",
-    greetingAudio: raw.greeting_audio ? String(raw.greeting_audio) : undefined,
+    greetingAudio: mediaUrl(raw.greeting_audio ? String(raw.greeting_audio) : undefined),
   };
 }
 
@@ -183,7 +198,7 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
     read: Boolean(raw.is_read),
   };
   if (typeof raw.duration_ms === "number") mapped.durationMs = raw.duration_ms;
-  if (raw.audio_url) mapped.audio = String(raw.audio_url);
+  if (raw.audio_url) mapped.audio = mediaUrl(String(raw.audio_url));
   if (raw.image_url) mapped.image = String(raw.image_url);
   if (raw.suggestion) {
     const rawSug = raw.suggestion as unknown;

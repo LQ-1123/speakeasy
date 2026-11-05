@@ -136,12 +136,19 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 前后端分离：CORS 白名单可用环境变量覆盖（逗号分隔）
+    import os as _os
+
+    _env_origins = [
+        o.strip() for o in _os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.server.cors_origins,
+        allow_origins=_env_origins or settings.server.cors_origins,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     app.include_router(http_api.router)

@@ -1,0 +1,26 @@
+[Unit]
+Description=SpeakEasy backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/speakeasy
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/root/speakeasy/backend
+# 线上锁定 key 编辑（如需在 App 里改 key，改成 1）
+Environment=ALLOW_KEY_EDIT=0
+# 前端域名（前后端分离时填写，逗号分隔；同源部署可留空）
+Environment=CORS_ORIGINS=https://your-domain.example.com
+# 服务器出站代理（如果你的 VPN 是本地 socks/http 代理，按实际端口改）
+# Environment=HTTPS_PROXY=http://127.0.0.1:7890
+# Environment=HTTP_PROXY=http://127.0.0.1:7890
+ExecStart=/root/speakeasy/.venv/bin/python -m uvicorn app.main:app \
+    --app-dir /root/speakeasy/backend \
+    --host 127.0.0.1 --port 8000 --log-level warning
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

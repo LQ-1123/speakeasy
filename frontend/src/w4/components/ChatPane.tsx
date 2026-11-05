@@ -619,7 +619,7 @@ export function ChatPane({
         if (blob.size >= 1200) void sendCallBlob(blob, ms);
         else window.setTimeout(() => vadTick(), 200);
       };
-      rec.start(150);
+      rec.start(100);
       setCallTalking(true);
     } else if (v.rec) {
       if (speaking) {
@@ -629,7 +629,7 @@ export function ChatPane({
       }
       const silentFor = v.silenceSince ? now - v.silenceSince : 0;
       const total = now - v.startedAt;
-      if (silentFor >= 850 || total >= 15000) {
+      if (silentFor >= 420 || total >= 15000) {
         const rec = v.rec;
         v.rec = null;
         try {
@@ -640,7 +640,7 @@ export function ChatPane({
         return;
       }
     }
-    v.timer = window.setTimeout(vadTick, 100);
+    v.timer = window.setTimeout(vadTick, 60);
   }
 
   /** 恢复“继续听”：只在没静音、没在等回复、对方也没在说话时 */

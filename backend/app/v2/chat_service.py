@@ -684,7 +684,7 @@ class ChatService:
         )
         system_prompt = "\n\n".join(p for p in (persona, call_hint) if p)
         messages: list[Any] = [{"role": "system", "content": system_prompt}]
-        for item in history[-4:]:
+        for item in history[-2:]:
             # 通话历史里不要把「通话摘要」当对话内容喂回模型（否则可能被模仿/复读）
             if item.get("msg_type") == "call_summary":
                 continue
@@ -715,7 +715,7 @@ class ChatService:
             async for delta in self.engines.llm.stream_chat(
                 messages,
                 temperature=0.65,
-                max_tokens=500,
+                max_tokens=220,
                 # 通话要快：关掉推理模型的思考阶段（省 1~3s）
                 extra={"thinking": {"type": "disabled"}},
             ):
@@ -742,7 +742,7 @@ class ChatService:
                 # 让用户更早听到声音（剩余部分继续正常按句合成）。
                 if not audio_paths and not fallback_used:
                     clause_match = re.search(r"[,;:，；：]", buffer)
-                    if clause_match is not None and clause_match.start() >= 6:
+                    if clause_match is not None and clause_match.start() >= 3:
                         clause = buffer[: clause_match.end()].strip()
                         if clause and _matches_language(clause, lang):
                             event = await synth_and_event(clause)

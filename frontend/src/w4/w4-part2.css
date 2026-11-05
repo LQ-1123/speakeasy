@@ -1819,3 +1819,63 @@
   width: 28px;
   height: 28px;
 }
+
+/* ===== 手机长按录音：变暗 + 两个大扇形按钮 ===== */
+.w4-root .w4-rec-dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.58);
+  z-index: 55;
+  pointer-events: none;
+  animation: w4-fade 0.15s ease;
+}
+.w4-root .w4-rec-zones {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 118px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 0 22px;
+  z-index: 70;
+  pointer-events: none;
+}
+.w4-root .w4-rec-zone {
+  height: 58px;
+  min-width: 132px;
+  padding: 0 20px;
+  border-radius: 29px 29px 12px 29px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #3c3c3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+  transition: transform 0.14s ease, background 0.14s ease, color 0.14s ease;
+  transform: rotate(-6deg);
+}
+.w4-root .w4-rec-zone.is-text {
+  border-radius: 29px 29px 29px 12px;
+  transform: rotate(6deg);
+}
+.w4-root .w4-rec-zone.is-cancel {
+  color: #e64340;
+}
+.w4-root .w4-rec-zone.is-cancel.on {
+  background: #fa5151;
+  color: #fff;
+  transform: rotate(-6deg) scale(1.08);
+}
+.w4-root .w4-rec-zone.is-text.on {
+  background: #07c160;
+  color: #fff;
+  transform: rotate(6deg) scale(1.08);
+}
+/* 录音提示框在暗色背景上更清楚 */
+.w4-root .w4-rec-overlay {
+  z-index: 65;
+}

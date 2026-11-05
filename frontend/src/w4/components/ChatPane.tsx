@@ -917,14 +917,13 @@ export function ChatPane({
                   <button
                     className={`w4-hold ${recording ? "is-rec" : ""} ${cancelHint ? "is-cancel" : ""}`}
                     onPointerDown={(e) => {
-                      const mouse = e.pointerType === "mouse";
-                      setRecMouse(mouse);
-                      if (mouse) {
-                        e.preventDefault();
-                        if (!recording) void startRecording(e.clientY);
-                        return;
+                      e.preventDefault();
+                      setRecMouse(false);
+                      try {
+                        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      } catch {
+                        /* 合成事件可能没有真实 pointer，忽略 */
                       }
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                       void startRecording(e.clientY);
                     }}
                     onPointerMove={(e) => {
@@ -1107,20 +1106,23 @@ export function ChatPane({
             </div>
           ) : null}
 
+          {recording && !recMouse ? <div className="w4-rec-dim" /> : null}
+
           {recording && !recMouse ? (
             <div className="w4-rec-zones">
               <div
                 ref={cancelZoneRef}
                 className={`w4-rec-zone is-cancel${recZone === "cancel" ? " on" : ""}`}
               >
-                取消
+                <X size={18} strokeWidth={2.2} />
+                取消发送
               </div>
               <div
                 ref={transcribeZoneRef}
                 className={`w4-rec-zone is-text${recZone === "transcribe" ? " on" : ""}`}
               >
-                <Languages size={15} strokeWidth={2} />
-                滑到这里 转文字
+                <Languages size={18} strokeWidth={2.1} />
+                转文字
               </div>
             </div>
           ) : null}

@@ -368,7 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [moments, setMoments] = useState<Moment[]>(() => []);
   const [expressions, setExpressions] = useState<Expression[]>([]);
-  const [profile, setProfile] = useState<Profile>({ ...ME, name: '', nickname: '' } as Profile);
+  const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], birthday: '' });
   /* 是否已拿到真实后端数据（拿不到就一直用 mock，原型仍可浏览） */
   const [live, setLive] = useState(false);
   const [typing, setTyping] = useState<Record<string, boolean>>({});

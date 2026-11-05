@@ -78,22 +78,22 @@ export async function saveCallSummary(friendId: string, durationS: number, turns
 }
 
 export async function deleteExpressionOnServer(id: string) {
-  if (isLocalMode()) return null;
+  if (isLocalMode()) return (await local()).localDeleteExpression(id);
   return server.deleteExpressionOnServer(id);
 }
 
 export async function generateMoments() {
-  if (isLocalMode()) return [];
+  if (isLocalMode()) return (await local()).localGenerateMoments();
   return server.generateMoments();
 }
 
 export async function loadExpressions() {
-  if (isLocalMode()) return [];
+  if (isLocalMode()) return (await local()).localLoadExpressions();
   return server.loadExpressions();
 }
 
 export async function loadMoments() {
-  if (isLocalMode()) return [];
+  if (isLocalMode()) return (await local()).localLoadMoments();
   return server.loadMoments();
 }
 
@@ -103,12 +103,12 @@ export async function loadSettings() {
 }
 
 export async function patchExpression(id: string, fields: Record<string, unknown>) {
-  if (isLocalMode()) return null;
+  if (isLocalMode()) return (await local()).localPatchExpression(id, fields);
   return server.patchExpression(id, fields);
 }
 
 export async function publishMomentToServer(text: string, mood: string) {
-  if (isLocalMode()) return null;
+  if (isLocalMode()) return (await local()).localPublishMoment(text, mood);
   return server.publishMomentToServer(text, mood);
 }
 
@@ -118,7 +118,7 @@ export async function saveTts(body: Record<string, string | undefined>) {
 }
 
 export async function deleteMoment(momentId: string) {
-  if (isLocalMode()) return null;
+  if (isLocalMode()) return (await local()).localDeleteMoment(momentId);
   return server.deleteMoment(momentId);
 }
 
@@ -174,4 +174,15 @@ export async function callTurnStream(
     );
   }
   return server.callTurnStream(friendId, blob, durationMs, onEvent);
+}
+
+
+export async function commentMomentOnServer(momentId: string, text: string) {
+  if (isLocalMode()) return (await local()).localCommentMoment(momentId, text);
+  return server.commentMomentOnServer(momentId, text);
+}
+
+export async function addExpression(better: string, original = "", explanation = "") {
+  if (isLocalMode()) return (await local()).localAddExpression(better, original, explanation);
+  return server.addExpression(better, original, explanation);
 }

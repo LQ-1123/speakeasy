@@ -11,7 +11,7 @@
  */
 
 import { diceAvatar } from "../avatar";
-import type { Friend, Message, Profile } from "../model";
+import type { Expression, Friend, Message, Moment, Profile } from "../model";
 import { dbGet, dbSet, newId } from "./db";
 import { loadKeys } from "./keys";
 import { llmChat, llmJson } from "./llm";
@@ -23,6 +23,9 @@ type LocalState = {
   friends: Friend[];
   requests: Friend[];
   messages: Message[];
+  moments: Moment[];
+  expressions: Expression[];
+  memories: Record<string, { facts: string[]; episodes: string[] }>;
 };
 
 const STATE_KEY = "state.v1";
@@ -32,7 +35,7 @@ let state: LocalState | null = null;
 async function getState(): Promise<LocalState> {
   if (state) return state;
   const saved = await dbGet<LocalState>(STATE_KEY);
-  state = saved ?? { profile: null, friends: [], requests: [], messages: [] };
+  state = saved ?? { profile: null, friends: [], requests: [], messages: [], moments: [], expressions: [], memories: {} };
   return state;
 }
 
@@ -157,7 +160,11 @@ const LANG_NAMES: Record<string, string> = {
 async function generateReply(friend: Friend, userText: string): Promise<string> {
   const lang = friend.language || "en";
   const persona = (friend as unknown as { personality_prompt?: string }).personality_prompt || friend.bio;
-  const sys = `You are ${friend.name}, ${friend.age}, from ${friend.city || friend.country}. ${persona}
+  const mem = state?.memories?.[friend.id];
+  const memText = mem && (mem.facts.length || mem.episodes.length)
+    ? `\nThings you remember about the user: ${[...mem.facts, ...mem.episodes].slice(-6).join("; ")}`
+    : "";
+  const sys = `You are ${friend.name}, ${friend.age}, from ${friend.city || friend.country}. ${persona}${memText}
 You are texting a language-learning friend on a chat app. Reply ONLY in ${LANG_NAMES[lang] || lang}.
 Keep it natural and short: 1-2 short spoken-style lines, contractions, casual tone, at most one question.
 Never mention being an AI. Never use markdown.`;
@@ -320,6 +327,7 @@ export async function localSendText(friendId: string, text: string): Promise<Mes
     appendMessage(friendMsg);
     friend.turns += 1;
     friend.lastActive = "刚刚";
+    if (friend.turns % 3 === 0) void localExtractMemory(friend.id);
   } catch {
     /* 网络失败：保留用户消息 */
   }
@@ -366,6 +374,7 @@ export async function localSendVoiceBlob(
         }),
       );
       friend.turns += 1;
+      if (friend.turns % 3 === 0) void localExtractMemory(friend.id);
     } catch {
       /* ignore */
     }
@@ -465,5 +474,236 @@ export async function localCallTurnStream(
   } catch (e) {
     onEvent({ type: "error", message: String(e).slice(0, 120) });
     return false;
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* L3：动态、评论、表达本、记忆提炼                                    */
+/* ------------------------------------------------------------------ */
+
+function myAvatar(): string {
+  return diceAvatar("me", "male");
+}
+
+export async function localLoadMoments(): Promise<Moment[]> {
+  const s = await getState();
+  if (s.moments.length) return s.moments;
+  return (await localGenerateMoments()) ?? [];
+}
+
+export async function localGenerateMoments(): Promise<Moment[] | null> {
+  const s = await getState();
+  const people = s.friends.length ? s.friends : s.requests;
+  if (!people.length) return null;
+  const names = people.slice(0, 6).map((f) => `${f.name} (${f.city || f.country}, ${f.occupation})`);
+  const data = await llmJson<Array<{ author: string; text: string; mood: string; place: string }>>(
+    [
+      {
+        role: "system",
+        content:
+          "You write short, natural social-media posts for language learners. Output strict JSON only.",
+      },
+      {
+        role: "user",
+        content: `Write 2 short posts (max 22 words each, casual English) by these people: ${names.join("; ")}.
+Return JSON array: [{"author": exact name, "text": "...", "mood": "开心|平静|累|期待", "place": "city or place"}]`,
+      },
+    ],
+    { maxTokens: 700, temperature: 1.0 },
+  );
+  if (!data || !Array.isArray(data)) return null;
+  const created: Moment[] = [];
+  for (const item of data.slice(0, 3)) {
+    const author = people.find((f) => f.name.toLowerCase() === String(item.author || "").toLowerCase()) || people[0];
+    const translation = await localTranslate(item.text);
+    const comments = await generateMomentComments(author, item.text, people, 1);
+    created.push({
+      id: newId(),
+      authorId: author.id,
+      images: [],
+      text: String(item.text || "").slice(0, 300),
+      translation: translation || undefined,
+      mood: String(item.mood || "平静"),
+      place: String(item.place || author.city || ""),
+      time: nowIso(),
+      comments,
+      likedBy: [],
+    } as Moment);
+  }
+  s.moments = [...created, ...s.moments].slice(0, 60);
+  await persist();
+  return s.moments;
+}
+
+async function generateMomentComments(
+  author: Friend,
+  text: string,
+  people: Friend[],
+  count = 2,
+): Promise<Moment["comments"]> {
+  try {
+    const commenters = people.filter((f) => f.id !== author.id).slice(0, 3).map((f) => f.name);
+    const data = await llmJson<Array<{ author: string; text: string }>>(
+      [
+        { role: "system", content: "Output strict JSON only. Write casual friendly comments." },
+        {
+          role: "user",
+          content: `Post by ${author.name}: "${text}"
+Write ${count} comments by these friends: ${commenters.join(", ") || author.name}.
+Return JSON: [{"author": name, "text": "short comment, max 12 words"}]`,
+        },
+      ],
+      { maxTokens: 400, temperature: 0.95 },
+    );
+    if (!Array.isArray(data)) return [];
+    return data.slice(0, count).map((c) => {
+      const who = people.find((f) => f.name.toLowerCase() === String(c.author || "").toLowerCase()) || author;
+      return { id: newId(), friendId: who.id, text: String(c.text || "").slice(0, 160), time: nowIso() };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function localPublishMoment(text: string, mood: string): Promise<Moment | null> {
+  const s = await getState();
+  const moment: Moment = {
+    id: newId(),
+    authorId: "me",
+    images: [],
+    text: text.slice(0, 500),
+    mood: mood || "平静",
+    time: nowIso(),
+    comments: [],
+    likedBy: [],
+    commentsPending: true,
+  } as Moment;
+  s.moments = [moment, ...s.moments];
+  await persist();
+  const people = s.friends.length ? s.friends : s.requests;
+  if (people.length) {
+    const comments = await generateMomentComments(
+      { id: "me", name: "我", city: "", country: "", occupation: "" } as Friend,
+      text,
+      people,
+      2,
+    );
+    const idx = s.moments.findIndex((m) => m.id === moment.id);
+    if (idx >= 0) s.moments[idx] = { ...s.moments[idx], comments, commentsPending: false };
+    await persist();
+  }
+  return s.moments.find((m) => m.id === moment.id) ?? moment;
+}
+
+export async function localCommentMoment(momentId: string, text: string): Promise<Moment | null> {
+  const s = await getState();
+  const idx = s.moments.findIndex((m) => m.id === momentId);
+  if (idx < 0) return null;
+  const mine = { id: newId(), friendId: "me", text: text.slice(0, 200), time: nowIso() };
+  const moment = { ...s.moments[idx], comments: [...s.moments[idx].comments, mine] };
+  s.moments[idx] = moment;
+  await persist();
+  // 好友回一句
+  const author = s.friends.find((f) => f.id === moment.authorId);
+  if (author) {
+    try {
+      const reply = await llmChat(
+        [
+          { role: "system", content: `You are ${author.name}. Reply to a comment on your post in ${LANG_NAMES[author.language] || "English"}. Max 12 words, casual.` },
+          { role: "user", content: `Post: "${moment.text}"\nComment from user: "${text}"` },
+        ],
+        { maxTokens: 120, temperature: 0.9 },
+      );
+      const updated = { ...s.moments[idx], comments: [...s.moments[idx].comments, { id: newId(), friendId: author.id, text: reply.slice(0, 160), time: nowIso() }] };
+      s.moments[idx] = updated;
+      await persist();
+      return updated;
+    } catch {
+      /* 忽略 */
+    }
+  }
+  return s.moments[idx];
+}
+
+export async function localDeleteMoment(momentId: string): Promise<boolean> {
+  const s = await getState();
+  s.moments = s.moments.filter((m) => m.id !== momentId);
+  await persist();
+  return true;
+}
+
+export async function localLoadExpressions(): Promise<Expression[]> {
+  const s = await getState();
+  return s.expressions;
+}
+
+export async function localAddExpression(
+  better: string,
+  original = "",
+  explanation = "",
+): Promise<Expression | null> {
+  const s = await getState();
+  const item: Expression = {
+    id: newId(),
+    original,
+    better,
+    why: explanation,
+    sourceFriendId: "",
+    createdAt: nowIso(),
+    status: "learning",
+    mastery: 10,
+    due: 70,
+  };
+  s.expressions = [item, ...s.expressions];
+  await persist();
+  return item;
+}
+
+export async function localPatchExpression(
+  id: string,
+  fields: Record<string, unknown>,
+): Promise<boolean> {
+  const s = await getState();
+  s.expressions = s.expressions.map((e) => (e.id === id ? { ...e, ...(fields as Partial<Expression>) } : e));
+  await persist();
+  return true;
+}
+
+export async function localDeleteExpression(id: string): Promise<boolean> {
+  const s = await getState();
+  s.expressions = s.expressions.filter((e) => e.id !== id);
+  await persist();
+  return true;
+}
+
+/** 记忆提炼：每聊几轮后把关键信息记下来，聊天时作为上下文 */
+export async function localExtractMemory(friendId: string): Promise<void> {
+  const s = await getState();
+  const friend = s.friends.find((f) => f.id === friendId);
+  if (!friend) return;
+  const recent = s.messages.filter((m) => m.friendId === friendId).slice(-8);
+  if (recent.length < 4) return;
+  const transcript = recent.map((m) => `${m.from === "me" ? "User" : friend.name}: ${m.text}`).join("\n");
+  try {
+    const data = await llmJson<{ facts: string[]; episodes: string[] }>(
+      [
+        { role: "system", content: "Extract durable facts about the user. Strict JSON only." },
+        {
+          role: "user",
+          content: `Conversation:\n${transcript}\n\nReturn JSON: {"facts": ["..."], "episodes": ["..."]} (max 3 each, English, short).`,
+        },
+      ],
+      { maxTokens: 400, temperature: 0.4 },
+    );
+    if (!data) return;
+    const prev = s.memories[friendId] ?? { facts: [], episodes: [] };
+    s.memories[friendId] = {
+      facts: [...new Set([...(prev.facts || []), ...(data.facts || [])])].slice(-8),
+      episodes: [...new Set([...(prev.episodes || []), ...(data.episodes || [])])].slice(-8),
+    };
+    await persist();
+  } catch {
+    /* 忽略 */
   }
 }

@@ -155,6 +155,20 @@ const engine = require("./build/local/engine.js");
   console.log("   首句:", sentences[0] && sentences[0].text);
   console.log("   done:", done && done.totalTurns);
 
+  console.log("7) L3：动态 / 评论 / 表达本 / 记忆…");
+  const generated = await engine.localGenerateMoments();
+  const moments = (await engine.localLoadMoments()) || [];
+  console.log("   生成动态:", (generated || []).length, "| 当前动态数:", moments.length);
+  const published = await engine.localPublishMoment("Trying to speak more English every day.", "开心");
+  const commented = published ? await engine.localCommentMoment(published.id, "Love this!") : null;
+  console.log("   发布:", Boolean(published), "| 评论数:", commented ? commented.comments.length : 0);
+  const expr = await engine.localAddExpression("I'm feeling under the weather", "I feel sick", "地道表达");
+  const expressions = (await engine.localLoadExpressions()) || [];
+  console.log("   表达本新增:", Boolean(expr), "| 总数:", expressions.length);
+  await engine.localExtractMemory(req.id);
+  const mems = await engine.localLoadExpressions();
+  console.log("   记忆提炼已触发（聊满 3 轮自动执行）");
+
   const pass =
     requests.length > 0 &&
     theirs.length > 0 &&
@@ -162,7 +176,12 @@ const engine = require("./build/local/engine.js");
     Boolean(reply.audio) &&
     callOk &&
     sentences.length > 0 &&
-    sentences.some((x) => x.audioUrl);
+    sentences.some((x) => x.audioUrl) &&
+    moments.length >= 1 &&
+    Boolean(published) &&
+    Boolean(commented) &&
+    Boolean(expr) &&
+    expressions.length >= 1;
   console.log(`\n结果: ${pass ? "PASS" : "FAIL"}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s）`);
   process.exit(pass ? 0 : 2);
 })().catch((e) => {

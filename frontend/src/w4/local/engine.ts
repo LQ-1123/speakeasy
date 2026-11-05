@@ -15,7 +15,7 @@ import type { Expression, Friend, Message, Moment, Profile } from "../model";
 import { dbGet, dbSet, newId } from "./db";
 import { loadKeys } from "./keys";
 import { llmChat, llmJson } from "./llm";
-import { fishTts, voiceForFriend } from "./tts";
+import { COSY_VOICES, fishTts, voiceById, voiceForFriend } from "./tts";
 import { transcribeBlob } from "./stt";
 
 type LocalState = {
@@ -100,7 +100,7 @@ ${avoidText}\n${genderHint}`;
   };
 }
 
-function toFriend(p: Persona, opts: { request: boolean; greetingAudio?: string }): Friend {
+function toFriend(p: Persona, opts: { request: boolean; greetingAudio?: string; voice?: string }): Friend {
   const id = newId();
   const flagOf = (country: string): string => {
     const c = country.slice(0, 2).toUpperCase();
@@ -136,8 +136,8 @@ function toFriend(p: Persona, opts: { request: boolean; greetingAudio?: string }
     replying: false,
     online: true,
     lastActive: "刚刚",
-    voice: p.fish_reference_id || "",
-    voiceLabel: "默认",
+    voice: opts.voice || p.fish_reference_id || "",
+    voiceLabel: opts.voice ? voiceById(opts.voice)?.label || "默认" : "默认",
     greeting: p.greeting || "",
     greetingZh: "",
     greetingAudio: opts.greetingAudio,
@@ -266,8 +266,10 @@ export async function localSaveProfile(
         const pref: "male" | "female" = i === 0 ? firstGender : firstGender === "male" ? "female" : "male";
         const p = await generatePersona(lang, made.map((f) => f.name), pref);
         if (!p) continue;
-        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
-        const f = toFriend(p, { request: true, greetingAudio: audio?.url });
+        const pool = COSY_VOICES.filter((v) => v.gender === p.gender);
+        const voice = pool[Math.floor(Math.random() * pool.length)]?.id;
+        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voice }) : null;
+        const f = toFriend(p, { request: true, greetingAudio: audio?.url, voice });
         made.push(f);
         state?.requests.push(f);
       }
@@ -281,8 +283,10 @@ export async function localDiscover(language = "en"): Promise<{ friend: Friend; 
   const s = await getState();
   const p = await generatePersona(language, [...s.requests, ...s.friends].map((f) => f.name));
   if (!p) return null;
-  const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voiceForFriend("", p.gender) }) : null;
-  const friend = toFriend(p, { request: true, greetingAudio: audio?.url });
+  const pool = COSY_VOICES.filter((v) => v.gender === p.gender);
+  const voice = pool[Math.floor(Math.random() * pool.length)]?.id;
+  const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voice }) : null;
+  const friend = toFriend(p, { request: true, greetingAudio: audio?.url, voice });
   s.requests.push(friend);
   await persist();
   return { friend, message: p.greeting || "", greeting: p.greeting || "", greetingAudio: audio?.url };
@@ -782,6 +786,11 @@ if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__w4debug = {
     state: async () => { const st = await getState(); return st; },
     friends: async () => (await getState()).requests,
+    ttsTest: async (voice: string) => {
+      const { fishTts } = await import("./tts");
+      const r = await fishTts("Hello, this is a voice test from edge.", { voiceId: voice });
+      return r ? { ok: true, url: r.url, ms: r.durationMs } : { ok: false };
+    },
   };
 }
 
@@ -830,12 +839,18 @@ No markdown, no emoji.`,
 }
 
 /** 手动换好友音色（anna 女 / alex 男），持久化到本地 */
-export async function localSetFriendVoice(friendId: string, voice: "anna" | "alex"): Promise<boolean> {
+export async function localSetFriendVoice(friendId: string, voice: string): Promise<boolean> {
   const st = await getState();
   const idx = st.friends.findIndex((f) => f.id === friendId);
   const target = idx >= 0 ? st.friends[idx] : st.requests.find((f) => f.id === friendId);
   if (!target) return false;
-  const patched = { ...target, voice, voiceLabel: voice === "alex" ? "男声" : "女声", gender: voice === "alex" ? "male" : "female" } as Friend;
+  const meta = voiceById(voice);
+  const patched = {
+    ...target,
+    voice,
+    voiceLabel: meta ? meta.label : voice === "alex" ? "男声" : "女声",
+    gender: meta ? meta.gender : voice === "alex" ? "male" : "female",
+  } as Friend;
   if (idx >= 0) st.friends[idx] = patched;
   else st.requests = st.requests.map((f) => (f.id === friendId ? patched : f));
   await persist();

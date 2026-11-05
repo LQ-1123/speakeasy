@@ -155,7 +155,7 @@ export async function synthesizeVoice(text: string, friendId?: string): Promise<
     const eng = await local();
     const f = friendId ? await eng.localFriendById(friendId) : null;
     const { fishTts } = await import("./local/tts");
-    const r = await fishTts(text, { gender: f?.gender === "male" ? "male" : "female" });
+    const r = await fishTts(text, { gender: f?.gender === "male" ? "male" : "female", voiceId: f?.voice });
     return r?.url ?? null;
   }
   return null;
@@ -230,15 +230,15 @@ export async function callOpening(friendId: string): Promise<string> {
   return "Can you hear me?";
 }
 
-export async function setFriendVoice(friendId: string, voice: "anna" | "alex"): Promise<boolean> {
+export async function setFriendVoice(friendId: string, voice: string): Promise<boolean> {
   if (isLocalMode()) return (await local()).localSetFriendVoice(friendId, voice);
   return false;
 }
 
 /** 试听某个具体音色（本地模式） */
-export async function previewVoice(text: string, voice: "anna" | "alex"): Promise<string | null> {
+export async function previewVoice(text: string, voice: string): Promise<string | null> {
   if (!isLocalMode()) return null;
   const { fishTts } = await import("./local/tts");
-  const r = await fishTts(text, { gender: voice === "alex" ? "male" : "female", voiceId: voice });
+  const r = await fishTts(text, { voiceId: voice });
   return r?.url ?? null;
 }

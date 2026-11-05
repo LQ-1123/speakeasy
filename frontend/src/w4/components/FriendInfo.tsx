@@ -6,6 +6,7 @@ import { Clock, MapPin, Sparkles } from "lucide-react";
 
 import { previewVoice, playVoiceUrl, setFriendVoice as apiSetFriendVoice } from "../apiFacade";
 import { CLOSENESS, languageLabel } from "../format";
+import { COSY_VOICES } from "../local/tts";
 import { isLocalMode } from "../local/keys";
 import type { Friend } from "../model";
 import { useApp } from "../store";
@@ -15,26 +16,24 @@ export function FriendInfo({ friend }: { friend: Friend }) {
   const { expressions, updateFriendVoice, showToast } = useApp();
   const fromThisFriend = expressions.filter((e) => e.sourceFriendId === friend.id).length;
 
-  const switchVoice = async (voice: "anna" | "alex") => {
+  const currentVoice = friend.voice || (friend.gender === "male" ? "alex" : "anna");
+
+  const switchVoice = async (voice: string) => {
+    if (!voice) return;
     const ok = await apiSetFriendVoice(friend.id, voice);
     if (!ok) {
       showToast("切换失败，稍后再试", "error");
       return;
     }
-    updateFriendVoice(friend.id, voice, voice === "alex" ? "男声" : "女声");
-    showToast(voice === "alex" ? "已换成男声" : "已换成女声");
+    const meta = COSY_VOICES.find((v) => v.id === voice);
+    updateFriendVoice(friend.id, voice, meta ? meta.label : "默认");
+    showToast(`已换成 ${meta ? meta.label : voice}`);
   };
 
   const previewCurrent = async () => {
-    const voice: "anna" | "alex" =
-      friend.voice === "alex" || friend.voice === "anna"
-        ? friend.voice
-        : friend.gender === "male"
-          ? "alex"
-          : "anna";
-    const url = await previewVoice("Hi! This is how I sound when we talk.", voice);
+    const url = await previewVoice("Hi! This is how I sound when we talk.", currentVoice);
     if (!url) {
-      showToast("试听失败：检查 SiliconFlow Key", "error");
+      showToast("试听失败：检查网络或 Key", "error");
       return;
     }
     await playVoiceUrl(url);
@@ -103,14 +102,36 @@ export function FriendInfo({ friend }: { friend: Friend }) {
       {isLocalMode() ? (
         <div className="w4-info-section">
           <div className="w4-info-label">TA 的声音</div>
+          <select
+            className="w4-select"
+            value={COSY_VOICES.some((v) => v.id === friend.voice) ? friend.voice : ""}
+            onChange={(e) => void switchVoice(e.target.value)}
+            style={{ marginBottom: 8 }}
+          >
+            {!COSY_VOICES.some((v) => v.id === friend.voice) ? <option value="">当前：默认音色</option> : null}
+            <optgroup label="女声">
+              {COSY_VOICES.filter((v) => v.gender === "female").map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="男声">
+              {COSY_VOICES.filter((v) => v.gender === "male").map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </optgroup>
+          </select>
           <div className="w4-chips">
-            <button className="w4-chip" onClick={() => void switchVoice("anna")}>
-              女声
-            </button>
-            <button className="w4-chip" onClick={() => void switchVoice("alex")}>
-              男声
-            </button>
-            <button className="w4-chip" onClick={() => void switchVoice(Math.random() < 0.5 ? "alex" : "anna")}>
+            <button
+              className="w4-chip"
+              onClick={() => {
+                const v = COSY_VOICES[Math.floor(Math.random() * COSY_VOICES.length)];
+                void switchVoice(v.id);
+              }}
+            >
               随机
             </button>
             <button className="w4-chip" onClick={() => void previewCurrent()}>

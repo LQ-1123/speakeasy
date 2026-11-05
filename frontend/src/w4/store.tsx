@@ -1051,7 +1051,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateFriendVoice = useCallback((friendId: string, voice: string, voiceLabel: string) => {
     setFriends((list) => list.map((f) => (f.id === friendId ? { ...f, voice, voiceLabel } : f)));
     // 本地模式：音色写回本地引擎，聊天 / 通话都立即生效
-    if (isLocalMode() && (voice === "anna" || voice === "alex")) {
+    if (isLocalMode() && voice) {
       void apiSetFriendVoice(friendId, voice);
     }
   }, []);

@@ -528,6 +528,7 @@ export function ChatPane({
             if (!url) return;
             callAudioPlaying.current = true;
             const played = await playVoiceUrl(url);
+            if (!played) showToast("通话语音加载失败", "error");
             const ms = Math.min(15000, 800 + (ev.text || "").length * 75);
             window.setTimeout(() => {
               callAudioPlaying.current = false;

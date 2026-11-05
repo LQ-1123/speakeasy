@@ -150,7 +150,7 @@ export function ttsSampleUrl(text: string, voice: string, friendId?: string): st
 
 /** 本地模式：现场合成语音并返回可播放 URL；服务器模式回落到 /tts/sample */
 export async function synthesizeVoice(text: string, friendId?: string): Promise<string | null> {
-  if (!text.trim()) return null;
+  if (!text.trim()) return server.ttsSampleUrl(text, "", friendId);
   if (isLocalMode()) {
     const eng = await local();
     const f = friendId ? await eng.localFriendById(friendId) : null;

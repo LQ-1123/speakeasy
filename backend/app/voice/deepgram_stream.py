@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import websockets
@@ -37,8 +38,68 @@ class StreamUnavailable(RuntimeError):
     """Deepgram 流式不可用（未配置 key / 连接失败）。"""
 
 
+CONFIG_FILENAME = "deepgram_config.json"
+
+
+def _config_path() -> Path:
+    from app.config import get_settings  # noqa: PLC0415
+
+    return Path(str(get_settings().data_path)) / CONFIG_FILENAME
+
+
+def load_runtime_key() -> str:
+    """从 data/deepgram_config.json 读取 App 里保存的 key。"""
+    try:
+        path = _config_path()
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return str(raw.get("api_key") or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def save_runtime_key(key: str) -> bool:
+    try:
+        path = _config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps({"api_key": key.strip()}, ensure_ascii=False), encoding="utf-8"
+        )
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
+        tmp.replace(path)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _mask(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 10:
+        return "已配置"
+    return f"{key[:6]}…{key[-4:]}"
+
+
 def deepgram_key() -> str:
-    return (os.environ.get("DEEPGRAM_API_KEY") or "").strip()
+    """优先级：App 设置里保存的 key > 环境变量。"""
+    return load_runtime_key() or (os.environ.get("DEEPGRAM_API_KEY") or "").strip()
+
+
+def deepgram_status() -> dict:
+    runtime = load_runtime_key()
+    env = (os.environ.get("DEEPGRAM_API_KEY") or "").strip()
+    key = runtime or env
+    return {
+        "available": bool(key),
+        "configured": bool(key),
+        "source": "app" if runtime else ("env" if env else "none"),
+        "key_masked": _mask(key),
+    }
 
 
 def language_code(lang: str | None) -> str:

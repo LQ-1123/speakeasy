@@ -848,3 +848,42 @@ export async function callTurnFromText(
   }
   return true;
 }
+
+/* ------------------------------------------------------- Deepgram 流式识别 */
+
+export type DeepgramSettings = {
+  available: boolean;
+  configured: boolean;
+  source: string;
+  keyMasked: string;
+};
+
+function mapDeepgram(raw: Record<string, any> | undefined): DeepgramSettings | null {
+  if (!raw) return null;
+  return {
+    available: Boolean(raw.available),
+    configured: Boolean(raw.configured),
+    source: String(raw.source ?? ""),
+    keyMasked: String(raw.key_masked ?? ""),
+  };
+}
+
+export async function loadDeepgramSettings(): Promise<DeepgramSettings | null> {
+  const r = await getJson<{ deepgram?: Record<string, any> }>(`${BASE}/settings/deepgram`);
+  return mapDeepgram(r?.deepgram);
+}
+
+export async function saveDeepgramKey(apiKey: string): Promise<DeepgramSettings | null> {
+  try {
+    const res = await fetch(`${BASE}/settings/deepgram`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { deepgram?: Record<string, any> };
+    return mapDeepgram(j?.deepgram);
+  } catch {
+    return null;
+  }
+}

@@ -18,7 +18,15 @@ import {
   Volume2,
 } from "lucide-react";
 
-import { saveLlm, saveStt, saveTts, ttsSampleUrl } from "../api";
+import {
+  loadDeepgramSettings,
+  saveDeepgramKey,
+  saveLlm,
+  saveStt,
+  saveTts,
+  ttsSampleUrl,
+  type DeepgramSettings,
+} from "../api";
 import { playMessageSound, playRequestSound } from "../notify";
 
 import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
@@ -399,6 +407,30 @@ function SttSection({
 }) {
   const [sttKey, setSttKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
+  const [dgKey, setDgKey] = useState("");
+  const [savingDg, setSavingDg] = useState(false);
+  const [dg, setDg] = useState<DeepgramSettings | null>(null);
+
+  useEffect(() => {
+    void loadDeepgramSettings().then((v) => setDg(v));
+  }, []);
+
+  const saveDeepgram = async () => {
+    if (!dgKey.trim()) {
+      toast("先粘贴 Deepgram Key", "error");
+      return;
+    }
+    setSavingDg(true);
+    const res = await saveDeepgramKey(dgKey.trim());
+    setSavingDg(false);
+    if (!res) {
+      toast("保存失败，请检查 Key", "error");
+      return;
+    }
+    setDg(res);
+    setDgKey("");
+    toast("流式识别密钥已保存", "success");
+  };
 
   const saveKey = async () => {
     if (!sttKey.trim()) {
@@ -454,6 +486,28 @@ function SttSection({
           </div>
         </div>
       ) : null}
+
+      <div className="w4-field">
+        <div className="w4-field-label">流式识别（通话用）</div>
+        <input
+          className="w4-input"
+          type="password"
+          value={dgKey}
+          onChange={(e) => setDgKey(e.target.value)}
+          placeholder={dg?.configured ? dg.keyMasked : "Deepgram API Key"}
+        />
+        <div className="w4-field-hint">
+          通话时边说边识别，响应更快。不填写则自动回退到上面的云端识别。
+          {dg?.configured
+            ? `（当前：${dg.source === "app" ? "已在 App 里配置" : "服务器环境变量"}）`
+            : ""}
+        </div>
+        <div className="w4-field-hint" style={{ marginTop: 8 }}>
+          <button className="w4-btn" onClick={() => void saveDeepgram()} disabled={savingDg}>
+            {savingDg ? "保存中…" : "保存 Key"}
+          </button>
+        </div>
+      </div>
 
       <div className="w4-field">
         <div className="w4-field-label">识别语言</div>

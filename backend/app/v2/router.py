@@ -1221,9 +1221,34 @@ async def stt_stream(websocket: WebSocket, language: str = "en") -> None:
 
 @router.get("/stt/stream/health")
 async def stt_stream_health() -> dict:
-    from app.voice.deepgram_stream import deepgram_key
+    from app.voice.deepgram_stream import deepgram_status
 
-    return {"available": bool(deepgram_key())}
+    return {"available": deepgram_status()["available"]}
+
+
+class DeepgramKeyBody(BaseModel):
+    api_key: str = ""
+
+
+@router.get("/settings/deepgram")
+async def get_deepgram_settings() -> dict:
+    from app.voice.deepgram_stream import deepgram_status
+
+    return {"deepgram": deepgram_status()}
+
+
+@router.post("/settings/deepgram")
+async def save_deepgram_settings(body: DeepgramKeyBody) -> dict:
+    """保存 Deepgram 流式识别 Key（App 设置页）——仍由服务器保管。"""
+    _key_edit_guard()
+    from app.voice.deepgram_stream import deepgram_status, save_runtime_key
+
+    key = (body.api_key or "").strip()
+    if len(key) < 16:
+        raise HTTPException(status_code=422, detail="Key 格式不正确")
+    if not save_runtime_key(key):
+        raise HTTPException(status_code=500, detail="保存失败")
+    return {"ok": True, "deepgram": deepgram_status()}
 
 
 @router.post("/chat/{friend_id}/call/turn-text")

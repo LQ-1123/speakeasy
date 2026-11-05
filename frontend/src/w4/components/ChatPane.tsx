@@ -612,6 +612,10 @@ export function ChatPane({
       v.rec = rec;
       rec.onstop = () => {
         if (!vadRef.current) return;
+        if (suppressUploadRef.current) {
+          suppressUploadRef.current = false;
+          return;
+        }
         const ms = Date.now() - v.startedAt;
         const blob = new Blob(v.chunks, { type: rec.mimeType || "audio/webm" });
         v.chunks = [];
@@ -644,8 +648,17 @@ export function ChatPane({
           const text = (await waitSttFinal(2200)).trim();
           setCallTalking(false);
           if (text) {
-            void sendCallText(text, total);
-            return;
+            const ok = await sendCallText(text, total);
+            if (ok) {
+              try {
+                suppressUploadRef.current = true;
+                if (rec && rec.state !== "inactive") rec.stop();
+              } catch {
+                suppressUploadRef.current = false;
+              }
+              return;
+            }
+            setCallUserZh("流式回复失败，改用整段识别…");
           }
         }
         try {
@@ -681,6 +694,7 @@ export function ChatPane({
   const sttReadyRef = useRef(false);
   const sttPartialRef = useRef("");
   const sttFinalRef = useRef<((t: string) => void) | null>(null);
+  const suppressUploadRef = useRef(false);
 
   const stopSttStream = () => {
     sttReadyRef.current = false;
@@ -799,12 +813,14 @@ export function ChatPane({
   };
 
   /** 流式 STT 拿到文本后，直接请求通话回复（不再上传音频） */
-  const sendCallText = async (text: string, ms: number) => {
-    if (!friend) return;
+  const sendCallText = async (text: string, ms: number): Promise<boolean> => {
+    if (!friend) return false;
     setCallWaiting(true);
     setCallFriendText("");
     setCallFriendZh("");
-    const ok = await callTurnFromText(friend.id, text, ms, (ev) => {
+    let ok = false;
+    try {
+      ok = await callTurnFromText(friend.id, text, ms, (ev) => {
       if (ev.type === "transcript") {
         setCallUserText(ev.text);
         if (ev.text) {
@@ -854,15 +870,21 @@ export function ChatPane({
         setCallWaiting(false);
         showToast(ev.message || "这一轮没接上", "error");
       }
-    });
+      });
+    } catch (err) {
+      ok = false;
+      setCallUserZh("流式回复请求失败：" + String((err as Error)?.message ?? err));
+    }
     if (!ok) {
       setCallWaiting(false);
-      showToast("通话连接失败", "error");
+      showToast("流式回复失败，已回退整段上传", "error");
+      return false;
     }
     if (!callAudioQueue.current.length && !callAudioPlaying.current) {
       setCallWaiting(false);
       window.setTimeout(() => resumeCallListening(), 350);
     }
+    return true;
   };
 
   const startVad = async () => {

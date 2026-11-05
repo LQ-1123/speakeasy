@@ -16,7 +16,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -1106,6 +1115,145 @@ async def call_turn_stream(
             raise
         except Exception as exc:  # noqa: BLE001 - 流内错误转事件，避免连接直接断
             log.exception("通话流式回合失败: %s", exc)
+            yield json.dumps(
+                {"type": "error", "message": f"通话生成失败：{exc}"}, ensure_ascii=False
+            ) + "\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+
+class CallTurnTextBody(BaseModel):
+    """流式 STT 已拿到文本时，直接请求通话回复。"""
+
+    text: str = ""
+    duration_ms: int = 0
+
+
+@router.websocket("/stt/stream")
+async def stt_stream(websocket: WebSocket, language: str = "en") -> None:
+    """手机 PCM 分片 → Deepgram 流式识别 → partial/final 文本。
+
+    客户端协议：
+    - 二进制帧：PCM16LE / 16kHz / 单声道
+    - 文本帧：{"type":"stop"} 表示本句说完，服务端 Finalize 并回 {"type":"done","text":...}
+    """
+    from app.voice.deepgram_stream import (
+        DeepgramStreamer,
+        StreamUnavailable,
+        deepgram_key,
+        language_code,
+    )
+
+    await websocket.accept()
+    key = deepgram_key()
+    if not key:
+        await websocket.send_json({"type": "error", "message": "stream-stt-not-configured"})
+        await websocket.close()
+        return
+    streamer = DeepgramStreamer(key, language_code(language))
+    try:
+        await streamer.connect()
+    except StreamUnavailable as exc:
+        await websocket.send_json({"type": "error", "message": f"connect:{exc}"})
+        await websocket.close()
+        return
+
+    final_evt = asyncio.Event()
+
+    async def pump() -> None:
+        try:
+            async for ev in streamer.events():
+                try:
+                    await websocket.send_json(ev)
+                except Exception:  # noqa: BLE001
+                    break
+                if ev.get("type") == "final":
+                    final_evt.set()
+        except Exception:  # noqa: BLE001 - 上游断开
+            pass
+        finally:
+            final_evt.set()
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            chunk = msg.get("bytes")
+            if chunk:
+                await streamer.send(chunk)
+                continue
+            raw = msg.get("text")
+            if not raw:
+                continue
+            try:
+                cmd = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            if cmd.get("type") == "stop":
+                final_evt.clear()
+                await streamer.finalize()
+                try:
+                    await asyncio.wait_for(final_evt.wait(), timeout=1.2)
+                except asyncio.TimeoutError:
+                    pass
+                try:
+                    await websocket.send_json({"type": "done", "text": streamer.final_text})
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+            if cmd.get("type") == "close":
+                break
+    finally:
+        task.cancel()
+        await streamer.close()
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.get("/stt/stream/health")
+async def stt_stream_health() -> dict:
+    from app.voice.deepgram_stream import deepgram_key
+
+    return {"available": bool(deepgram_key())}
+
+
+@router.post("/chat/{friend_id}/call/turn-text")
+async def call_turn_text(
+    request: Request, friend_id: str, body: CallTurnTextBody
+) -> StreamingResponse:
+    """通话回合（文本路径）：流式 STT 已经给出文本，直接生成回复。"""
+    services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+
+    async def gen():
+        try:
+            async for event in services.chat.handle_call_turn_stream(
+                friend_id,
+                b"",
+                "stream.webm",
+                int(body.duration_ms or 0),
+                transcript=(body.text or "").strip(),
+                stt_meta={"backend": "deepgram-stream", "latency_ms": 0.0},
+            ):
+                if event.get("type") == "done":
+                    event["user_message"] = _message_public(event.get("user_message"))
+                    event["friend_message"] = _message_public(event.get("friend_message"))
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.exception("通话文本回合失败: %s", exc)
             yield json.dumps(
                 {"type": "error", "message": f"通话生成失败：{exc}"}, ensure_ascii=False
             ) + "\n"

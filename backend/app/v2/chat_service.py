@@ -638,19 +638,20 @@ class ChatService:
             yield {"type": "error", "message": "音频服务未初始化"}
             return
 
-        try:
-            decoded = await asyncio.to_thread(
-                self.audio.decode_upload, audio_bytes, filename
-            )
-        except ValueError as exc:
-            yield {"type": "error", "message": str(exc)}
-            return
-
         lang = _language_of(friend)
-        stt_language = None if lang == "en" else lang
-        transcript, stt_meta = await self._transcribe(
-            decoded["pcm16"], language=stt_language, prefer_local=True, fast=True
-        )
+        if transcript is None:
+            try:
+                decoded = await asyncio.to_thread(
+                    self.audio.decode_upload, audio_bytes, filename
+                )
+            except ValueError as exc:
+                yield {"type": "error", "message": str(exc)}
+                return
+            stt_language = None if lang == "en" else lang
+            transcript, stt_meta = await self._transcribe(
+                decoded["pcm16"], language=stt_language, prefer_local=True, fast=True
+            )
+        stt_meta = stt_meta or {"backend": "deepgram-stream", "latency_ms": 0.0}
         if not transcript:
             transcript = "（语音没有识别清楚，可以再说一次吗？）"
         yield {"type": "transcript", "text": transcript, "stt": stt_meta}

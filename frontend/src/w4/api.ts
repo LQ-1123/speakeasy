@@ -799,3 +799,52 @@ export async function uploadMomentPhoto(
     return false;
   }
 }
+
+/** 通话回合（文本路径）：流式 STT 已拿到文本，直接让后端生成回复（NDJSON 流） */
+export async function callTurnFromText(
+  friendId: string,
+  text: string,
+  durationMs: number,
+  onEvent: (e: CallTurnEvent) => void,
+): Promise<boolean> {
+  const resp = await fetch(`${BASE}/chat/${friendId}/call/turn-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, duration_ms: Math.round(durationMs) }),
+  });
+  if (!resp.ok || !resp.body) {
+    console.warn("[call] turn-text 失败", resp.status);
+    return false;
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl = buffer.indexOf("\n");
+    while (nl >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf("\n");
+      if (!line) continue;
+      try {
+        const raw = JSON.parse(line) as Record<string, any>;
+        if (raw.type === "transcript") onEvent({ type: "transcript", text: String(raw.text ?? "") });
+        else if (raw.type === "sentence")
+          onEvent({
+            type: "sentence",
+            index: Number(raw.index ?? 0),
+            text: String(raw.text ?? ""),
+            audioUrl: String(raw.audio_url ?? ""),
+          });
+        else if (raw.type === "done") onEvent({ type: "done", totalTurns: Number(raw.total_turns ?? 0) });
+        else if (raw.type === "error") onEvent({ type: "error", message: String(raw.message ?? "") });
+      } catch {
+        /* 忽略半行 */
+      }
+    }
+  }
+  return true;
+}

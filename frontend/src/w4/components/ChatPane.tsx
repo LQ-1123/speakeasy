@@ -43,6 +43,7 @@ import {
   synthesizeVoice,
   translate as apiTranslate,
   ttsSampleUrl,
+  callTurnFromText,
 } from "../apiFacade";
 import { useApp } from "../store";
 import { playMessageSound } from "../notify";
@@ -584,7 +585,7 @@ export function ChatPane({
   };
 
   /** VAD 主循环：说话开始录音，停顿 ~0.85s 自动发送 */
-  function vadTick() {
+  async function vadTick() {
     const v = vadRef.current;
     if (!v) return;
     const buf: Float32Array<ArrayBuffer> = new Float32Array(
@@ -632,6 +633,21 @@ export function ChatPane({
       if (silentFor >= 420 || total >= 15000) {
         const rec = v.rec;
         v.rec = null;
+        if (sttReadyRef.current && sttWsRef.current?.readyState === 1) {
+          sttPartialRef.current = "";
+          try {
+            sttNodeRef.current?.port.postMessage({ cmd: "flush" });
+            sttWsRef.current.send(JSON.stringify({ type: "stop" }));
+          } catch {
+            /* ignore */
+          }
+          const text = (await waitSttFinal(2200)).trim();
+          setCallTalking(false);
+          if (text) {
+            void sendCallText(text, total);
+            return;
+          }
+        }
         try {
           if (rec && rec.state !== "inactive") rec.stop();
         } catch {
@@ -659,6 +675,196 @@ export function ChatPane({
     v.timer = window.setTimeout(vadTick, 120);
   };
 
+  /* ---------------- Deepgram 流式 STT（通话说一句就识别） ---------------- */
+  const sttWsRef = useRef<WebSocket | null>(null);
+  const sttNodeRef = useRef<AudioWorkletNode | null>(null);
+  const sttReadyRef = useRef(false);
+  const sttPartialRef = useRef("");
+  const sttFinalRef = useRef<((t: string) => void) | null>(null);
+
+  const stopSttStream = () => {
+    sttReadyRef.current = false;
+    try {
+      sttNodeRef.current?.port.postMessage({ cmd: "stop" });
+      sttNodeRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    sttNodeRef.current = null;
+    const ws = sttWsRef.current;
+    sttWsRef.current = null;
+    if (ws) {
+      try {
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: "close" }));
+      } catch {
+        /* ignore */
+      }
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    sttFinalRef.current?.(sttPartialRef.current);
+    sttFinalRef.current = null;
+  };
+
+  const waitSttFinal = (ms: number) =>
+    new Promise<string>((resolve) => {
+      let done = false;
+      const finish = (t: string) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        sttFinalRef.current = null;
+        resolve(t);
+      };
+      const timer = window.setTimeout(() => finish(sttPartialRef.current), ms);
+      sttFinalRef.current = finish;
+    });
+
+  const startSttStream = async (ctx: AudioContext, stream: MediaStream) => {
+    try {
+      const base = API_ORIGIN || window.location.origin;
+      const wsUrl = `${base.replace(/^http/, "ws")}/api/v2/stt/stream?language=en`;
+      const ws = new WebSocket(wsUrl);
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error("ws-timeout")), 3500);
+        ws.onopen = () => {
+          window.clearTimeout(timer);
+          resolve();
+        };
+        ws.onerror = () => {
+          window.clearTimeout(timer);
+          reject(new Error("ws-error"));
+        };
+      });
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(String(e.data)) as {
+            type?: string;
+            text?: string;
+          };
+          if (data.type === "partial" && data.text) {
+            sttPartialRef.current = data.text;
+            setCallUserText(data.text);
+          } else if (data.type === "final" && data.text) {
+            sttPartialRef.current = data.text;
+            setCallUserText(data.text);
+          } else if (data.type === "done") {
+            sttFinalRef.current?.(data.text || sttPartialRef.current);
+          } else if (data.type === "error") {
+            sttReadyRef.current = false;
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      await ctx.audioWorklet.addModule("/worklets/pcm-processor.js");
+      const node = new AudioWorkletNode(ctx, "pcm-processor", {
+        processorOptions: { inputRate: ctx.sampleRate },
+      });
+      const src = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      src.connect(node);
+      node.connect(sink);
+      sink.connect(ctx.destination);
+      node.port.onmessage = (ev: MessageEvent) => {
+        const pcm = (ev.data as { pcm?: ArrayBuffer }).pcm;
+        if (!pcm) return;
+        const sock = sttWsRef.current;
+        if (
+          sock &&
+          sock.readyState === 1 &&
+          callListeningRef.current &&
+          !callMutedRef.current
+        ) {
+          sock.send(pcm);
+        }
+      };
+      node.port.postMessage({ cmd: "start" });
+      sttNodeRef.current = node;
+      sttWsRef.current = ws;
+      sttReadyRef.current = true;
+    } catch {
+      sttReadyRef.current = false;
+      try {
+        sttWsRef.current?.close();
+      } catch {
+        /* ignore */
+      }
+      sttWsRef.current = null;
+    }
+  };
+
+  /** 流式 STT 拿到文本后，直接请求通话回复（不再上传音频） */
+  const sendCallText = async (text: string, ms: number) => {
+    if (!friend) return;
+    setCallWaiting(true);
+    setCallFriendText("");
+    setCallFriendZh("");
+    const ok = await callTurnFromText(friend.id, text, ms, (ev) => {
+      if (ev.type === "transcript") {
+        setCallUserText(ev.text);
+        if (ev.text) {
+          void apiTranslate(ev.text, friend.id).then((zh) => {
+            if (zh) setCallUserZh(zh);
+          });
+        }
+      } else if (ev.type === "sentence") {
+        setCallFriendText((t) => (t ? t + " " : "") + ev.text);
+        void apiTranslate(ev.text, friend.id).then((zh) => {
+          if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
+        });
+        setCallFriendSpeaking(true);
+        void (async () => {
+          let url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
+          if (!url) return;
+          if (!url.startsWith("http")) {
+            url = `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
+          }
+          callAudioPlaying.current = true;
+          const nat = (window as unknown as {
+            AndroidTone?: { playUrl?: (u: string) => void };
+          }).AndroidTone;
+          let played = false;
+          if (nat?.playUrl) {
+            nat.playUrl(url);
+            played = true;
+          } else {
+            played = await playVoiceUrl(url);
+          }
+          if (!played) showToast("通话语音加载失败", "error");
+          const playMs = Math.min(15000, 800 + (ev.text || "").length * 75);
+          window.setTimeout(() => {
+            callAudioPlaying.current = false;
+            if (played) resumeCallListening();
+          }, played ? playMs : 200);
+        })();
+      } else if (ev.type === "done") {
+        setCallWaiting(false);
+        setCallTurns((n) => n + 1);
+        window.setTimeout(() => {
+          if (callAudioPlaying.current || callAudioQueue.current.length) return;
+          setCallFriendSpeaking(false);
+          resumeCallListening();
+        }, 1200);
+      } else if (ev.type === "error") {
+        setCallWaiting(false);
+        showToast(ev.message || "这一轮没接上", "error");
+      }
+    });
+    if (!ok) {
+      setCallWaiting(false);
+      showToast("通话连接失败", "error");
+    }
+    if (!callAudioQueue.current.length && !callAudioPlaying.current) {
+      setCallWaiting(false);
+      window.setTimeout(() => resumeCallListening(), 350);
+    }
+  };
+
   const startVad = async () => {
     if (vadRef.current || callMutedRef.current) return;
     try {
@@ -668,6 +874,7 @@ export function ChatPane({
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
       source.connect(analyser);
+      void startSttStream(ctx, stream);
       vadRef.current = {
         stream,
         ctx,
@@ -687,6 +894,7 @@ export function ChatPane({
   };
 
   const stopVad = () => {
+    stopSttStream();
     const v = vadRef.current;
     vadRef.current = null;
     callListeningRef.current = false;

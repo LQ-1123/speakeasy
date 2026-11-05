@@ -161,6 +161,16 @@ export async function synthesizeVoice(text: string, friendId?: string): Promise<
   return null;
 }
 
+export async function callTurnFromText(
+  friendId: string,
+  text: string,
+  durationMs: number,
+  onEvent: (e: import("./api").CallTurnEvent) => void,
+): Promise<boolean> {
+  if (isLocalMode()) return server.callTurnFromText(friendId, text, durationMs, onEvent);
+  return server.callTurnFromText(friendId, text, durationMs, onEvent);
+}
+
 export async function callTurnStream(
   friendId: string,
   blob: Blob,

@@ -769,3 +769,11 @@ export async function localWipeData(): Promise<boolean> {
     return false;
   }
 }
+
+// 调试钩子（仅本地模式）：方便在浏览器控制台检查本地状态
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__w4debug = {
+    state: async () => { const st = await getState(); return st; },
+    friends: async () => (await getState()).requests,
+  };
+}

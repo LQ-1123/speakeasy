@@ -53,6 +53,7 @@ import {
   loadFriendList as apiLoadFriendList,
 } from "./apiFacade";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
+import { isLocalMode } from "./local/keys";
 
 export interface Settings {
   llm: {
@@ -453,15 +454,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setFriends(snap.friends);
       setRequests(snap.requests);
     };
-    const timer = window.setInterval(() => void refresh(), 12_000);
+    const timer = window.setInterval(() => void refresh(), isLocalMode() ? 2_500 : 12_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
+    const onKick = () => void refresh();
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("speakeasy:refresh", onKick);
     return () => {
       stopped = true;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("speakeasy:refresh", onKick);
     };
   }, []);
   const toastTimer = useRef<number | null>(null);

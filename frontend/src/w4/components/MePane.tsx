@@ -148,7 +148,18 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
             setEditOpen(false);
             void (async () => {
               const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday);
-              if (!ok) showToast("资料没保存成功，稍后再试");
+              if (!ok) {
+        showToast("资料没保存成功，稍后再试");
+        return;
+      }
+      showToast("正在按你的资料匹配语伴，约 20 秒…");
+      window.dispatchEvent(new Event("speakeasy:refresh"));
+      let tries = 0;
+      const timer = window.setInterval(() => {
+        window.dispatchEvent(new Event("speakeasy:refresh"));
+        tries += 1;
+        if (tries >= 8) window.clearInterval(timer);
+      }, 4_000);
             })();
           }}
         />

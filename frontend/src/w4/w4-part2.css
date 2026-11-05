@@ -1568,3 +1568,129 @@
   border-radius: 6px;
   font-size: 13px;
 }
+
+/* ===== 电脑输入框：录音行（X / 转文字··· / ↑） ===== */
+.w4-root .w4-cd {
+  position: relative;
+}
+.w4-root .w4-cd-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.w4-root .w4-cd-voice-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid #b9b9b9;
+  background: transparent;
+  color: #5c5c5c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.w4-root .w4-cd-voice-btn:hover {
+  border-color: #07c160;
+  color: #07c160;
+}
+.w4-root .w4-cd-voice-btn.is-on {
+  border-color: #07c160;
+  color: #07c160;
+  background: #eefaf3;
+}
+.w4-root .w4-cd.is-recording .w4-cd-input,
+.w4-root .w4-cd.is-recording .w4-cd-bar {
+  position: absolute;
+  opacity: 0;
+  height: 1px;
+  width: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.w4-root .w4-cd-record {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0 2px;
+}
+.w4-root .w4-cd-rec-x {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--w-surface-2, #f2f2f2);
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.w4-root .w4-cd-rec-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 17px;
+  background: #ececec;
+  color: #07c160;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 0;
+}
+.w4-root .w4-cd-rec-pill.is-text {
+  background: #e7f8ee;
+}
+.w4-root .w4-cd-rec-word {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.w4-root .w4-cd-rec-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.w4-root .w4-cd-rec-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #07c160;
+  animation: w4-dot 1s infinite ease-in-out;
+}
+.w4-root .w4-cd-rec-dots i:nth-child(2) { animation-delay: 0.1s; }
+.w4-root .w4-cd-rec-dots i:nth-child(3) { animation-delay: 0.2s; }
+.w4-root .w4-cd-rec-dots i:nth-child(4) { animation-delay: 0.3s; }
+.w4-root .w4-cd-rec-dots i:nth-child(5) { animation-delay: 0.4s; }
+.w4-root .w4-cd-rec-dots i:nth-child(6) { animation-delay: 0.5s; }
+@keyframes w4-dot {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+.w4-root .w4-cd-rec-time {
+  font-size: 12px;
+  color: #8a8a8a;
+  min-width: 20px;
+  text-align: right;
+}
+.w4-root .w4-cd-rec-send {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: #07c160;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.w4-root .w4-cd-rec-send:hover {
+  background: #06ad56;
+}

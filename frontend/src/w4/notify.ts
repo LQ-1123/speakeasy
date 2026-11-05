@@ -1,3 +1,9 @@
+type NativeTone = { ding?: () => void; dong?: () => void };
+
+function nativeTone(): NativeTone | undefined {
+  return (window as unknown as { AndroidTone?: NativeTone }).AndroidTone;
+}
+
 /** 提示音：用 WebAudio 现场合成，不依赖音频文件（APK 内也能响）。 */
 
 let ctx: AudioContext | null = null;
@@ -39,10 +45,20 @@ function tone(freqs: number[], duration = 0.12, gap = 0.09, volume = 0.05): void
 
 /** 新消息：一声「叮」 */
 export function playMessageSound(): void {
+  const nat = nativeTone();
+  if (nat?.ding) {
+    nat.ding();
+    return;
+  }
   tone([880], 0.11, 0, 0.05);
 }
 
 /** 新好友申请：两声上行 */
 export function playRequestSound(): void {
+  const nat = nativeTone();
+  if (nat?.dong) {
+    nat.dong();
+    return;
+  }
   tone([660, 990], 0.11, 0.1, 0.06);
 }

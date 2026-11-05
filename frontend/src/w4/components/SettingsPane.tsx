@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { saveLlm, saveStt, saveTts, ttsSampleUrl } from "../api";
+import { playMessageSound, playRequestSound } from "../notify";
 
 import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
 import { exportLocalData, importLocalData, playVoiceUrl, synthesizeVoice, wipeLocalData } from "../apiFacade";
@@ -509,6 +510,16 @@ function NotifySection({
           on={settings.notify.practice}
           onChange={(v) => update({ notify: { ...settings.notify, practice: v } })}
         />
+      </div>
+      <div className="w4-settings-row">
+        <div>
+          <div className="w4-settings-row-title">提示音</div>
+          <div className="w4-settings-row-desc">试听新消息和新好友申请的提示音。</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="w4-btn" onClick={() => playMessageSound()}>消息</button>
+          <button className="w4-btn" onClick={() => playRequestSound()}>新好友</button>
+        </div>
       </div>
     </section>
   );

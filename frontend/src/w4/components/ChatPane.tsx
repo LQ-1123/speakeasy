@@ -45,6 +45,7 @@ import {
   ttsSampleUrl,
 } from "../apiFacade";
 import { useApp } from "../store";
+import { playMessageSound } from "../notify";
 import { Avatar, Confirm, Dialog, Icon, Lightbox, VoiceBar } from "../ui";
 import { FriendInfo } from "./FriendInfo";
 
@@ -117,6 +118,21 @@ export function ChatPane({
   const totalUnread = friends.reduce((n, f) => n + (f.unread || 0), 0);
   const msgs = messagesOf(friendId);
   const isTyping = typing[friendId];
+
+  /* 收到好友新消息时播放提示音 */
+  const lastFriendMsgId = useRef("");
+  useEffect(() => {
+    const last = [...msgs].reverse().find((m) => m.from === "friend");
+    if (!last) return;
+    if (!lastFriendMsgId.current) {
+      lastFriendMsgId.current = last.id;
+      return;
+    }
+    if (last.id !== lastFriendMsgId.current) {
+      lastFriendMsgId.current = last.id;
+      playMessageSound();
+    }
+  }, [msgs]);
 
   const [draft, setDraft] = useState("");
   const [voiceMode, setVoiceMode] = useState(false);

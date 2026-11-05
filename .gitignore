@@ -61,3 +61,8 @@ deliverables/
 # 本地端到端测试编译产物
 scripts/local-e2e/build/
 scripts/local-e2e/*.log
+
+# 临时打包/测试产物
+static.zip
+sounds/dg_test*
+sounds/turn_body.json

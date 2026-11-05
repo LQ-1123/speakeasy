@@ -15,6 +15,112 @@
 >
 > 下面 1.0 的实时语音 / 本地克隆 / GPU 说明仍然有效（`/classic` 页面与 `/ws` 通道保留）。
 
+---
+
+## 本地运行（在另一台电脑上跑前后端）
+
+克隆仓库后，可以完全在本机运行前端 + 后端，不依赖任何远程服务器。首次启动是全新数据（新手引导 → 设置里填 Key → 开始使用）。
+
+### 环境要求
+
+| 项 | 要求 |
+|---|---|
+| Python | **3.11 / 3.12**（不要 3.14） |
+| Node.js | 18+（推荐 20） |
+| ffmpeg | 可选，建议安装（解码 webm 语音更稳） |
+| 网络 | DeepSeek / SiliconFlow 可直连；**Fish Audio、Deepgram 在国内需要代理** |
+
+### 方式 A：一个进程同时跑前后端（推荐，最简单）
+
+前端先构建进后端静态目录，之后只启动后端：
+
+```bash
+git clone https://github.com/LQ-1123/speakeasy.git
+cd speakeasy
+
+# 1) 后端依赖（cloud-only，不装 torch，约 200MB）
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r backend/requirements-cloud.txt
+
+# 2) 前端构建（产物写入 backend/app/static/app）
+cd frontend
+npm install
+npm run build:backend
+cd ..
+
+# 3) 启动（Windows / macOS / Linux 通用）
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+浏览器打开 <http://127.0.0.1:8000> 即可。前后端、数据库、音频、Key 全部在**本机**：
+
+```
+data/                       运行时数据（数据库 / 音频 / 配置 / 记忆）
+data/llm_config.json        LLM 配置
+data/tts_config.json        TTS（Fish）配置
+data/stt_config.json        云端识别（SiliconFlow）配置
+data/deepgram_config.json   流式识别（Deepgram）配置
+```
+
+### 方式 B：开发模式（前后端分开，改代码即时生效）
+
+```bash
+# 终端 1：后端
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+
+# 终端 2：前端 dev server
+cd frontend
+# Windows: set NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
+# macOS/Linux: export NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
+npm run dev
+```
+
+打开 <http://localhost:3000>。需要在 `.env` 里允许跨域：
+
+```ini
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000
+```
+
+### 首次使用要填的 Key（设置页）
+
+| 位置 | 用途 |
+|---|---|
+| 设置 → 对话模型 | DeepSeek API Key（`https://api.deepseek.com`） |
+| 设置 → 声音 | Fish Audio Key（自然音色） |
+| 设置 → 语音识别 → 云端密钥 | 硅基流动 SiliconFlow Key（SenseVoiceSmall，兜底识别） |
+| 设置 → 语音识别 → 流式识别 | Deepgram API Key（通话边说边识别，延迟更低） |
+
+> 不填 Fish / Deepgram 也能跑，会自动降级（系统提示音 / 整段识别），但通话体验会变差。
+
+### 需要代理时
+
+Fish Audio 与 Deepgram 在部分网络环境需要代理（DeepSeek / SiliconFlow 直连）：
+
+```bash
+# Windows CMD
+set HTTPS_PROXY=http://127.0.0.1:7890
+set HTTP_PROXY=http://127.0.0.1:7890
+set NO_PROXY=api.deepseek.com,api.siliconflow.cn,127.0.0.1,localhost
+
+# macOS/Linux
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+export NO_PROXY=api.deepseek.com,api.siliconflow.cn,127.0.0.1,localhost
+```
+
+然后再启动后端。
+
+### 常见问题
+
+1. **不要提交 `.env` 和 `data/`**：密钥与个人数据都在这两处（`.gitignore` 已排除）。
+2. **每台机器数据独立**：想迁移就复制整个 `data/` 目录。
+3. **改了前端要重新构建**：`cd frontend && npm run build:backend`，否则页面还是旧版本。
+4. **端口冲突**：换 `--port` 时，方式 B 的 `NEXT_PUBLIC_API_BASE` 要同步改。
+5. **Python 版本**：3.14 与部分依赖不兼容，请用 3.11/3.12。
+
+
 > 本地语音栈（Silero-VAD + faster-whisper + CosyVoice2 / F5-TTS）+ 云端 LLM 的实时多口音英语对话练习。
 
 不是又一个"AI 聊天框"。SpeakEasy 要解决的是**哑巴英语**的核心困境：

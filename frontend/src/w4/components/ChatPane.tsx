@@ -727,6 +727,7 @@ export function ChatPane({
   };
 
   const startCall = async () => {
+    (window as unknown as { AndroidTone?: { ding?: () => void } }).AndroidTone?.ding?.();
     setCalling(true);
     setCallTurns(0);
     setCallUserText("");
@@ -754,6 +755,7 @@ export function ChatPane({
   };
 
   const endCall = (seconds: number) => {
+    (window as unknown as { AndroidTone?: { stop?: () => void } }).AndroidTone?.stop?.();
     stopVad();
     setCalling(false);
     callAudioQueue.current = [];

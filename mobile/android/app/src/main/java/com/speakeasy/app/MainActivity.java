@@ -9,10 +9,19 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private WebView wv;
+
+    /* 通话语音串行播放：避免多句同时出声（第一轮 TTS 很快时尤其明显） */
+    private final Deque<String> callQueue = new ArrayDeque<>();
+    private MediaPlayer callPlayer;
+    private boolean callPlaying;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -20,11 +29,11 @@ public class MainActivity extends BridgeActivity {
         try {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView != null) {
+                wv = webView;
                 WebSettings s = webView.getSettings();
                 s.setMediaPlaybackRequiresUserGesture(false);
                 s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-                // 原生提示音：播放内置铃声（比 ToneGenerator 好听、也更响）
                 webView.addJavascriptInterface(new Object() {
                     @JavascriptInterface
                     public void ding() {
@@ -36,35 +45,29 @@ public class MainActivity extends BridgeActivity {
                         playRaw(R.raw.notify_request);
                     }
 
-                    /** 原生播放在线音频（通话语音用；绕开 WebView 的音频限制） */
+                    /** 原生播放在线音频：进入队列，按顺序逐句播放 */
                     @JavascriptInterface
                     public void playUrl(final String url) {
                         if (url == null) return;
-                        if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+                        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                            notifyJs("bad-url");
+                            return;
+                        }
                         ui.post(
                                 () -> {
-                                    try {
-                                        MediaPlayer mp = new MediaPlayer();
-                                        mp.setAudioAttributes(
-                                                new AudioAttributes.Builder()
-                                                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                                                        .setContentType(
-                                                                AudioAttributes
-                                                                        .CONTENT_TYPE_SPEECH)
-                                                        .build());
-                                        mp.setDataSource(url);
-                                        mp.setVolume(1.0f, 1.0f);
-                                        mp.setOnPreparedListener(MediaPlayer::start);
-                                        mp.setOnCompletionListener(MediaPlayer::release);
-                                        mp.setOnErrorListener(
-                                                (m, what, extra) -> {
-                                                    m.release();
-                                                    return true;
-                                                });
-                                        mp.prepareAsync();
-                                    } catch (Throwable ignored) {
-                                        // 播放失败静默忽略
-                                    }
+                                    if (callQueue.size() > 8) callQueue.clear();
+                                    callQueue.addLast(url);
+                                    if (!callPlaying) playNext();
+                                });
+                    }
+
+                    /** 通话结束：停止并清空 */
+                    @JavascriptInterface
+                    public void stop() {
+                        ui.post(
+                                () -> {
+                                    callQueue.clear();
+                                    stopPlayer();
                                 });
                     }
                 }, "AndroidTone");
@@ -72,6 +75,80 @@ public class MainActivity extends BridgeActivity {
         } catch (Throwable ignored) {
             // 设置失败不影响 App 启动
         }
+    }
+
+    private void playNext() {
+        String url = callQueue.pollFirst();
+        if (url == null) {
+            callPlaying = false;
+            notifyJs("native-done");
+            return;
+        }
+        callPlaying = true;
+        stopPlayer();
+        try {
+            final MediaPlayer mp = new MediaPlayer();
+            callPlayer = mp;
+            mp.setAudioAttributes(
+                    new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build());
+            mp.setDataSource(url);
+            mp.setVolume(1.0f, 1.0f);
+            mp.setOnPreparedListener(
+                    m -> {
+                        m.start();
+                        notifyJs("native-start");
+                    });
+            mp.setOnCompletionListener(
+                    m -> {
+                        m.release();
+                        if (callPlayer == m) callPlayer = null;
+                        playNext();
+                    });
+            mp.setOnErrorListener(
+                    (m, what, extra) -> {
+                        m.release();
+                        if (callPlayer == m) callPlayer = null;
+                        notifyJs("native-error:" + what + "/" + extra);
+                        playNext();
+                        return true;
+                    });
+            mp.prepareAsync();
+        } catch (Throwable t) {
+            notifyJs("native-ex:" + t.getClass().getSimpleName());
+            playNext();
+        }
+    }
+
+    private void stopPlayer() {
+        if (callPlayer != null) {
+            try {
+                callPlayer.stop();
+            } catch (Throwable ignored) {
+                // 已停止/未开始
+            }
+            try {
+                callPlayer.release();
+            } catch (Throwable ignored) {
+                // 已释放
+            }
+            callPlayer = null;
+        }
+    }
+
+    private void notifyJs(final String msg) {
+        ui.post(
+                () -> {
+                    if (wv == null) return;
+                    wv.evaluateJavascript(
+                            "window.w4OnCallAudio && window.w4OnCallAudio(" + quote(msg) + ")", null);
+                });
+    }
+
+    private static String quote(String s) {
+        return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
     private void playRaw(final int resId) {

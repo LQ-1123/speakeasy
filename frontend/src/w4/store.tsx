@@ -54,6 +54,7 @@ import {
   setFriendVoice as apiSetFriendVoice,
 } from "./apiFacade";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
+import { uploadChatImage as apiUploadChatImage } from "./api";
 import { isLocalMode } from "./local/keys";
 
 export interface Settings {
@@ -110,7 +111,7 @@ interface Store {
     opts?: { openTranscript?: boolean },
   ) => Promise<void>;
   sendVoice: (friendId: string, durationMs: number) => void;
-  sendImage: (friendId: string, image: string) => void;
+  sendImage: (friendId: string, file: Blob) => void;
   markRead: (friendId: string) => void;
   toggleZh: (key: string) => void;
   /** 单条消息翻译：没有译文就现翻，有就收起/展开 */
@@ -699,7 +700,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const sendImage = useCallback(
-    (friendId: string, image: string) => {
+    async (friendId: string, file: Blob) => {
+      const localUrl = URL.createObjectURL(file);
       setMessages((list) => [
         ...list,
         {
@@ -708,14 +710,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
           from: "me",
           kind: "image",
           text: "",
-          image,
+          image: localUrl,
           time: new Date().toISOString(),
           read: false,
         },
       ]);
-      scheduleReply(friendId);
+      const ok = await apiUploadChatImage(friendId, file);
+      if (!ok) {
+        showToast("图片发送失败，请检查网络", "error");
+        return;
+      }
+      const fresh = await apiFetchMessages(friendId);
+      if (fresh && fresh.length) {
+        setMessages((list) => [
+          ...list.filter((m) => m.friendId !== friendId),
+          ...fresh,
+        ]);
+      }
+      setFriends((list) =>
+        list.map((f) =>
+          f.id === friendId ? { ...f, lastActive: "刚刚", unread: 0 } : f,
+        ),
+      );
     },
-    [scheduleReply],
+    [showToast, apiFetchMessages],
   );
 
   const toggleZh = useCallback((key: string) => {

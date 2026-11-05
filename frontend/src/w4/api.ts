@@ -762,3 +762,40 @@ export async function loadFriendList(): Promise<{
     })),
   };
 }
+
+/* ---------------------------------------------------------------- 图片上传 */
+
+/** 发一张图给好友（真实上传，后端做多模态回复） */
+export async function uploadChatImage(
+  friendId: string,
+  file: Blob,
+  text = "",
+): Promise<boolean> {
+  const fd = new FormData();
+  fd.append("image", file, (file as File).name || "photo.jpg");
+  if (text) fd.append("text", text);
+  try {
+    const res = await fetch(`${BASE}/chat/${friendId}/image`, { method: "POST", body: fd });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 发一条带真实图片的动态 */
+export async function uploadMomentPhoto(
+  file: Blob,
+  content: string,
+  moodTag: string,
+): Promise<boolean> {
+  const fd = new FormData();
+  fd.append("image", file, (file as File).name || "photo.jpg");
+  fd.append("content", content);
+  fd.append("mood_tag", moodTag);
+  try {
+    const res = await fetch(`${BASE}/moments/photo`, { method: "POST", body: fd });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

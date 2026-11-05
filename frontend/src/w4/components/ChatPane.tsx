@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Camera,
   Image as ImageIcon,
   Info,
   ArrowUp,
@@ -127,7 +128,6 @@ export function ChatPane({
   const [voiceTranscribe, setVoiceTranscribe] = useState(false);
   const cancelZoneRef = useRef<HTMLDivElement | null>(null);
   const transcribeZoneRef = useRef<HTMLDivElement | null>(null);
-  const [emojiOpen, setEmojiOpen] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -212,6 +212,15 @@ export function ChatPane({
   const recChunks = useRef<Blob[]>([]);
   const startY = useRef(0);
   const playingTimer = useRef<number | null>(null);
+  const galleryRef = useRef<HTMLInputElement | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+
+  const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    setPhotoOpen(false);
+    if (file) void sendImage(friendId, file);
+  };
 
   /* 未读清零 */
   useEffect(() => {
@@ -320,7 +329,6 @@ export function ChatPane({
     if (!text) return;
     sendText(friendId, text);
     setDraft("");
-    setEmojiOpen(false);
     inputRef.current?.focus();
   };
 
@@ -896,24 +904,13 @@ export function ChatPane({
                 <div className="w4-cd-bar">
                   <div className="w4-cd-icons">
                     <button
-                      className={`w4-icon-btn ${emojiOpen ? "is-active" : ""}`}
-                      onClick={() => {
-                        setEmojiOpen((v) => !v);
-                        setPhotoOpen(false);
-                      }}
-                      aria-label="表情"
-                    >
-                      <Smile size={18} strokeWidth={1.7} />
-                    </button>
-                    <button
                       className={`w4-icon-btn ${photoOpen ? "is-active" : ""}`}
                       onClick={() => {
                         setPhotoOpen((v) => !v);
-                        setEmojiOpen(false);
                       }}
                       aria-label="图片"
                     >
-                      <ImageIcon size={18} strokeWidth={1.7} />
+                      <Camera size={18} strokeWidth={1.7} />
                     </button>
                   </div>
                   <div className="w4-cd-right">
@@ -1086,63 +1083,24 @@ export function ChatPane({
 
                 <div className="w4-composer-actions">
                   <button
-                    className={`w4-icon-btn ${emojiOpen ? "is-active" : ""}`}
-                    onClick={() => {
-                      setEmojiOpen((v) => !v);
-                      setPhotoOpen(false);
-                    }}
-                    aria-label="表情"
-                  >
-                    <Smile size={18} strokeWidth={1.7} />
-                  </button>
-                  <button
                     className={`w4-icon-btn ${photoOpen ? "is-active" : ""}`}
                     onClick={() => {
                       setPhotoOpen((v) => !v);
-                      setEmojiOpen(false);
                     }}
                     aria-label="图片"
                   >
-                    <ImageIcon size={18} strokeWidth={1.7} />
+                    <Camera size={18} strokeWidth={1.7} />
                   </button>
                 </div>
               </div>
             )}
           </div>
-
-          {emojiOpen ? (
-            <div className="w4-pop">
-              <div className="w4-emoji-grid">
-                {EMOJIS.map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => {
-                      setDraft((d) => d + e);
-                      inputRef.current?.focus();
-                    }}
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           {photoOpen ? (
-            <div className="w4-pop">
-              <div className="w4-photo-grid">
-                {PHOTOS.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      sendImage(friendId, p);
-                      setPhotoOpen(false);
-                    }}
-                  >
-                    <img src={p} alt="" />
-                  </button>
-                ))}
-              </div>
+            <div className="w4-pop w4-photo-sheet">
+              <button onClick={() => galleryRef.current?.click()}>从相册选择</button>
+              <button onClick={() => cameraRef.current?.click()}>拍照</button>
+              <input ref={galleryRef} type="file" accept="image/*" hidden onChange={onPickImage} />
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onPickImage} />
             </div>
           ) : null}
 

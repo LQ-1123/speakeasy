@@ -1418,6 +1418,7 @@ function MessageRow({
 }) {
   const { profile } = useApp();
   const mine = message.from === "me";
+  const [played, setPlayed] = useState(false);
 
   /* 长按/右键语音消息 → 在指针位置弹出「转文字」菜单 */
   const pressTimer = useRef<number | null>(null);
@@ -1451,6 +1452,7 @@ function MessageRow({
 
   /* 长按之后浏览器还会补一次 click，这里把它吃掉，避免顺手播放语音 */
   const handlePlay = () => {
+    setPlayed(true);
     if (longPressed.current) {
       longPressed.current = false;
       return;
@@ -1503,6 +1505,9 @@ function MessageRow({
                 playing={playing}
                 onToggle={handlePlay}
               />
+              {!mine && message.kind === "voice" && !played ? (
+                <span className="w4-voice-dot" aria-label="unplayed" />
+              ) : null}
               {message.shownText ? (
                 <div className="w4-voice-text">{message.text}</div>
               ) : null}

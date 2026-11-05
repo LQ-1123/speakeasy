@@ -18,7 +18,7 @@ import {
   Volume2,
 } from "lucide-react";
 
-import { saveLlm, saveStt, saveTts } from "../api";
+import { saveLlm, saveStt, saveTts, ttsSampleUrl } from "../api";
 
 import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
 import { exportLocalData, importLocalData, playVoiceUrl, synthesizeVoice, wipeLocalData } from "../apiFacade";
@@ -229,6 +229,28 @@ function LlmSection({
   );
 }
 
+
+let _waCtx: AudioContext | null = null;
+async function playPreviewAudio(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return false;
+    const buf = await res.arrayBuffer();
+    _waCtx = _waCtx ?? new AudioContext();
+    if (_waCtx.state === "suspended") await _waCtx.resume();
+    const audio = await _waCtx.decodeAudioData(buf);
+    const src = _waCtx.createBufferSource();
+    src.buffer = audio;
+    src.connect(_waCtx.destination);
+    src.start();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const PREVIEW_TEXT = "Morning! Right — the flat white guy. I remember you.";
+
 /* ---------------------------------------------------------------- 声音 */
 
 function VoiceSection({
@@ -336,7 +358,20 @@ function VoiceSection({
       <div className="w4-field" style={{ marginTop: 18 }}>
         <div className="w4-field-label">试听</div>
         <div className="w4-try-card">
-          <button className="w4-try-play" onClick={() => setPlaying(!playing)} aria-label="试听">
+          <button
+            className="w4-try-play"
+            aria-label="试听"
+            onClick={async () => {
+              if (playing) {
+                setPlaying(false);
+                return;
+              }
+              setPlaying(true);
+              const ok = await playPreviewAudio(ttsSampleUrl(PREVIEW_TEXT, "en-GB-RyanNeural"));
+              if (!ok) toast("试听失败，请检查网络或声音配置", "error");
+              setPlaying(false);
+            }}
+          >
             <Play size={14} fill="currentColor" strokeWidth={0} />
           </button>
           <div style={{ flex: 1, minWidth: 0 }}>

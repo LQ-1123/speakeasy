@@ -195,8 +195,8 @@ function mapLiveSettings(
     tts: {
       provider: provider === "fish" ? "fish" : "system",
       emotion: Boolean(ttsCfg.fish_reference_id || ttsCfg.emotion),
-      keyMasked: String(ttsCfg.fish_api_key ?? ""),
-      hasKey: Boolean(ttsCfg.fish_api_key),
+      keyMasked: String(ttsCfg.api_key_masked ?? ttsCfg.fish_api_key_masked ?? ttsCfg.fish_api_key ?? ""),
+      hasKey: Boolean(ttsCfg.api_key_set ?? ttsCfg.fish_api_key_set ?? ttsCfg.fish_api_key),
       cloned: Boolean(ttsCfg.fish_reference_id),
     },
   };

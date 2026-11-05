@@ -1951,14 +1951,3 @@
     max-width: 560px;
   }
 }
-
-/* 未播放的好友语音小红点 */
-.w4-root .w4-voice-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #fa5151;
-  margin-left: 6px;
-  vertical-align: middle;
-}

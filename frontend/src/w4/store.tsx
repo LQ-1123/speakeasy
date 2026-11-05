@@ -669,6 +669,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...merged]);
+
     },
     [showToast],
   );

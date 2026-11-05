@@ -2027,3 +2027,43 @@
     text-align: center;
   }
 }
+
+/* 聊天顶栏最终布局：左返回(+角标) · 中名字 · 右电话 */
+@media (max-width: 899.98px) {
+  .w4-root .w4-head {
+    position: relative;
+    justify-content: center;
+  }
+  .w4-root .w4-head > .w4-only-mobile.w4-back-badge-wrap {
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+  }
+  .w4-root .w4-head .w4-head-actions {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+  }
+  .w4-root .w4-head-person {
+    position: static;
+    left: auto;
+    top: auto;
+    transform: none;
+    max-width: calc(100% - 140px);
+    margin: 0 auto;
+    justify-content: center;
+    background: transparent;
+  }
+}
+/* 消息气泡头像可点击 */
+.w4-root .w4-msg-avatar {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}

@@ -778,21 +778,6 @@ export function ChatPane({
           >
             <Phone size={17} strokeWidth={1.8} />
           </button>
-          <button
-            className="w4-icon-btn"
-            aria-label="翻译最近消息"
-            title="把最近的对方消息都翻译成中文"
-            onClick={() => translateAll(friend.id)}
-          >
-            <Languages size={17} strokeWidth={1.8} />
-          </button>
-          <button
-            className={`w4-icon-btn ${infoOpen ? "is-active" : ""}`}
-            aria-label="对方资料"
-            onClick={() => setInfoOpen((v) => !v)}
-          >
-            <Info size={17} strokeWidth={1.8} />
-          </button>
         </div>
       </div>
 
@@ -835,6 +820,10 @@ export function ChatPane({
                       onLongPress={(pos) =>
                         setMsgMenu({ message: m, x: pos.x, y: pos.y })
                       }
+                      onAvatarClick={() => {
+                        setMobileInfo(true);
+                        setInfoOpen(true);
+                      }}
                     />
                   ))}
                 </div>
@@ -1405,6 +1394,7 @@ function MessageRow({
   onDismiss,
   onZoom,
   onLongPress,
+  onAvatarClick,
 }: {
   message: Message;
   friend: Friend;
@@ -1417,6 +1407,7 @@ function MessageRow({
   onDismiss: () => void;
   onZoom: (src: string) => void;
   onLongPress?: (pos: { x: number; y: number }) => void;
+  onAvatarClick?: () => void;
 }) {
   const { profile } = useApp();
   const mine = message.from === "me";
@@ -1473,10 +1464,10 @@ function MessageRow({
 
   return (
     <div className={`w4-msg ${mine ? "is-me" : ""}`}>
-      {mine ? (
-        <Avatar src={profile.avatar} name={profile.name} size={32} />
-      ) : (
-        <Avatar friend={friend} size={32} />
+      {mine ? null : (
+        <button className="w4-msg-avatar" onClick={onAvatarClick} aria-label="查看资料">
+          <Avatar friend={friend} size={32} />
+        </button>
       )}
       <div className="w4-msg-col">
         <div className="w4-bubble-row">

@@ -55,7 +55,16 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
     const a = new Audio(src);
     a.preload = "auto";
     a.onended = () => setPlayingId(null);
-    a.onerror = () => setPlayingId(null);
+    a.onerror = () => {
+      // 预生成音频缺失（例如旧数据）→ 现场用 /tts/sample 合成
+      const fb = friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice) : "";
+      if (fb && !a.src.endsWith(fb)) {
+        a.src = fb;
+        a.play().then(() => setPlayingId(friend.id)).catch(() => setPlayingId(null));
+        return;
+      }
+      setPlayingId(null);
+    };
     audioRef.current = a;
     a.play()
       .then(() => setPlayingId(friend.id))

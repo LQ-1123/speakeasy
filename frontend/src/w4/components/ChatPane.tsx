@@ -37,6 +37,7 @@ import {
   changeFriendVoice,
   loadArchetypes,
   translate as apiTranslate,
+  ttsSampleUrl,
   type ArchetypeLite,
 } from "../api";
 import { useApp } from "../store";
@@ -225,7 +226,17 @@ export function ChatPane({
         const a = new Audio(m.audio);
         audioRef.current = a;
         a.onended = () => setPlayingId(null);
-        a.onerror = () => setPlayingId(null);
+        a.onerror = () => {
+          // 服务器上的音频文件可能已缺失（例如老数据）：用 /tts/sample 现场合成兜底
+          const f = friendById(friendId);
+          const fb = m.text ? ttsSampleUrl(m.text, f?.voice || "") : "";
+          if (fb && !a.src.endsWith(fb)) {
+            a.src = fb;
+            void a.play().catch(() => setPlayingId(null));
+            return;
+          }
+          setPlayingId(null);
+        };
         void a.play().catch(() => setPlayingId(null));
         setPlayingId(m.id);
         return;

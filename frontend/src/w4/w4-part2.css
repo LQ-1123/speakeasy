@@ -1786,3 +1786,36 @@
 .w4-root .w4-cd-rec-pill .w4-cd-rec-send:hover {
   background: #06ad56;
 }
+
+/* ===== 录音胶囊只在右下角，不整行 ===== */
+.w4-root .w4-cd.is-recording .w4-cd-input,
+.w4-root .w4-cd.is-recording .w4-cd-bar {
+  position: static;
+  opacity: 1;
+  height: auto;
+  width: auto;
+  overflow: visible;
+  pointer-events: auto;
+}
+.w4-root .w4-cd-right .w4-cd-rec-pill {
+  flex: none;
+  width: 236px;
+  height: 32px;
+  padding: 0 2px 0 10px;
+  border-radius: 16px;
+}
+.w4-root .w4-cd-right .w4-cd-rec-x {
+  width: 26px;
+  height: 26px;
+}
+.w4-root .w4-cd-right .w4-cd-rec-text {
+  height: 28px;
+  font-size: 12.5px;
+}
+.w4-root .w4-cd-right .w4-cd-rec-time {
+  font-size: 11.5px;
+}
+.w4-root .w4-cd-rec-pill .w4-cd-rec-send {
+  width: 28px;
+  height: 28px;
+}

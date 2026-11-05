@@ -638,6 +638,7 @@ export function ChatPane({
         const rec = v.rec;
         v.rec = null;
         if (sttReadyRef.current && sttWsRef.current?.readyState === 1) {
+          showToast("检测到停顿，正在收尾识别…");
           sttPartialRef.current = "";
           try {
             sttNodeRef.current?.port.postMessage({ cmd: "flush" });
@@ -648,6 +649,7 @@ export function ChatPane({
           const text = (await waitSttFinal(2200)).trim();
           setCallTalking(false);
           if (text) {
+            showToast(`识别到：${text.slice(0, 30)}`);
             const ok = await sendCallText(text, total);
             if (ok) {
               try {
@@ -769,6 +771,7 @@ export function ChatPane({
             sttFinalRef.current?.(data.text || sttPartialRef.current);
           } else if (data.type === "error") {
             sttReadyRef.current = false;
+            showToast(`STT 错误：${(data as { message?: string }).message ?? "unknown"}`, "error");
           }
         } catch {
           /* ignore */
@@ -803,6 +806,7 @@ export function ChatPane({
       sttReadyRef.current = true;
     } catch {
       sttReadyRef.current = false;
+      showToast("STT 连接失败，本轮回退整段识别", "error");
       try {
         sttWsRef.current?.close();
       } catch {
@@ -884,6 +888,7 @@ export function ChatPane({
       setCallWaiting(false);
       window.setTimeout(() => resumeCallListening(), 350);
     }
+    showToast("回复已开始");
     return true;
   };
 

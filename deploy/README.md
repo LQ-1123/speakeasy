@@ -176,3 +176,43 @@ cd /root/speakeasy
 git pull
 systemctl restart speakeasy
 ```
+
+---
+
+## 附：云精简版部署（2 核 2G 小服务器，无 torch）
+
+如果你的服务器配置很低（如 2 核 2G），**不要装完整的 requirements.txt**（会拉 500MB+ 的 torch 和本地语音模型），用精简版：
+
+`ash
+# 1) 装 Python 3.12（服务器自带 3.14 太新，很多轮子没有）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source \C:\Users\Administrator/.local/bin/env
+uv python install 3.12
+
+# 2) 建环境（不要用系统 python3）
+cd /root/speakeasy
+rm -rf .venv
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+
+# 3) 只装云精简依赖（约 100MB，1 分钟内）
+pip install -r backend/requirements-cloud.txt
+
+# 4) 其余部署步骤和上面一样（传 key 配置 → .env → systemd）
+`
+
+启动日志里出现下面这些提示是**正常的**，因为精简版没有本地语音模型：
+
+`
+STT 降级到 mock 后端（faster_whisper import 失败）
+TTS 后端 cosyvoice2/f5tts/xtts 不可用
+`
+
+实际使用中：
+
+- 语音识别 → 云端 SiliconFlow（data/stt_config.json 里配置的 key）
+- 语音合成 → 云端 Fish（data/tts_config.json 里配置的 key）
+
+内存占用：空载约 200–350MB，2G 内存足够。
+
+> 注意：精简版不要用 python3.14，numpy/scipy/pydantic 的 3.14 轮子可能缺失；统一用 uv 装的 3.12。

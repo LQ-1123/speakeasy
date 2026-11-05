@@ -14,13 +14,10 @@ public class MainActivity extends BridgeActivity {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView != null) {
                 WebSettings s = webView.getSettings();
-                // 允许自动播放（否则异步加载音频后 play() 会被拦截）
                 s.setMediaPlaybackRequiresUserGesture(false);
-                // 允许 https://localhost 页面加载 http://IP 的音频/接口
                 s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             }
         } catch (Throwable ignored) {
-            // 设置失败不影响 App 启动
         }
     }
 
@@ -31,29 +28,17 @@ public class MainActivity extends BridgeActivity {
             super.onBackPressed();
             return;
         }
-        // 先问页面：如果有浮层（好友详情等）打开，由页面自己关闭；返回 handled 表示已处理
+        // 顺序：页面浮层（如好友详情）→ 浏览器历史（从哪来回哪去）→ 退到后台
+        String js =
+                "(function(){"
+                        + "if (window.w4HandleBack && window.w4HandleBack() === 'handled') return 'handled';"
+                        + "if (window.history.length > 1) { window.history.back(); return 'handled'; }"
+                        + "return 'unhandled';"
+                        + "})()";
         webView.evaluateJavascript(
-                "(window.w4HandleBack ? window.w4HandleBack() : 'unhandled')",
+                js,
                 value -> {
                     if (value != null && value.contains("handled")) return;
-                    String url = webView.getUrl();
-                    String hash = "";
-                    if (url != null) {
-                        int i = url.indexOf('#');
-                        if (i >= 0) hash = url.substring(i);
-                    }
-                    boolean root =
-                            hash.isEmpty()
-                                    || hash.equals("#/")
-                                    || hash.equals("#/chats")
-                                    || hash.equals("#/contacts")
-                                    || hash.equals("#/discover")
-                                    || hash.equals("#/expressions")
-                                    || hash.equals("#/me");
-                    if (!root) {
-                        webView.evaluateJavascript("history.back()", null);
-                        return;
-                    }
                     moveTaskToBack(true);
                 });
     }

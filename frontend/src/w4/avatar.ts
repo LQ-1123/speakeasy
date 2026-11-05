@@ -133,13 +133,6 @@ export function diceAvatar(
   };
 
   // DiceBear 的 options 类型按画风逐字面量声明，这里值是动态拼的，只能放宽一次
-  if (currentStyle !== "personas") {
-    const avatar = createAvatar(styleCollection(currentStyle) as never, {
-      seed: seed || "anonymous",
-      size: 128,
-    } as never);
-    return avatar.toDataUri();
-  }
   const avatar = createAvatar(personas, options as unknown as Parameters<typeof createAvatar>[1]);
   return avatar.toDataUri();
 }
@@ -196,4 +189,19 @@ export function avatarForName(name: string): string {
   const slug = (name || "").toLowerCase().replace(/[^a-z]/g, "");
   const meta = NAME_META[slug];
   return diceAvatar(slug || "friend", meta?.gender ?? "", meta?.region ?? "");
+}
+
+/** 用户自己的头像：跟随设置里选择的风格 */
+export function profileAvatar(name: string): string {
+  const seed = (name || "me").trim() || "me";
+  if (currentStyle === "personas") return diceAvatar(seed);
+  try {
+    const avatar = createAvatar(styleCollection(currentStyle) as never, {
+      seed,
+      size: 128,
+    } as never);
+    return avatar.toDataUri();
+  } catch {
+    return diceAvatar(seed);
+  }
 }

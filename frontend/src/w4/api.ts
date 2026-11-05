@@ -8,7 +8,7 @@
  */
 
 import type { Expression, Friend, Message, Moment, Profile } from "./model";
-import { avatarRegionOf, diceAvatar } from "./avatar";
+import { avatarRegionOf, diceAvatar, profileAvatar } from "./avatar";
 
 /* ------------------------------------------------------------ 常量与工具 */
 
@@ -270,11 +270,7 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
   const factProfile = (fact.profile ?? {}) as Record<string, any>;
   const profile: Partial<Profile> = {
     name: String(rawProfile.nickname ?? "我"),
-    avatar: diceAvatar(
-      String(rawProfile.nickname ?? "me"),
-      "",
-      avatarRegionOf("China"),
-    ),
+    avatar: profileAvatar(String(rawProfile.nickname ?? "me")),
     city: String(factProfile.city ?? ""),
     job: String(factProfile.major_or_job ?? ""),
     targets: Array.isArray(rawProfile.target_languages)

@@ -314,7 +314,7 @@ function VoiceSection({
               type="password"
               value={fishKey}
               onChange={(e) => setFishKey(e.target.value)}
-              placeholder={settings.tts.hasKey ? settings.tts.keyMasked : "粘贴 Fish Audio Key"}
+              placeholder={settings.tts.hasKey ? settings.tts.keyMasked : "服务器已托管，如需替换可粘贴新 Key"}
             />
             <div className="w4-field-hint" style={{ marginTop: 8 }}>
               <button className="w4-btn" onClick={() => void saveKey()} disabled={savingKey}>

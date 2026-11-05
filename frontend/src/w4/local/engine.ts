@@ -777,3 +777,47 @@ if (typeof window !== "undefined") {
     friends: async () => (await getState()).requests,
   };
 }
+
+/** 每次通话的开场白：LLM 现生成一句，避免固定“Hey”出戏 */
+export async function localCallOpening(friendId: string): Promise<string> {
+  const st = await getState();
+  const friend = st.friends.find((f) => f.id === friendId);
+  if (!friend) return "Can you hear me?";
+  const lang = friend.language || "en";
+  const hour = new Date().getHours();
+  const daypart =
+    hour < 5 ? "late night" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+  const recent = st.messages
+    .filter((m) => m.friendId === friendId)
+    .slice(-3)
+    .map((m) => `${m.from === "me" ? "User" : friend.name}: ${m.text}`)
+    .join("\n");
+  try {
+    const line = await llmChat(
+      [
+        {
+          role: "system",
+          content: `You are ${friend.name}, ${friend.age}, from ${friend.city || friend.country}. ${(friend as unknown as { personality_prompt?: string }).personality_prompt || friend.bio}
+The phone just connected. Say ONE short, natural opening line in ${LANG_NAMES[lang] || lang} (max 12 words).
+Rules: do NOT start with "Hey"; do NOT use the same line every time; it's currently ${daypart}.
+No markdown, no emoji.`,
+        },
+        ...(recent ? [{ role: "user" as const, content: `Recent chat for context:\n${recent}` }] : []),
+        { role: "user", content: "Say your opening line now, just the line." },
+      ],
+      { maxTokens: 60, temperature: 1.0 },
+    );
+    const cleaned = line.replace(/^["'“”]|["'“”]$/g, "").trim();
+    if (cleaned) return cleaned.slice(0, 120);
+  } catch {
+    /* 网络失败用兜底 */
+  }
+  const fallbacks = [
+    "Can you hear me okay?",
+    "I'm glad you called.",
+    "What are you up to right now?",
+    "Perfect timing — I was just free.",
+    "Tell me about your day.",
+  ];
+  return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+}

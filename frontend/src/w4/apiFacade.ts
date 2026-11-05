@@ -224,3 +224,8 @@ export async function wipeLocalData(): Promise<boolean> {
   if (!isLocalMode()) return false;
   return (await local()).localWipeData();
 }
+
+export async function callOpening(friendId: string): Promise<string> {
+  if (isLocalMode()) return (await local()).localCallOpening(friendId);
+  return "Can you hear me?";
+}

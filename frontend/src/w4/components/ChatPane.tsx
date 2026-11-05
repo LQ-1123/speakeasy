@@ -33,6 +33,7 @@ import { clockTime, dayOf } from "../format";
 import type { Friend, Message, Route } from "../model";
 import { type ArchetypeLite } from "../api";
 import {
+  callOpening,
   callTurnStream,
   callWarmup,
   changeFriendVoice,
@@ -651,8 +652,8 @@ export function ChatPane({
     setCallMuted(false);
     if (friend) {
       await callWarmup(friend.id);
-      // 接通后对方先开口，避免通话一开始是完全静音的
-      const greet = (friend.greeting || "").trim() || "Hey! Can you hear me?";
+      // 接通后对方先开口：每次都现生成一句，避免固定“Hey”出戏
+      const greet = (await callOpening(friend.id)) || "Can you hear me?";
       setCallFriendText(greet);
       void (async () => {
         const url = await synthesizeVoice(greet, friend.id);

@@ -113,6 +113,14 @@ const engine = require("./build/local/engine.js");
   console.log("3) 通过申请…");
   await engine.localAcceptFriend(req.id);
 
+  console.log("3.5) 通话开场白（每次应不同、且不固定 Hey）…");
+  const opening1 = await engine.localCallOpening(req.id);
+  const opening2 = await engine.localCallOpening(req.id);
+  console.log("   第一次:", opening1);
+  console.log("   第二次:", opening2);
+  const openingOk = Boolean(opening1) && Boolean(opening2) && !/^hey\b/i.test(opening1) && !/^hey\b/i.test(opening2);
+  console.log("   非固定 Hey:", openingOk);
+
   console.log("4) 发一条文字消息（真实 DeepSeek + 本地 TTS）…");
   const msgs = await engine.localSendText(req.id, "Hi! What are you up to today?");
   const mine = (msgs || []).filter((m) => m.from === "me");
@@ -191,6 +199,7 @@ const engine = require("./build/local/engine.js");
     Boolean(commented) &&
     Boolean(expr) &&
     expressions.length >= 1 &&
+    openingOk &&
     imported &&
     afterImport.friends.length === 1;
   console.log(`\n结果: ${pass ? "PASS" : "FAIL"}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s）`);

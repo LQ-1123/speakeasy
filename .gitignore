@@ -47,3 +47,13 @@ Thumbs.db
 
 # QA 截图（留在 workspace artifacts/，不入库）
 artifacts/
+
+# 移动端构建产物
+mobile/node_modules/
+mobile/www/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/android/app/src/main/assets/public/
+deliverables/

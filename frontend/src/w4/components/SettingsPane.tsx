@@ -20,7 +20,7 @@ import {
 
 import { saveLlm, saveStt, saveTts } from "../api";
 
-import { loadKeys, saveKeys } from "../local/keys";
+import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
 import { playVoiceUrl, synthesizeVoice } from "../apiFacade";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
@@ -44,7 +44,11 @@ export function SettingsPane({
   navigate: (r: Route) => void;
 }) {
   const { settings, updateSettings, showToast } = useApp();
-  const [active, setActive] = useState<string>(section ?? "llm");
+  const local = isLocalMode();
+  const sections = local
+    ? SECTIONS.filter((s) => s.key === "local" || s.key === "notify" || s.key === "privacy" || s.key === "about")
+    : SECTIONS;
+  const [active, setActive] = useState<string>(section ?? (local ? "local" : "llm"));
   const [playing, setPlaying] = useState(false);
 
   return (
@@ -60,7 +64,7 @@ export function SettingsPane({
 
       <div className="w4-settings-layout">
         <div className="w4-settings-nav">
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <button key={s.key} className={active === s.key ? "on" : ""} onClick={() => setActive(s.key)}>
               {s.label}
             </button>
@@ -72,7 +76,7 @@ export function SettingsPane({
             {/* 手机上分组导航折叠成下拉 */}
             <div className="w4-only-mobile" style={{ marginBottom: 16 }}>
               <select className="w4-select" value={active} onChange={(e) => setActive(e.target.value)}>
-                {SECTIONS.map((s) => (
+                {sections.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>

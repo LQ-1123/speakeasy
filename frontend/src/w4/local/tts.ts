@@ -45,7 +45,20 @@ export type TtsResult = { url: string; durationMs: number } | null;
 /** 本地 TTS：SiliconFlow（国内直连）优先，Fish 兜底；同文本+音色缓存 */
 const cache = new Map<string, Promise<TtsResult>>();
 
-export type TtsOptions = { gender?: "male" | "female"; refId?: string };
+export type TtsOptions = { gender?: "male" | "female"; refId?: string; voiceId?: string };
+
+const SF_VOICES: Record<"male" | "female", string[]> = {
+  male: ["alex", "benjamin", "charles", "david"],
+  female: ["anna", "bella", "claire", "diana"],
+};
+
+/** 按好友 id 稳定分配一个 CosyVoice 音色，同一好友聊天/通话音色一致 */
+export function voiceForFriend(friendId: string, gender?: "male" | "female"): string {
+  const list = SF_VOICES[gender === "male" ? "male" : "female"];
+  let h = 0;
+  for (let i = 0; i < friendId.length; i += 1) h = (h * 31 + friendId.charCodeAt(i)) % 997;
+  return list[h % list.length];
+}
 
 export function fishTts(text: string, opts: TtsOptions = {}): Promise<TtsResult> {
   const cleaned = (text || "").trim();
@@ -59,7 +72,8 @@ export function fishTts(text: string, opts: TtsOptions = {}): Promise<TtsResult>
     // 1) SiliconFlow CosyVoice（国内可直连，无需 VPN）
     if (k.sttKey.trim()) {
       try {
-        const voice = `FunAudioLLM/CosyVoice2-0.5B:${opts.gender === "male" ? "alex" : "anna"}`;
+        const picked = opts.voiceId || voiceForFriend("", opts.gender);
+        const voice = `FunAudioLLM/CosyVoice2-0.5B:${picked}`;
         const resp = await fetch(`${k.sttBase.replace(/\/+$/, "")}/audio/speech`, {
           method: "POST",
           headers: {

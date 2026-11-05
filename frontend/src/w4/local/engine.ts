@@ -15,7 +15,7 @@ import type { Expression, Friend, Message, Moment, Profile } from "../model";
 import { dbGet, dbSet, newId } from "./db";
 import { loadKeys } from "./keys";
 import { llmChat, llmJson } from "./llm";
-import { fishTts } from "./tts";
+import { fishTts, voiceForFriend } from "./tts";
 import { transcribeBlob } from "./stt";
 
 type LocalState = {
@@ -259,7 +259,7 @@ export async function localSaveProfile(
       for (let i = 0; i < 2; i += 1) {
         const p = await generatePersona(lang, made.map((f) => f.name));
         if (!p) continue;
-        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
+        const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voiceForFriend("", p.gender) }) : null;
         const f = toFriend(p, { request: true, greetingAudio: audio?.url });
         made.push(f);
         state?.requests.push(f);
@@ -274,7 +274,7 @@ export async function localDiscover(language = "en"): Promise<{ friend: Friend; 
   const s = await getState();
   const p = await generatePersona(language, [...s.requests, ...s.friends].map((f) => f.name));
   if (!p) return null;
-  const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender }) : null;
+  const audio = p.greeting ? await fishTts(p.greeting, { gender: p.gender, voiceId: voiceForFriend("", p.gender) }) : null;
   const friend = toFriend(p, { request: true, greetingAudio: audio?.url });
   s.requests.push(friend);
   await persist();
@@ -315,7 +315,7 @@ export async function localSendText(friendId: string, text: string): Promise<Mes
   await persist();
   try {
     const reply = await generateReply(friend, text);
-    const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female" });
+    const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female", voiceId: voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female") });
     const friendMsg = makeMessage({
       friendId,
       from: "friend",
@@ -362,7 +362,7 @@ export async function localSendVoiceBlob(
   if (text) {
     try {
       const reply = await generateReply(friend, text);
-      const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female" });
+      const audio = await fishTts(reply, { gender: friend.gender === "male" ? "male" : "female", voiceId: voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female") });
       appendMessage(
         makeMessage({
           friendId,
@@ -454,6 +454,7 @@ export async function localCallTurnStream(
     for (let i = 0; i < sentences.length; i += 1) {
       const audio = await fishTts(sentences[i], {
         gender: friend.gender === "male" ? "male" : "female",
+        voiceId: voiceForFriend(friend.id, friend.gender === "male" ? "male" : "female"),
       });
       if (i === 0) firstAudio = audio?.url;
       onEvent({ type: "sentence", index: i, text: sentences[i], audioUrl: audio?.url ?? "" });

@@ -32,7 +32,7 @@ import {
 
 import { clockTime, dayOf } from "../format";
 import type { Friend, Message, Route } from "../model";
-import { type ArchetypeLite } from "../api";
+import { API_ORIGIN, type ArchetypeLite } from "../api";
 import {
   callOpening,
   callTurnStream,
@@ -118,6 +118,18 @@ export function ChatPane({
   const totalUnread = friends.reduce((n, f) => n + (f.unread || 0), 0);
   const msgs = messagesOf(friendId);
   const isTyping = typing[friendId];
+
+  useEffect(() => {
+    const w = window as unknown as { w4OnCallAudio?: (s: string) => void };
+    w.w4OnCallAudio = (s: string) => {
+      if (s.startsWith("native-error") || s.startsWith("native-ex") || s === "bad-url") {
+        showToast(`通话音频失败：${s}`, "error");
+      }
+    };
+    return () => {
+      delete w.w4OnCallAudio;
+    };
+  }, [showToast]);
 
   /* 收到好友新消息时播放提示音 */
   const lastFriendMsgId = useRef("");
@@ -524,8 +536,11 @@ export function ChatPane({
         // 通话语音：优先用事件里的音频（本地模式是 blob），没有就现场合成
         if (ev.audioUrl || ev.text) {
           void (async () => {
-            const url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
+            let url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
             if (!url) return;
+            if (!url.startsWith("http")) {
+              url = `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
+            }
             callAudioPlaying.current = true;
             const nat = (window as unknown as { AndroidTone?: { playUrl?: (u: string) => void } })
               .AndroidTone;

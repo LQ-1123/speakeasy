@@ -656,16 +656,8 @@ class ChatService:
         yield {"type": "transcript", "text": transcript, "stt": stt_meta}
 
         history = await asyncio.to_thread(self.db.recent_messages, friend_id, 10)
-        user_msg = await asyncio.to_thread(
-            self.db.add_message,
-            friend_id,
-            "user",
-            transcript,
-            msg_type="voice",
-            audio_path=decoded["audio_filename"],
-            duration_ms=int(decoded["duration_ms"] or duration_ms or 0),
-            is_read=True,
-        )
+        # 通话内容不写入聊天记录：只做本轮流式回复，挂断后由 call/summary 记一条通话摘要
+        user_msg = None
         friend = await asyncio.to_thread(self.db.add_turns, friend_id, 1)
         total_turns = await asyncio.to_thread(self.db.count_turns, friend_id)
         level = social.closeness_level(total_turns)
@@ -793,16 +785,8 @@ class ChatService:
                 audio_name = os.path.basename(audio_paths[0])
                 reply_duration = 0
 
-        friend_msg = await asyncio.to_thread(
-            self.db.add_message,
-            friend_id,
-            "friend",
-            _clean_reply(full_text),
-            msg_type="voice",
-            audio_path=audio_name or None,
-            duration_ms=reply_duration,
-            is_read=True,
-        )
+        # 同上：通话中的好友回复不落聊天记录
+        friend_msg = None
         self._schedule_memory(friend_id)
         yield {
             "type": "done",

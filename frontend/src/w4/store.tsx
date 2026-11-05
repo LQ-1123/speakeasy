@@ -101,7 +101,12 @@ interface Store {
   friendById: (id: string) => Friend | undefined;
   sendText: (friendId: string, text: string) => void;
   /** 真实录音发送（走后端 STT + LLM + TTS） */
-  sendVoiceBlob: (friendId: string, blob: Blob, durationMs: number) => Promise<void>;
+  sendVoiceBlob: (
+    friendId: string,
+    blob: Blob,
+    durationMs: number,
+    opts?: { openTranscript?: boolean },
+  ) => Promise<void>;
   sendVoice: (friendId: string, durationMs: number) => void;
   sendImage: (friendId: string, image: string) => void;
   markRead: (friendId: string) => void;
@@ -613,7 +618,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** 真实语音：先放一条占位气泡，等后端返回后整体替换 */
   const sendVoiceBlob = useCallback(
-    async (friendId: string, blob: Blob, durationMs: number) => {
+    async (
+      friendId: string,
+      blob: Blob,
+      durationMs: number,
+      opts?: { openTranscript?: boolean },
+    ) => {
       const tempId = nextId("u");
       setMessages((list) => [
         ...list,
@@ -626,7 +636,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           durationMs,
           time: new Date().toISOString(),
           read: false,
-          shownText: false,
+          shownText: Boolean(opts?.openTranscript),
         },
       ]);
       setTyping((t) => ({ ...t, [friendId]: true }));
@@ -640,7 +650,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       /* 后端返回的是该好友的完整消息列表：用它替换这一栏 */
-      setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...fresh]);
+      let merged = fresh;
+      if (opts?.openTranscript) {
+        const idx = fresh.reduce(
+          (acc: number, m: Message, i: number) =>
+            m.from === "me" && m.kind === "voice" ? i : acc,
+          -1,
+        );
+        if (idx >= 0) {
+          merged = fresh.map((m: Message, i: number) =>
+            i === idx ? { ...m, shownText: true } : m,
+          );
+        }
+      }
+      setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...merged]);
 
       /* 自动播一下 TA 的回复，省一次点击 */
       const last = [...fresh].reverse().find((m) => m.from === "friend" && m.audio);

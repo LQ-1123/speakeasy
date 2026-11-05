@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon,
   Info,
+  ArrowUp,
   Languages,
   Mic,
   MicOff,
@@ -95,6 +96,10 @@ export function ChatPane({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [cancelHint, setCancelHint] = useState(false);
+  const [recZone, setRecZone] = useState<"cancel" | "transcribe" | null>(null);
+  const [recMouse, setRecMouse] = useState(false);
+  const cancelZoneRef = useRef<HTMLDivElement | null>(null);
+  const transcribeZoneRef = useRef<HTMLDivElement | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -239,6 +244,7 @@ export function ChatPane({
   const startRecording = async (y: number) => {
     setRecording(true);
     setCancelHint(false);
+    setRecZone(null);
     setRecSeconds(0);
     recStart.current = Date.now();
     startY.current = y;
@@ -270,8 +276,10 @@ export function ChatPane({
     recTimer.current = null;
   };
 
-  const finishRecording = (cancelled: boolean) => {
+  const finishRecording = (cancelled: boolean, transcribe = false) => {
     if (!recording) return;
+    setRecZone(null);
+    setCancelHint(false);
     stopRecTimer();
     const ms = Date.now() - recStart.current;
     setRecording(false);
@@ -298,7 +306,7 @@ export function ChatPane({
         showToast("没录到声音，再试一次", "error");
         return;
       }
-      void sendVoiceBlob(friendId, blob, ms);
+      void sendVoiceBlob(friendId, blob, ms, { openTranscript: transcribe });
     };
     rec.stop();
   };
@@ -779,17 +787,51 @@ export function ChatPane({
                 <button
                   className={`w4-hold ${recording ? "is-rec" : ""} ${cancelHint ? "is-cancel" : ""}`}
                   onPointerDown={(e) => {
+                    const mouse = e.pointerType === "mouse";
+                    setRecMouse(mouse);
+                    if (mouse) {
+                      e.preventDefault();
+                      if (!recording) void startRecording(e.clientY);
+                      return;
+                    }
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                    startRecording(e.clientY);
+                    void startRecording(e.clientY);
                   }}
                   onPointerMove={(e) => {
-                    if (!recording) return;
-                    setCancelHint(startY.current - e.clientY > 50);
+                    if (!recording || recMouse) return;
+                    const inside = (el: HTMLDivElement | null) => {
+                      if (!el) return false;
+                      const r = el.getBoundingClientRect();
+                      const pad = 12;
+                      return (
+                        e.clientX >= r.left - pad &&
+                        e.clientX <= r.right + pad &&
+                        e.clientY >= r.top - pad &&
+                        e.clientY <= r.bottom + pad
+                      );
+                    };
+                    let zone: "cancel" | "transcribe" | null = null;
+                    if (inside(transcribeZoneRef.current)) zone = "transcribe";
+                    else if (inside(cancelZoneRef.current)) zone = "cancel";
+                    else if (startY.current - e.clientY > 90) zone = "cancel";
+                    setRecZone(zone);
+                    setCancelHint(zone === "cancel");
                   }}
-                  onPointerUp={() => finishRecording(cancelHint)}
+                  onPointerUp={() => {
+                    if (recMouse) return;
+                    finishRecording(recZone === "cancel", recZone === "transcribe");
+                  }}
                   onPointerCancel={() => finishRecording(true)}
                 >
-                  {recording ? (cancelHint ? "松开取消" : "松开发送") : "按住 说话"}
+                  {recording
+                    ? recMouse
+                      ? "录制中…"
+                      : recZone === "cancel"
+                        ? "松开取消"
+                        : recZone === "transcribe"
+                          ? "松开转文字"
+                          : "松开发送"
+                    : "按住 说话"}
                 </button>
               ) : (
                 <div className="w4-composer-field">
@@ -900,7 +942,55 @@ export function ChatPane({
               <div className="w4-rec-time">
                 {cancelHint ? "松开取消" : `0:${String(recSeconds).padStart(2, "0")}`}
               </div>
-              <div className="w4-rec-hint">{cancelHint ? "" : "上滑取消"}</div>
+              <div className="w4-rec-hint">
+                {recZone === "cancel"
+                  ? "松开取消"
+                  : recZone === "transcribe"
+                    ? "松开转文字"
+                    : recMouse
+                      ? "点击下方按钮发送"
+                      : "上滑取消 · 右滑转文字"}
+              </div>
+              {recMouse ? (
+                <div className="w4-rec-bar">
+                  <button className="w4-rec-bar-btn" onClick={() => finishRecording(true)}>
+                    <X size={15} strokeWidth={2.2} />
+                    取消
+                  </button>
+                  <button
+                    className="w4-rec-bar-btn"
+                    onClick={() => finishRecording(false, true)}
+                  >
+                    <Languages size={15} strokeWidth={2} />
+                    转文字
+                  </button>
+                  <button
+                    className="w4-rec-bar-btn is-send"
+                    onClick={() => finishRecording(false)}
+                  >
+                    <ArrowUp size={15} strokeWidth={2.4} />
+                    发送
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {recording && !recMouse ? (
+            <div className="w4-rec-zones">
+              <div
+                ref={cancelZoneRef}
+                className={`w4-rec-zone is-cancel${recZone === "cancel" ? " on" : ""}`}
+              >
+                取消
+              </div>
+              <div
+                ref={transcribeZoneRef}
+                className={`w4-rec-zone is-text${recZone === "transcribe" ? " on" : ""}`}
+              >
+                <Languages size={15} strokeWidth={2} />
+                滑到这里 转文字
+              </div>
             </div>
           ) : null}
 

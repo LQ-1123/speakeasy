@@ -36,6 +36,7 @@ import {
   callWarmup,
   changeFriendVoice,
   loadArchetypes,
+  synthesizeVoice,
   translate as apiTranslate,
   ttsSampleUrl,
 } from "../apiFacade";
@@ -257,26 +258,39 @@ export function ChatPane({
         audioRef.current = a;
         a.onended = () => setPlayingId(null);
         a.onerror = () => {
-          // 服务器上的音频文件可能已缺失（例如老数据）：用 /tts/sample 现场合成兜底
-          const f = friendById(friendId);
-          const fb = m.text ? ttsSampleUrl(m.text, f?.voice || "") : "";
-          if (fb && !a.src.endsWith(fb)) {
-            a.src = fb;
-            void a.play().catch(() => setPlayingId(null));
-            return;
-          }
-          setPlayingId(null);
+          // 音频文件失效（blob 过期/服务器缺失）→ 现场合成兜底
+          void (async () => {
+            const synth = await synthesizeVoice(m.text, friendId);
+            if (synth && !a.src.endsWith(synth)) {
+              a.src = synth;
+              void a.play().catch(() => setPlayingId(null));
+              return;
+            }
+            setPlayingId(null);
+          })();
         };
         void a.play().catch(() => setPlayingId(null));
         setPlayingId(m.id);
         return;
       }
       setPlayingId(m.id);
-      if (playingTimer.current) window.clearTimeout(playingTimer.current);
-      playingTimer.current = window.setTimeout(
-        () => setPlayingId(null),
-        Math.min(9000, (m.durationMs ?? 3000) * 1.05),
-      );
+      // 一条消息没有音频文件（本地模式只存了文字）→ 现场合成一条再播
+      void (async () => {
+        const synth = m.text ? await synthesizeVoice(m.text, friendId) : null;
+        if (synth) {
+          audioRef.current?.pause();
+          const a = new Audio(synth);
+          audioRef.current = a;
+          a.onended = () => setPlayingId(null);
+          void a.play().catch(() => setPlayingId(null));
+          return;
+        }
+        if (playingTimer.current) window.clearTimeout(playingTimer.current);
+        playingTimer.current = window.setTimeout(
+          () => setPlayingId(null),
+          Math.min(9000, (m.durationMs ?? 3000) * 1.05),
+        );
+      })();
     },
     [playingId],
   );

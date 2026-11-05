@@ -147,3 +147,16 @@ export function ttsSampleUrl(text: string, voice: string, friendId?: string): st
   if (isLocalMode()) return "";
   return server.ttsSampleUrl(text, voice, friendId);
 }
+
+/** 本地模式：现场合成语音并返回可播放 URL；服务器模式回落到 /tts/sample */
+export async function synthesizeVoice(text: string, friendId?: string): Promise<string | null> {
+  if (!text.trim()) return null;
+  if (isLocalMode()) {
+    const eng = await local();
+    const f = friendId ? await eng.localFriendById(friendId) : null;
+    const { fishTts } = await import("./local/tts");
+    const r = await fishTts(text, { gender: f?.gender === "male" ? "male" : "female" });
+    return r?.url ?? null;
+  }
+  return null;
+}

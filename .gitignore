@@ -57,3 +57,7 @@ mobile/android/app/build/
 mobile/android/local.properties
 mobile/android/app/src/main/assets/public/
 deliverables/
+
+# 本地端到端测试编译产物
+scripts/local-e2e/build/
+scripts/local-e2e/*.log

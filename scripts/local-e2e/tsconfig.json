@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./build",
+    "rootDir": "../../frontend/src/w4",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["../../frontend/src/w4/local/engine.ts"]
+}

@@ -208,6 +208,11 @@ export async function localLoadAll(): Promise<{
   };
 }
 
+export async function localFriendById(id: string): Promise<Friend | null> {
+  const st = await getState();
+  return st.friends.find((f) => f.id === id) ?? st.requests.find((f) => f.id === id) ?? null;
+}
+
 export async function localLoadFriendList(): Promise<{ friends: Friend[]; requests: Friend[] }> {
   const s = await getState();
   return { friends: s.friends, requests: s.requests };

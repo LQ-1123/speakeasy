@@ -221,7 +221,9 @@ class LLMClient:
             "top_p": self.cfg.top_p,
         }
         if extra:
-            kwargs.update(extra)
+            _eb = dict(kwargs.get("extra_body") or {})
+            _eb.update(extra)
+            kwargs["extra_body"] = _eb
         if self.cfg.extra_headers:
             kwargs["extra_headers"] = dict(self.cfg.extra_headers)
 

@@ -21,6 +21,7 @@ import {
 import { saveLlm, saveStt, saveTts } from "../api";
 
 import { loadKeys, saveKeys } from "../local/keys";
+import { playVoiceUrl, synthesizeVoice } from "../apiFacade";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
 import { Icon, Segmented, Switch } from "../ui";
@@ -578,6 +579,24 @@ function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "er
         }}
       >
         保存到本机
+      </button>
+      <button
+        className="w4-btn"
+        style={{ marginTop: 10, marginLeft: 8 }}
+        onClick={() =>
+          void (async () => {
+            toast("正在合成测试语音…");
+            const url = await synthesizeVoice("Hello! This is a voice test. Can you hear me clearly?");
+            if (!url) {
+              toast("合成失败：检查 SiliconFlow Key 和网络", "error");
+              return;
+            }
+            const ok = await playVoiceUrl(url);
+            toast(ok ? "开始播放测试语音" : "播放失败：手机音频权限/静音检查", ok ? "success" : "error");
+          })()
+        }
+      >
+        测试声音
       </button>
       <p className="w4-hint" style={{ marginTop: 10 }}>
         Key 只存在这台手机上，用于直接调用云端接口；不会上传到任何服务器。

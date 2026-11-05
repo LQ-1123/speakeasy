@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Play, X } from "lucide-react";
 
-import { ttsSampleUrl } from "../api";
+import { playVoiceUrl, synthesizeVoice, ttsSampleUrl } from "../apiFacade";
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { Avatar, Empty, Icon } from "../ui";

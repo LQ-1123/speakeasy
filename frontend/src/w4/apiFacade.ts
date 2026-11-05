@@ -186,3 +186,26 @@ export async function addExpression(better: string, original = "", explanation =
   if (isLocalMode()) return (await local()).localAddExpression(better, original, explanation);
   return server.addExpression(better, original, explanation);
 }
+
+/** 播放一段音频 URL：优先 WebAudio（荣耀/华为 WebView 更稳），失败再退回 <audio> */
+export async function playVoiceUrl(url: string): Promise<boolean> {
+  if (!url) return false;
+  try {
+    const { playUrlWebAudio } = await import("./local/tts");
+    const ok = await playUrlWebAudio(url);
+    if (ok) return true;
+  } catch {
+    /* 继续尝试 audio 元素 */
+  }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const a = new Audio(url);
+      a.onended = () => resolve();
+      a.onerror = () => reject(new Error("audio error"));
+      void a.play().then(() => resolve()).catch(reject);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}

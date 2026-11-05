@@ -37,6 +37,7 @@ import {
   callWarmup,
   changeFriendVoice,
   loadArchetypes,
+  playVoiceUrl,
   synthesizeVoice,
   translate as apiTranslate,
   ttsSampleUrl,
@@ -263,8 +264,8 @@ export function ChatPane({
           void (async () => {
             const synth = await synthesizeVoice(m.text, friendId);
             if (synth && !a.src.endsWith(synth)) {
-              a.src = synth;
-              void a.play().catch(() => setPlayingId(null));
+              const played = await playVoiceUrl(synth);
+              if (!played) setPlayingId(null);
               return;
             }
             setPlayingId(null);
@@ -280,11 +281,11 @@ export function ChatPane({
         const synth = m.text ? await synthesizeVoice(m.text, friendId) : null;
         if (synth) {
           audioRef.current?.pause();
-          const a = new Audio(synth);
-          audioRef.current = a;
-          a.onended = () => setPlayingId(null);
-          void a.play().catch(() => setPlayingId(null));
-          return;
+          const played = await playVoiceUrl(synth);
+          if (played) {
+            window.setTimeout(() => setPlayingId(null), Math.min(12000, (m.durationMs ?? 4000) * 1.05));
+            return;
+          }
         }
         if (playingTimer.current) window.clearTimeout(playingTimer.current);
         playingTimer.current = window.setTimeout(

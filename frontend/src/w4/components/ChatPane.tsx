@@ -758,7 +758,6 @@ export function ChatPane({
             setInfoOpen(true);
           }}
         >
-          <Avatar friend={friend} size={34} />
           <span className="w4-head-main">
             <span className="w4-head-title">{friend.name}</span>
             <span className="w4-head-sub">

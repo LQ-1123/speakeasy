@@ -649,7 +649,23 @@ export function ChatPane({
     setCallFriendSpeaking(false);
     callMutedRef.current = false;
     setCallMuted(false);
-    if (friend) await callWarmup(friend.id);
+    if (friend) {
+      await callWarmup(friend.id);
+      // 接通后对方先开口，避免通话一开始是完全静音的
+      const greet = (friend.greeting || "").trim() || "Hey! Can you hear me?";
+      setCallFriendText(greet);
+      void (async () => {
+        const url = await synthesizeVoice(greet, friend.id);
+        if (!url) return;
+        setCallFriendSpeaking(true);
+        callAudioPlaying.current = true;
+        const played = await playVoiceUrl(url);
+        window.setTimeout(() => {
+          setCallFriendSpeaking(false);
+          callAudioPlaying.current = false;
+        }, played ? Math.min(12000, 900 + greet.length * 75) : 200);
+      })();
+    }
   };
 
   const endCall = (seconds: number) => {

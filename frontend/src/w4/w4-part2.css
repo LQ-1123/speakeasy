@@ -1879,3 +1879,45 @@
 .w4-root .w4-rec-overlay {
   z-index: 65;
 }
+
+/* ===== 手机录音气泡：变绿色，挪到扇形按钮上方，避免重叠 ===== */
+@media (max-width: 899.98px) {
+  .w4-root .w4-rec-overlay {
+    position: fixed;
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: 248px;
+    transform: translateX(-50%);
+    width: auto;
+    min-width: 168px;
+    padding: 16px 22px 12px;
+    border-radius: 12px;
+    background: #95ec69;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.26);
+    z-index: 65;
+  }
+  /* 绿色气泡的小尾巴 */
+  .w4-root .w4-rec-overlay::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -7px;
+    margin-left: -7px;
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 8px solid #95ec69;
+  }
+  .w4-root .w4-rec-overlay .w4-rec-bars i {
+    background: #2f6b34 !important;
+  }
+  .w4-root .w4-rec-overlay .w4-rec-time {
+    color: #1f2d20;
+    font-weight: 600;
+  }
+  .w4-root .w4-rec-overlay .w4-rec-hint {
+    color: rgba(23, 45, 24, 0.55);
+  }
+}

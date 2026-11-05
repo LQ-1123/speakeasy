@@ -51,7 +51,7 @@ import {
   translate as apiTranslate,
   deleteMoment as apiDeleteMoment,
   loadFriendList as apiLoadFriendList,
-} from "./api";
+} from "./apiFacade";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
 
 export interface Settings {

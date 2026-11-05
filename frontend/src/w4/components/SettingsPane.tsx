@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { saveLlm, saveStt, saveTts } from "../api";
+import { loadKeys, saveKeys } from "../local/keys";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
 import { Icon, Segmented, Switch } from "../ui";
@@ -30,6 +31,7 @@ const SECTIONS = [
   { key: "notify", label: "提醒" },
   { key: "privacy", label: "隐私与数据" },
   { key: "about", label: "关于" },
+  { key: "local", label: "本地与密钥" },
 ] as const;
 
 export function SettingsPane({
@@ -77,6 +79,7 @@ export function SettingsPane({
             </div>
 
             {active === "llm" ? <LlmSection settings={settings} update={updateSettings} toast={showToast} /> : null}
+            {active === "local" ? <LocalKeysSection toast={showToast} /> : null}
             {active === "voice" ? (
               <VoiceSection settings={settings} update={updateSettings} toast={showToast} playing={playing} setPlaying={setPlaying} />
             ) : null}
@@ -544,6 +547,40 @@ function SectionTitle({ title, desc }: { title: string; desc: string }) {
     <div style={{ marginBottom: 18 }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
       <div style={{ fontSize: 12.5, color: "var(--w-text-3)", marginTop: 3 }}>{desc}</div>
+    </div>
+  );
+}
+
+/** 本地模式：所有云端 key 只保存在本机，不经过任何服务器 */
+function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "error" | "default") => void }) {
+  const [keys, setKeys] = useState(() => loadKeys());
+  const bind = (field: keyof typeof keys) => ({
+    value: keys[field],
+    onChange: (e: { target: { value: string } }) => setKeys({ ...keys, [field]: e.target.value }),
+  });
+  return (
+    <div className="w4-settings-section">
+      <div className="w4-field-label">DeepSeek Key（对话）</div>
+      <input className="w4-input" {...bind("llmKey")} placeholder="sk-..." />
+      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish Audio Key（语音合成）</div>
+      <input className="w4-input" {...bind("fishKey")} placeholder="sk-fish-..." />
+      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish 音色 Reference ID（可选）</div>
+      <input className="w4-input" {...bind("fishRef")} placeholder="留空则用默认音色" />
+      <div className="w4-field-label" style={{ marginTop: 12 }}>SiliconFlow Key（语音识别）</div>
+      <input className="w4-input" {...bind("sttKey")} placeholder="sk-..." />
+      <button
+        className="w4-btn is-primary"
+        style={{ marginTop: 16 }}
+        onClick={() => {
+          saveKeys(keys);
+          toast("已保存到本机");
+        }}
+      >
+        保存到本机
+      </button>
+      <p className="w4-hint" style={{ marginTop: 10 }}>
+        Key 只存在这台手机上，用于直接调用云端接口；不会上传到任何服务器。
+      </p>
     </div>
   );
 }

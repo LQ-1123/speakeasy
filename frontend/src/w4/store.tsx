@@ -378,7 +378,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     llm: {
       preset: "deepseek",
       baseUrl: "https://api.deepseek.com/v1",
-      model: "deepseek-chat",
+      model: "deepseek-flash",
       keyMasked: "sk-••••••••••••3f7a",
       hasKey: true,
     },

@@ -94,7 +94,7 @@ export function SettingsPane({
 /* ---------------------------------------------------------------- 对话模型 */
 
 const PRESETS = [
-  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", note: "便宜、中文好" },
+  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", note: "便宜、中文好" },
   { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", note: "最稳，略贵" },
   { id: "siliconflow", name: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-72B-Instruct", note: "国内直连" },
   { id: "custom", name: "自定义", baseUrl: "", model: "", note: "任何 OpenAI 兼容接口" },
@@ -116,7 +116,7 @@ function LlmSection({
   const [busy, setBusy] = useState(false);
 
   /* store 里的设置是异步从后端拉回来的：到了要同步进输入框，
-     否则页面永远停在 mock 的 deepseek-chat */
+     否则页面永远停在 mock 的 deepseek-flash */
   useEffect(() => {
     setBaseUrl(settings.llm.baseUrl);
     setModel(settings.llm.model);
@@ -183,7 +183,7 @@ function LlmSection({
       </div>
       <div className="w4-field">
         <div className="w4-field-label">模型名</div>
-        <input className="w4-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat" />
+        <input className="w4-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-flash" />
       </div>
       <div className="w4-field">
         <div className="w4-field-label">API Key</div>

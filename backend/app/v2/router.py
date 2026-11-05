@@ -12,6 +12,7 @@ import asyncio
 import json
 import mimetypes
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1659,6 +1660,33 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
     text = (text or "").strip()[:300]
     if not text:
         raise HTTPException(status_code=422, detail="text 不能为空")
+    # Fish 优先（~1.5s）；失败/未配置再回落 edge（国内可能很慢）
+    try:
+        from app.config import get_settings as _gs  # noqa: PLC0415
+        from app.voice import fish_tts  # noqa: PLC0415
+
+        cfg = _tts_store(request).load()
+        if cfg.provider == "fish" and cfg.fish_api_key.strip():
+            audio = await fish_tts.synthesize(
+                text,
+                api_key=cfg.fish_api_key,
+                base_url=cfg.fish_base_url,
+                model=cfg.fish_model,
+                reference_id=cfg.fish_reference_id,
+                audio_format=cfg.fish_format or "mp3",
+            )
+            if audio:
+                ext = (cfg.fish_format or "mp3").lower()
+                fname = f"sample_{uuid.uuid4().hex[:10]}.{ext}"
+                fpath = os.path.join(services.audio.audio_dir, fname)
+                with open(fpath, "wb") as fh:
+                    fh.write(audio)
+                mime = "audio/mpeg" if ext == "mp3" else "audio/wav"
+                return FileResponse(fpath, media_type=mime, filename=fname)
+    except Exception as _fish_exc:  # noqa: BLE001 - 回落 edge
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning("tts/sample 走 Fish 失败，回落 edge: %s", _fish_exc)
     try:
         path, _ = await services.voice.synth_to_wav(
             text, voice, out_dir=services.audio.audio_dir

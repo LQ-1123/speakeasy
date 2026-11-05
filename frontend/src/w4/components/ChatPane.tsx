@@ -428,6 +428,13 @@ export function ChatPane({
         if (ev.audioUrl) {
           callAudioQueue.current.push(ev.audioUrl);
           void pumpCallAudio();
+        } else if (ev.text) {
+          // 后端没给音频（拼接失败等）→ 前端现场用 /tts/sample 合成，保证通话有声音
+          const fb = ttsSampleUrl(ev.text, friend.voice || "");
+          if (fb) {
+            callAudioQueue.current.push(fb);
+            void pumpCallAudio();
+          }
         }
       } else if (ev.type === "done") {
         setCallWaiting(false);

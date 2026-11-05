@@ -1501,3 +1501,70 @@
 .w4-root .w4-rec-bar-btn.is-send:hover {
   background: #06ad56;
 }
+
+/* ===== 电脑端输入框：上面输入、下面工具条（微信 PC 样式） ===== */
+.w4-root .w4-cd {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--w-line, #e5e5e5);
+  border-radius: 10px;
+  background: var(--w-surface, #fff);
+  box-shadow: none;
+}
+.w4-root .w4-cd-input {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  cursor: text;
+  border-radius: 6px;
+}
+.w4-root .w4-cd-input .w4-composer-input {
+  flex: 1;
+  width: 100%;
+  min-height: 24px;
+  max-height: 132px;
+  padding: 3px 2px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+}
+.w4-root .w4-cd-input.is-voice .w4-composer-input {
+  caret-color: #07c160;
+}
+.w4-root .w4-cd-voice-hint {
+  display: none;
+}
+.w4-root .w4-cd-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.w4-root .w4-cd-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.w4-root .w4-cd-icons .w4-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.w4-root .w4-cd-icons .w4-icon-btn.is-active {
+  background: var(--w-green-soft, #eaf7ef);
+  color: var(--w-green-strong, #07c160);
+}
+.w4-root .w4-cd-icons .w4-icon-btn.is-rec {
+  color: #fa5151;
+}
+.w4-root .w4-cd .w4-send-btn {
+  height: 28px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 13px;
+}

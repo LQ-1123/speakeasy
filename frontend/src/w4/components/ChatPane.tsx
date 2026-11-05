@@ -98,6 +98,7 @@ export function ChatPane({
   const [cancelHint, setCancelHint] = useState(false);
   const [recZone, setRecZone] = useState<"cancel" | "transcribe" | null>(null);
   const [recMouse, setRecMouse] = useState(false);
+  const [voiceTranscribe, setVoiceTranscribe] = useState(false);
   const cancelZoneRef = useRef<HTMLDivElement | null>(null);
   const transcribeZoneRef = useRef<HTMLDivElement | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -148,6 +149,7 @@ export function ChatPane({
   }, [speakerOn]);
   const [mobileInfo, setMobileInfo] = useState(false);
   const [wide, setWide] = useState(false);
+  const [deskUI, setDeskUI] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
   const [msgMenu, setMsgMenu] = useState<{
     message: Message;
@@ -180,7 +182,14 @@ export function ChatPane({
     const update = () => setWide(mq.matches);
     update();
     mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    const mqDesk = window.matchMedia("(min-width: 900px)");
+    const updateDesk = () => setDeskUI(mqDesk.matches);
+    updateDesk();
+    mqDesk.addEventListener("change", updateDesk);
+    return () => {
+      mq.removeEventListener("change", update);
+      mqDesk.removeEventListener("change", updateDesk);
+    };
   }, []);
 
   useEffect(() => {
@@ -764,83 +773,38 @@ export function ChatPane({
 
           {/* 输入区 */}
           <div className="w4-composer">
-            <div className="w4-composer-inner">
-              <div className="w4-composer-actions">
-                <button
-                  className={`w4-icon-btn ${voiceMode ? "is-active" : ""}`}
-                  onClick={() => setVoiceMode((v) => !v)}
-                  aria-label={voiceMode ? "切换到打字" : "切换到语音"}
-                  title={voiceMode ? "打字" : "语音"}
-                >
-                  {voiceMode ? (
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                      <rect x="3" y="6" width="18" height="12" rx="2" />
-                      <path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" strokeLinecap="round" />
-                    </svg>
-                  ) : (
-                    <Mic size={17} strokeWidth={1.8} />
-                  )}
-                </button>
-              </div>
-
-              {voiceMode ? (
-                <button
-                  className={`w4-hold ${recording ? "is-rec" : ""} ${cancelHint ? "is-cancel" : ""}`}
+            {deskUI ? (
+              /* 电脑：上面输入、下面工具条；语音输入 = 长按鼠标 */
+              <div className="w4-composer-inner w4-cd">
+                <div
+                  className={`w4-cd-input${voiceMode ? " is-voice" : ""}${recording ? " is-rec" : ""}`}
                   onPointerDown={(e) => {
-                    const mouse = e.pointerType === "mouse";
-                    setRecMouse(mouse);
-                    if (mouse) {
-                      e.preventDefault();
-                      if (!recording) void startRecording(e.clientY);
-                      return;
+                    if (!voiceMode || e.pointerType === "touch") return;
+                    e.preventDefault();
+                    try {
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                    } catch {
+                      /* 合成事件可能没有真实 pointer，忽略 */
                     }
-                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                    setRecMouse(true);
                     void startRecording(e.clientY);
                   }}
-                  onPointerMove={(e) => {
-                    if (!recording || recMouse) return;
-                    const inside = (el: HTMLDivElement | null) => {
-                      if (!el) return false;
-                      const r = el.getBoundingClientRect();
-                      const pad = 12;
-                      return (
-                        e.clientX >= r.left - pad &&
-                        e.clientX <= r.right + pad &&
-                        e.clientY >= r.top - pad &&
-                        e.clientY <= r.bottom + pad
-                      );
-                    };
-                    let zone: "cancel" | "transcribe" | null = null;
-                    if (inside(transcribeZoneRef.current)) zone = "transcribe";
-                    else if (inside(cancelZoneRef.current)) zone = "cancel";
-                    else if (startY.current - e.clientY > 90) zone = "cancel";
-                    setRecZone(zone);
-                    setCancelHint(zone === "cancel");
-                  }}
                   onPointerUp={() => {
-                    if (recMouse) return;
-                    finishRecording(recZone === "cancel", recZone === "transcribe");
+                    if (voiceMode && recMouse && recording) {
+                      finishRecording(recZone === "cancel", voiceTranscribe);
+                    }
                   }}
-                  onPointerCancel={() => finishRecording(true)}
+                  onPointerCancel={() => {
+                    if (recMouse) finishRecording(true);
+                  }}
                 >
-                  {recording
-                    ? recMouse
-                      ? "录制中…"
-                      : recZone === "cancel"
-                        ? "松开取消"
-                        : recZone === "transcribe"
-                          ? "松开转文字"
-                          : "松开发送"
-                    : "按住 说话"}
-                </button>
-              ) : (
-                <div className="w4-composer-field">
                   <textarea
                     ref={inputRef}
                     className="w4-composer-input"
                     rows={1}
                     value={draft}
-                    placeholder={`跟 ${friend.name} 说点什么`}
+                    readOnly={voiceMode}
+                    placeholder={voiceMode ? "长按鼠标 语音输入" : `跟 ${friend.name} 说点什么`}
                     onChange={(e) => {
                       setDraft(e.target.value);
                       const el = e.target;
@@ -854,6 +818,53 @@ export function ChatPane({
                       }
                     }}
                   />
+                  {voiceMode && !recording ? (
+                    <span className="w4-cd-voice-hint">长按鼠标 语音输入</span>
+                  ) : null}
+                </div>
+                <div className="w4-cd-bar">
+                  <div className="w4-cd-icons">
+                    <button
+                      className={`w4-icon-btn ${emojiOpen ? "is-active" : ""}`}
+                      onClick={() => {
+                        setEmojiOpen((v) => !v);
+                        setPhotoOpen(false);
+                      }}
+                      aria-label="表情"
+                    >
+                      <Smile size={18} strokeWidth={1.7} />
+                    </button>
+                    <button
+                      className={`w4-icon-btn ${photoOpen ? "is-active" : ""}`}
+                      onClick={() => {
+                        setPhotoOpen((v) => !v);
+                        setEmojiOpen(false);
+                      }}
+                      aria-label="图片"
+                    >
+                      <ImageIcon size={18} strokeWidth={1.7} />
+                    </button>
+                    <button
+                      className={`w4-icon-btn ${voiceTranscribe ? "is-active" : ""}`}
+                      onClick={() => setVoiceTranscribe((v) => !v)}
+                      aria-label="语音转文字"
+                      title={voiceTranscribe ? "已开启：语音发送后自动转文字" : "语音发送后自动转文字"}
+                    >
+                      <Languages size={17} strokeWidth={1.8} />
+                    </button>
+                    <button
+                      className={`w4-icon-btn ${voiceMode ? "is-active" : ""}${recording ? " is-rec" : ""}`}
+                      onClick={() => {
+                        if (recording) return;
+                        setVoiceMode((v) => !v);
+                        setDraft("");
+                      }}
+                      aria-label={voiceMode ? "切换到打字" : "语音输入"}
+                      title={voiceMode ? "切换回打字" : "长按输入框说话"}
+                    >
+                      {voiceMode ? <Mic size={18} strokeWidth={1.8} /> : <Mic size={18} strokeWidth={1.8} />}
+                    </button>
+                  </div>
                   <button
                     className="w4-send-btn"
                     disabled={!draft.trim()}
@@ -862,31 +873,132 @@ export function ChatPane({
                     发送
                   </button>
                 </div>
-              )}
-
-              <div className="w4-composer-actions">
-                <button
-                  className={`w4-icon-btn ${emojiOpen ? "is-active" : ""}`}
-                  onClick={() => {
-                    setEmojiOpen((v) => !v);
-                    setPhotoOpen(false);
-                  }}
-                  aria-label="表情"
-                >
-                  <Smile size={18} strokeWidth={1.7} />
-                </button>
-                <button
-                  className={`w4-icon-btn ${photoOpen ? "is-active" : ""}`}
-                  onClick={() => {
-                    setPhotoOpen((v) => !v);
-                    setEmojiOpen(false);
-                  }}
-                  aria-label="图片"
-                >
-                  <ImageIcon size={18} strokeWidth={1.7} />
-                </button>
               </div>
-            </div>
+            ) : (
+              <div className="w4-composer-inner">
+                <div className="w4-composer-actions">
+                  <button
+                    className={`w4-icon-btn ${voiceMode ? "is-active" : ""}`}
+                    onClick={() => setVoiceMode((v) => !v)}
+                    aria-label={voiceMode ? "切换到打字" : "切换到语音"}
+                    title={voiceMode ? "打字" : "语音"}
+                  >
+                    {voiceMode ? (
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <rect x="3" y="6" width="18" height="12" rx="2" />
+                        <path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <Mic size={17} strokeWidth={1.8} />
+                    )}
+                  </button>
+                </div>
+
+                {voiceMode ? (
+                  <button
+                    className={`w4-hold ${recording ? "is-rec" : ""} ${cancelHint ? "is-cancel" : ""}`}
+                    onPointerDown={(e) => {
+                      const mouse = e.pointerType === "mouse";
+                      setRecMouse(mouse);
+                      if (mouse) {
+                        e.preventDefault();
+                        if (!recording) void startRecording(e.clientY);
+                        return;
+                      }
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      void startRecording(e.clientY);
+                    }}
+                    onPointerMove={(e) => {
+                      if (!recording || recMouse) return;
+                      const inside = (el: HTMLDivElement | null) => {
+                        if (!el) return false;
+                        const r = el.getBoundingClientRect();
+                        const pad = 12;
+                        return (
+                          e.clientX >= r.left - pad &&
+                          e.clientX <= r.right + pad &&
+                          e.clientY >= r.top - pad &&
+                          e.clientY <= r.bottom + pad
+                        );
+                      };
+                      let zone: "cancel" | "transcribe" | null = null;
+                      if (inside(transcribeZoneRef.current)) zone = "transcribe";
+                      else if (inside(cancelZoneRef.current)) zone = "cancel";
+                      else if (startY.current - e.clientY > 90) zone = "cancel";
+                      setRecZone(zone);
+                      setCancelHint(zone === "cancel");
+                    }}
+                    onPointerUp={() => {
+                      if (recMouse) return;
+                      finishRecording(recZone === "cancel", recZone === "transcribe");
+                    }}
+                    onPointerCancel={() => finishRecording(true)}
+                  >
+                    {recording
+                      ? recMouse
+                        ? "录制中…"
+                        : recZone === "cancel"
+                          ? "松开取消"
+                          : recZone === "transcribe"
+                            ? "松开转文字"
+                            : "松开发送"
+                      : "按住 说话"}
+                  </button>
+                ) : (
+                  <div className="w4-composer-field">
+                    <textarea
+                      ref={inputRef}
+                      className="w4-composer-input"
+                      rows={1}
+                      value={draft}
+                      placeholder={`跟 ${friend.name} 说点什么`}
+                      onChange={(e) => {
+                        setDraft(e.target.value);
+                        const el = e.target;
+                        el.style.height = "auto";
+                        el.style.height = `${Math.min(132, el.scrollHeight)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          send();
+                        }
+                      }}
+                    />
+                    <button
+                      className="w4-send-btn"
+                      disabled={!draft.trim()}
+                      onClick={send}
+                    >
+                      发送
+                    </button>
+                  </div>
+                )}
+
+                <div className="w4-composer-actions">
+                  <button
+                    className={`w4-icon-btn ${emojiOpen ? "is-active" : ""}`}
+                    onClick={() => {
+                      setEmojiOpen((v) => !v);
+                      setPhotoOpen(false);
+                    }}
+                    aria-label="表情"
+                  >
+                    <Smile size={18} strokeWidth={1.7} />
+                  </button>
+                  <button
+                    className={`w4-icon-btn ${photoOpen ? "is-active" : ""}`}
+                    onClick={() => {
+                      setPhotoOpen((v) => !v);
+                      setEmojiOpen(false);
+                    }}
+                    aria-label="图片"
+                  >
+                    <ImageIcon size={18} strokeWidth={1.7} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {emojiOpen ? (
@@ -948,10 +1060,10 @@ export function ChatPane({
                   : recZone === "transcribe"
                     ? "松开转文字"
                     : recMouse
-                      ? "点击下方按钮发送"
+                      ? "松开鼠标发送"
                       : "上滑取消 · 右滑转文字"}
               </div>
-              {recMouse ? (
+              {recMouse && false ? (
                 <div className="w4-rec-bar">
                   <button className="w4-rec-bar-btn" onClick={() => finishRecording(true)}>
                     <X size={15} strokeWidth={2.2} />

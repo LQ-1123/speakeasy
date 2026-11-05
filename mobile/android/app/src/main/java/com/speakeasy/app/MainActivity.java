@@ -27,24 +27,34 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onBackPressed() {
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-        String url = webView != null ? webView.getUrl() : null;
-        String hash = "";
-        if (url != null) {
-            int i = url.indexOf('#');
-            if (i >= 0) hash = url.substring(i);
-        }
-        boolean root =
-                hash.isEmpty()
-                        || hash.equals("#/")
-                        || hash.equals("#/chats")
-                        || hash.equals("#/contacts")
-                        || hash.equals("#/discover")
-                        || hash.equals("#/expressions")
-                        || hash.equals("#/me");
-        if (!root && webView != null) {
-            webView.evaluateJavascript("history.back()", null);
+        if (webView == null) {
+            super.onBackPressed();
             return;
         }
-        moveTaskToBack(true);
+        // 先问页面：如果有浮层（好友详情等）打开，由页面自己关闭；返回 handled 表示已处理
+        webView.evaluateJavascript(
+                "(window.w4HandleBack ? window.w4HandleBack() : 'unhandled')",
+                value -> {
+                    if (value != null && value.contains("handled")) return;
+                    String url = webView.getUrl();
+                    String hash = "";
+                    if (url != null) {
+                        int i = url.indexOf('#');
+                        if (i >= 0) hash = url.substring(i);
+                    }
+                    boolean root =
+                            hash.isEmpty()
+                                    || hash.equals("#/")
+                                    || hash.equals("#/chats")
+                                    || hash.equals("#/contacts")
+                                    || hash.equals("#/discover")
+                                    || hash.equals("#/expressions")
+                                    || hash.equals("#/me");
+                    if (!root) {
+                        webView.evaluateJavascript("history.back()", null);
+                        return;
+                    }
+                    moveTaskToBack(true);
+                });
     }
 }

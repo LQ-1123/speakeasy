@@ -174,6 +174,22 @@ export function ChatPane({
     if (!speakerOn) currentCallAudio.current?.pause();
   }, [speakerOn]);
   const [mobileInfo, setMobileInfo] = useState(false);
+
+  /* 系统返回键：详情浮层打开时先关闭浮层，而不是退回聊天列表 */
+  useEffect(() => {
+    const w = window as unknown as { w4HandleBack?: () => string };
+    w.w4HandleBack = () => {
+      if (infoOpen || mobileInfo) {
+        setInfoOpen(false);
+        setMobileInfo(false);
+        return "handled";
+      }
+      return "unhandled";
+    };
+    return () => {
+      delete w.w4HandleBack;
+    };
+  }, [infoOpen, mobileInfo]);
   const [wide, setWide] = useState(false);
   const [deskUI, setDeskUI] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);

@@ -568,7 +568,7 @@ function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "er
     <div className="w4-settings-section">
       <div className="w4-field-label">DeepSeek Key（对话）</div>
       <input className="w4-input" {...bind("llmKey")} placeholder="sk-..." />
-      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish Audio Key（语音合成）</div>
+      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish Audio Key（在线音色库，App 内可用）</div>
       <input className="w4-input" {...bind("fishKey")} placeholder="sk-fish-..." />
       <div className="w4-field-label" style={{ marginTop: 12 }}>Fish 音色 Reference ID（可选）</div>
       <input className="w4-input" {...bind("fishRef")} placeholder="留空则用默认音色" />

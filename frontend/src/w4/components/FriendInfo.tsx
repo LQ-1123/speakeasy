@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 /** 会话页右侧的资料卡。 */
 
 import { Clock, MapPin, Sparkles } from "lucide-react";
 
 import { previewVoice, playVoiceUrl, setFriendVoice as apiSetFriendVoice } from "../apiFacade";
 import { CLOSENESS, languageLabel } from "../format";
+import { cachedFishVoices, loadFishVoices, type FishVoice } from "../local/fish";
 import { COSY_VOICES } from "../local/tts";
 import { isLocalMode } from "../local/keys";
 import type { Friend } from "../model";
@@ -15,6 +18,17 @@ import { Avatar, Icon } from "../ui";
 export function FriendInfo({ friend }: { friend: Friend }) {
   const { expressions, updateFriendVoice, showToast } = useApp();
   const fromThisFriend = expressions.filter((e) => e.sourceFriendId === friend.id).length;
+  const [fishVoices, setFishVoices] = useState<FishVoice[]>(() => cachedFishVoices());
+  useEffect(() => {
+    if (!isLocalMode()) return;
+    let alive = true;
+    void loadFishVoices().then((list) => {
+      if (alive) setFishVoices(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const currentVoice = friend.voice || (friend.gender === "male" ? "alex" : "anna");
 
@@ -104,12 +118,23 @@ export function FriendInfo({ friend }: { friend: Friend }) {
           <div className="w4-info-label">TA 的声音</div>
           <select
             className="w4-select"
-            value={COSY_VOICES.some((v) => v.id === friend.voice) ? friend.voice : ""}
+            value={friend.voice.startsWith("fish:") || COSY_VOICES.some((v) => v.id === friend.voice) ? friend.voice : ""}
             onChange={(e) => void switchVoice(e.target.value)}
             style={{ marginBottom: 8 }}
           >
-            {!COSY_VOICES.some((v) => v.id === friend.voice) ? <option value="">当前：默认音色</option> : null}
-            <optgroup label="女声">
+            {!COSY_VOICES.some((v) => v.id === friend.voice) && !friend.voice.startsWith("fish:") ? (
+              <option value="">当前：默认音色</option>
+            ) : null}
+            {fishVoices.length ? (
+              <optgroup label={`Fish 音色库（${fishVoices.length} 个在线音色）`}>
+                {fishVoices.map((v) => (
+                  <option key={v.id} value={`fish:${v.id}`}>
+                    {v.gender === "male" ? "男" : "女"} · {v.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            <optgroup label="内置音色">
               {COSY_VOICES.filter((v) => v.gender === "female").map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.label}
@@ -128,6 +153,11 @@ export function FriendInfo({ friend }: { friend: Friend }) {
             <button
               className="w4-chip"
               onClick={() => {
+                if (fishVoices.length) {
+                  const v = fishVoices[Math.floor(Math.random() * fishVoices.length)];
+                  void switchVoice(`fish:${v.id}`);
+                  return;
+                }
                 const v = COSY_VOICES[Math.floor(Math.random() * COSY_VOICES.length)];
                 void switchVoice(v.id);
               }}
@@ -140,6 +170,7 @@ export function FriendInfo({ friend }: { friend: Friend }) {
           </div>
           <div style={{ fontSize: 12, color: "var(--w-text-3)", marginTop: 4 }}>
             换完发一条消息或打一次电话就能听到。
+            {fishVoices.length === 0 ? "（Fish 音色库需要 App 内使用；浏览器受跨域限制）" : ""}
           </div>
         </div>
       ) : null}

@@ -6,6 +6,7 @@
  */
 
 import { loadKeys } from "./keys";
+import { fishSynth } from "./fish";
 
 let _ctx: AudioContext | null = null;
 
@@ -80,12 +81,30 @@ export function fishTts(text: string, opts: TtsOptions = {}): Promise<TtsResult>
   const cleaned = (text || "").trim();
   if (!cleaned) return Promise.resolve(null);
   const k = loadKeys();
-  const picked = (opts.voiceId && voiceById(opts.voiceId)?.id) || voiceForFriend("", opts.gender);
+  const raw = (opts.voiceId || "").trim();
+  const picked = raw.startsWith("fish:")
+    ? raw
+    : voiceById(raw)?.id || voiceForFriend("", opts.gender);
   const cacheKey = `${picked}|${cleaned.slice(0, 120)}`;
   const hit = cache.get(cacheKey);
   if (hit) return hit;
 
   const task = (async (): Promise<TtsResult> => {
+    // Fish 音色库（App 内原生请求可用；浏览器跨域会失败并回落到内置音色）
+    if (picked.startsWith("fish:")) {
+      const r = await fishSynth(cleaned, picked.slice(5));
+      if (r) return r;
+      const fallback = voiceForFriend("", opts.gender);
+      return synthCosy(cleaned, fallback, k);
+    }
+    return synthCosy(cleaned, picked, k);
+  })();
+  cache.set(cacheKey, task);
+  return task;
+}
+
+async function synthCosy(cleaned: string, picked: string, k: ReturnType<typeof loadKeys>): Promise<TtsResult> {
+  {
     if (!k.sttKey.trim()) return null;
     try {
       const resp = await fetch(`${k.sttBase.replace(/\/+$/, "")}/audio/speech`, {
@@ -111,7 +130,5 @@ export function fishTts(text: string, opts: TtsOptions = {}): Promise<TtsResult>
     } catch {
       return null;
     }
-  })();
-  cache.set(cacheKey, task);
-  return task;
+  }
 }

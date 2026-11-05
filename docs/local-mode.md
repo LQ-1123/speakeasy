@@ -78,3 +78,20 @@ python scripts/web-local-server.py 8123
 
 服务器模式仍然保留：构建时不加 `NEXT_PUBLIC_LOCAL_MODE=1`，即连接原 FastAPI 后端。
 调试入口（仅本地模式）：浏览器控制台 `window.__w4debug`。
+
+## 七、Fish 音色库（可选，App 内可用）
+
+在「本地与密钥」里填 Fish Audio Key 后：
+
+- 新建好友时，会从 Fish 在线音色库里按性别随机挑一个音色；
+- 好友资料卡 →「TA 的声音」下拉框里会多出 **Fish 音色库（N 个在线音色）** 分组，可逐个试听、随机、更换；
+- 合成走 Fish 的 /v1/tts，音色比内置 8 个丰富得多。
+
+注意两点：
+
+1. **浏览器的 Web 版用不了 Fish**：Fish 接口不返回跨域头（预检 404），
+   这是浏览器安全策略，挂 VPN 也解决不了；Web 版会自动回落到内置音色。
+2. **App（APK）内可以正常用**：App 的网络请求走 Android 原生层
+   （CapacitorHttp），不受浏览器跨域限制；但需要手机能访问 pi.fish.audio
+   （国内网络通常需要代理/VPN）。
+3. 如果 Fish 请求失败（没网/Key 错），会自动回落到内置 CosyVoice 音色，不会没声音。

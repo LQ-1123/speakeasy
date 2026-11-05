@@ -47,9 +47,11 @@ const cache = new Map<string, Promise<TtsResult>>();
 
 export type TtsOptions = { gender?: "male" | "female"; refId?: string; voiceId?: string };
 
+/* 只用两个自然、稳定的音色；此前按好友随机分配 bella/claire/diana 等，
+   部分声线听感很怪，所以收回固定音色。 */
 const SF_VOICES: Record<"male" | "female", string[]> = {
-  male: ["alex", "benjamin", "charles", "david"],
-  female: ["anna", "bella", "claire", "diana"],
+  male: ["alex"],
+  female: ["anna"],
 };
 
 /** 按好友 id 稳定分配一个 CosyVoice 音色，同一好友聊天/通话音色一致 */

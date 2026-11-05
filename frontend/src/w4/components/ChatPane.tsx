@@ -903,7 +903,12 @@ export function ChatPane({
                         <path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" strokeLinecap="round" />
                       </svg>
                     ) : (
-                      <Mic size={17} strokeWidth={1.8} />
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M9 12h.01" />
+                        <path d="M12.5 9.5v5" />
+                        <path d="M16 10.5v3" />
+                      </svg>
                     )}
                   </button>
                 </div>

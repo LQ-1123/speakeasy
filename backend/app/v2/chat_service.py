@@ -1071,6 +1071,14 @@ class ChatService:
 
         ``language``：好友回复语言非英语时传给 STT，避免用英语模型硬转写日语/韩语等。
         """
+        # 服务器没有本地 Whisper 时，通话等路径也要优先走云端 STT
+        try:
+            _cloud = self.engines.stt.cloud_health()  # type: ignore[attr-defined]
+            if _cloud.get("configured") and _cloud.get("enabled", True):
+                prefer_local = False
+                fast = False
+        except Exception:  # noqa: BLE001
+            pass
         try:
             try:
                 result = await self.engines.stt.transcribe(

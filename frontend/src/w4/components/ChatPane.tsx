@@ -212,6 +212,16 @@ export function ChatPane({
   /** 播放中的消息：只允许一条同时响 */
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /* 离开聊天页暂停所有播放 */
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      currentCallAudio.current?.pause();
+      currentCallAudio.current = null;
+    },
+    [],
+  );
   const togglePlay = useCallback(
     (m: Message) => {
       if (playingId === m.id) {

@@ -15,6 +15,14 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
   const { requests, acceptRequest, declineRequest } = useApp();
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /* 离开新的朋友页暂停预览 */
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    },
+    [],
+  );
 
   /* 预取：把每条申请的招呼语音提前加载好，点下去直接响 */
   useEffect(() => {

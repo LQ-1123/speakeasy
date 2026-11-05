@@ -307,7 +307,7 @@ async def verify_config(cfg: LLMRuntimeConfig, *, timeout_s: float = 20.0) -> di
             resp = await client.chat.completions.create(
                 model=cfg.model,
                 messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-                max_tokens=8,
+                max_tokens=64,
                 temperature=0,
             )
         finally:

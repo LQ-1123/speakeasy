@@ -90,7 +90,7 @@ async def translate(
 
     try:
         chunks: list[str] = []
-        async for tok in llm.stream_chat(messages, temperature=0.2, max_tokens=400):
+        async for tok in llm.stream_chat(messages, temperature=0.2, max_tokens=1200):
             chunks.append(tok)
         out = "".join(chunks).strip().strip('"').strip("“”").strip()
         if not out:

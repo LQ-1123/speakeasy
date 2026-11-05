@@ -1053,7 +1053,7 @@ async def call_warmup(request: Request, friend_id: str) -> dict:
             return
         try:
             async for _ in llm.stream_chat(
-                [{"role": "user", "content": "Hi"}], max_tokens=1, temperature=0.0
+                [{"role": "user", "content": "Hi"}], max_tokens=64, temperature=0.0
             ):
                 break
         except Exception as exc:  # noqa: BLE001 - 预热失败不影响通话

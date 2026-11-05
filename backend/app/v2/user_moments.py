@@ -173,7 +173,7 @@ async def _comment_for(
             schema_hint='{"comment": "short comment"}',
             fallback=lambda: {"comment": fallback},
             temperature=0.8,
-            max_tokens=120,
+            max_tokens=600,
         )
         comment = _clean((data or {}).get("comment")) or fallback
     except Exception as exc:  # noqa: BLE001 - 评论失败不能影响用户发动态

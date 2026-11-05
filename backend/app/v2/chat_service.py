@@ -692,7 +692,7 @@ class ChatService:
 
         try:
             async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.65, max_tokens=70
+                messages, temperature=0.65, max_tokens=500
             ):
                 if not delta:
                     continue
@@ -907,7 +907,7 @@ class ChatService:
         chunks: list[str] = []
         try:
             async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.8, max_tokens=160
+                messages, temperature=0.8, max_tokens=500
             ):
                 if delta:
                     chunks.append(delta)
@@ -1211,7 +1211,7 @@ class ChatService:
         chunks: list[str] = []
         try:
             async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.85, max_tokens=140
+                messages, temperature=0.85, max_tokens=600
             ):
                 if delta:
                     chunks.append(delta)
@@ -1254,7 +1254,7 @@ class ChatService:
         chunks: list[str] = []
         try:
             async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.2, max_tokens=220
+                messages, temperature=0.2, max_tokens=800
             ):
                 if delta:
                     chunks.append(delta)

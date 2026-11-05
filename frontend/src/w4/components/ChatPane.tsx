@@ -16,6 +16,7 @@ import {
   Info,
   Languages,
   Mic,
+  MicOff,
   Minimize2,
   MoreHorizontal,
   Phone,
@@ -114,6 +115,23 @@ export function ChatPane({
   const [speakerOn, setSpeakerOn] = useState(true);
   const speakerOnRef = useRef(true);
   const currentCallAudio = useRef<HTMLAudioElement | null>(null);
+
+  /* ---- 免提自动断句（VAD）---- */
+  const vadRef = useRef<{
+    stream: MediaStream;
+    ctx: AudioContext;
+    analyser: AnalyserNode;
+    timer: number | null;
+    rec: MediaRecorder | null;
+    chunks: Blob[];
+    startedAt: number;
+    silenceSince: number;
+  } | null>(null);
+  const callListeningRef = useRef(false);
+  const callMutedRef = useRef(false);
+  const [callListening, setCallListening] = useState(false);
+  const [callMuted, setCallMuted] = useState(false);
+  const [callFriendSpeaking, setCallFriendSpeaking] = useState(false);
 
   /* 关掉声音时立刻停下正在播的那句，而不是等它播完 */
   useEffect(() => {
@@ -306,7 +324,7 @@ export function ChatPane({
     showToast(`已换成 ${a.accent_label || a.display_name}`, "success");
   };
 
-  /** 顺序播放后端逐句下发的语音，避免叠在一起 */
+  /** 顺序播放后端逐句下发的语音；播完自动继续听用户说 */
   const pumpCallAudio = async () => {
     if (callAudioPlaying.current) return;
     callAudioPlaying.current = true;
@@ -317,89 +335,213 @@ export function ChatPane({
         const audio = new Audio(url);
         audio.muted = !speakerOnRef.current;
         currentCallAudio.current = audio;
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        void audio.play().catch(() => resolve());
+        let settled = false;
+        let timer = 0;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (timer) window.clearTimeout(timer);
+          resolve();
+        };
+        audio.onended = finish;
+        audio.onerror = finish;
+        audio.addEventListener("loadedmetadata", () => {
+          const d = Number.isFinite(audio.duration) ? audio.duration : 0;
+          if (d > 0) {
+            if (timer) window.clearTimeout(timer);
+            timer = window.setTimeout(finish, d * 1000 + 2000);
+          }
+        });
+        /* 兜底：避免某些环境 ended 永远不触发，通话卡在“正在说” */
+        timer = window.setTimeout(finish, 20000);
+        void audio.play().catch(finish);
       });
     }
     callAudioPlaying.current = false;
+    setCallFriendSpeaking(false);
+    window.setTimeout(() => resumeCallListening(), 350);
   };
 
-  const startCallTalk = async () => {
+  /** 一段话录完：发给后端，流式拿回逐句语音 */
+  const sendCallBlob = async (blob: Blob, ms: number) => {
     if (!friend) return;
-    setCallTalking(true);
+    setCallWaiting(true);
     setCallUserText("");
-    callStartAt.current = Date.now();
-    try {
-      callStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setCallFriendText("");
+    const ok = await callTurnStream(friend.id, blob, ms, (ev) => {
+      if (ev.type === "transcript") {
+        setCallUserText(ev.text);
+      } else if (ev.type === "sentence") {
+        setCallFriendText((t) => (t ? t + " " : "") + ev.text);
+        setCallFriendSpeaking(true);
+        if (ev.audioUrl) {
+          callAudioQueue.current.push(ev.audioUrl);
+          void pumpCallAudio();
+        }
+      } else if (ev.type === "done") {
+        setCallWaiting(false);
+        setCallTurns((n) => n + 1);
+        window.setTimeout(() => {
+          if (callAudioPlaying.current || callAudioQueue.current.length) return;
+          setCallFriendSpeaking(false);
+          resumeCallListening();
+        }, 1200);
+      } else if (ev.type === "error") {
+        setCallWaiting(false);
+        showToast(ev.message || "这一轮没接上", "error");
+      }
+    });
+    if (!ok) {
+      setCallWaiting(false);
+      showToast("通话连接失败", "error");
+    }
+    if (!callAudioQueue.current.length && !callAudioPlaying.current) {
+      setCallWaiting(false);
+      window.setTimeout(() => resumeCallListening(), 350);
+    }
+  };
+
+  /** VAD 主循环：说话开始录音，停顿 ~0.85s 自动发送 */
+  function vadTick() {
+    const v = vadRef.current;
+    if (!v) return;
+    const buf: Float32Array<ArrayBuffer> = new Float32Array(
+      new ArrayBuffer(v.analyser.fftSize * Float32Array.BYTES_PER_ELEMENT),
+    );
+    v.analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let k = 0; k < buf.length; k += 1) sum += buf[k] * buf[k];
+    const rms = Math.sqrt(sum / buf.length);
+    const now = Date.now();
+    const speaking = rms > 0.02;
+
+    if (!v.rec && speaking) {
+      v.chunks = [];
       const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : "audio/webm";
-      const rec = new MediaRecorder(callStreamRef.current, { mimeType: mime });
-      callChunks.current = [];
+      const rec = new MediaRecorder(v.stream, { mimeType: mime });
       rec.ondataavailable = (e) => {
-        if (e.data && e.data.size) callChunks.current.push(e.data);
+        if (e.data && e.data.size) v.chunks.push(e.data);
       };
-      rec.start(200);
-      callRec.current = rec;
+      v.startedAt = now;
+      v.silenceSince = 0;
+      v.rec = rec;
+      rec.onstop = () => {
+        if (!vadRef.current) return;
+        const ms = Date.now() - v.startedAt;
+        const blob = new Blob(v.chunks, { type: rec.mimeType || "audio/webm" });
+        v.chunks = [];
+        v.rec = null;
+        setCallTalking(false);
+        if (blob.size >= 1200) void sendCallBlob(blob, ms);
+        else window.setTimeout(() => vadTick(), 200);
+      };
+      rec.start(150);
+      setCallTalking(true);
+    } else if (v.rec) {
+      if (speaking) {
+        v.silenceSince = 0;
+      } else if (!v.silenceSince) {
+        v.silenceSince = now;
+      }
+      const silentFor = v.silenceSince ? now - v.silenceSince : 0;
+      const total = now - v.startedAt;
+      if (silentFor >= 850 || total >= 15000) {
+        const rec = v.rec;
+        v.rec = null;
+        try {
+          if (rec && rec.state !== "inactive") rec.stop();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+    }
+    v.timer = window.setTimeout(vadTick, 100);
+  }
+
+  /** 恢复“继续听”：只在没静音、没在等回复、对方也没在说话时 */
+  const resumeCallListening = () => {
+    const v = vadRef.current;
+    if (!v || v.rec) return;
+    if (callMutedRef.current || !callListeningRef.current) return;
+    if (callWaiting) return;
+    if (callAudioPlaying.current) {
+      if (callAudioQueue.current.length || currentCallAudio.current) return;
+      callAudioPlaying.current = false;
+      setCallFriendSpeaking(false);
+    }
+    if (callFriendSpeaking) setCallFriendSpeaking(false);
+    if (v.timer) window.clearTimeout(v.timer);
+    v.timer = window.setTimeout(vadTick, 120);
+  };
+
+  const startVad = async () => {
+    if (vadRef.current || callMutedRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      vadRef.current = {
+        stream,
+        ctx,
+        analyser,
+        timer: null,
+        rec: null,
+        chunks: [],
+        startedAt: 0,
+        silenceSince: 0,
+      };
+      callListeningRef.current = true;
+      setCallListening(true);
+      resumeCallListening();
     } catch {
-      setCallTalking(false);
       showToast("没有麦克风权限，先在浏览器里允许一下", "error");
     }
   };
 
-  const finishCallTalk = () => {
-    if (!callTalking) return;
+  const stopVad = () => {
+    const v = vadRef.current;
+    vadRef.current = null;
+    callListeningRef.current = false;
+    setCallListening(false);
     setCallTalking(false);
-    const ms = Date.now() - callStartAt.current;
-    const rec = callRec.current;
-    const stream = callStreamRef.current;
-    if (!rec || !friend || ms < 500) {
-      if (rec && rec.state !== "inactive") rec.stop();
-      stream?.getTracks().forEach((t) => t.stop());
-      callRec.current = null;
-      callStreamRef.current = null;
-      if (ms < 500) showToast("说一句再松手");
-      return;
+    setCallFriendSpeaking(false);
+    if (!v) return;
+    if (v.timer) window.clearTimeout(v.timer);
+    try {
+      if (v.rec && v.rec.state !== "inactive") v.rec.stop();
+    } catch {
+      /* ignore */
     }
+    v.stream.getTracks().forEach((t) => t.stop());
+    void v.ctx.close().catch(() => {});
+  };
 
-    rec.onstop = () => {
-      const blob = new Blob(callChunks.current, { type: rec.mimeType || "audio/webm" });
-      callChunks.current = [];
-      stream?.getTracks().forEach((t) => t.stop());
-      callRec.current = null;
-      callStreamRef.current = null;
-      if (blob.size < 1200) {
-        showToast("没录到声音", "error");
-        return;
+  const toggleCallMute = () => {
+    const next = !callMutedRef.current;
+    callMutedRef.current = next;
+    setCallMuted(next);
+    const v = vadRef.current;
+    if (next) {
+      if (v?.timer) window.clearTimeout(v.timer);
+      if (v) {
+        try {
+          if (v.rec && v.rec.state !== "inactive") v.rec.stop();
+        } catch {
+          /* ignore */
+        }
+        v.rec = null;
       }
-
-      setCallWaiting(true);
-      setCallFriendText("");
-      void callTurnStream(friend.id, blob, ms, (ev) => {
-        if (ev.type === "transcript") {
-          setCallUserText(ev.text);
-        } else if (ev.type === "sentence") {
-          setCallFriendText((t) => (t ? t + " " : "") + ev.text);
-          if (ev.audioUrl) {
-            callAudioQueue.current.push(ev.audioUrl);
-            void pumpCallAudio();
-          }
-        } else if (ev.type === "done") {
-          setCallWaiting(false);
-          setCallTurns((n) => n + 1);
-        } else if (ev.type === "error") {
-          setCallWaiting(false);
-          showToast(ev.message || "这一轮没接上", "error");
-        }
-      }).then((ok) => {
-        if (!ok) {
-          setCallWaiting(false);
-          showToast("通话连接失败", "error");
-        }
-      });
-    };
-    rec.stop();
+      setCallTalking(false);
+    } else {
+      resumeCallListening();
+      if (!vadRef.current) void startVad();
+    }
   };
 
   const startCall = async () => {
@@ -407,10 +549,14 @@ export function ChatPane({
     setCallTurns(0);
     setCallUserText("");
     setCallFriendText("");
+    setCallFriendSpeaking(false);
+    callMutedRef.current = false;
+    setCallMuted(false);
     if (friend) await callWarmup(friend.id);
   };
 
   const endCall = (seconds: number) => {
+    stopVad();
     setCalling(false);
     callAudioQueue.current = [];
     currentCallAudio.current?.pause();
@@ -424,6 +570,16 @@ export function ChatPane({
       showToast(callTurns > 0 ? `通话结束，聊了 ${callTurns} 轮` : "通话结束，摘要已存进会话");
     }
   };
+
+  useEffect(() => {
+    if (!calling) {
+      stopVad();
+      return;
+    }
+    if (callPhase === "live" && !callMutedRef.current) void startVad();
+    return () => stopVad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calling, callPhase]);
 
   useEffect(() => {
     if (!calling) return;
@@ -745,9 +901,11 @@ export function ChatPane({
               friendText={callFriendText}
               talking={callTalking}
               waiting={callWaiting}
+              listening={callListening}
+              muted={callMuted}
+              friendSpeaking={callFriendSpeaking}
               speakerOn={speakerOn}
-              onTalkStart={() => void startCallTalk()}
-              onTalkEnd={finishCallTalk}
+              onToggleMute={toggleCallMute}
               onToggleSpeaker={() => setSpeakerOn((v) => !v)}
               onEnd={() => endCall(callSeconds)}
             />
@@ -1153,9 +1311,11 @@ function CallOverlay({
   friendText,
   talking,
   waiting,
+  listening,
+  muted,
+  friendSpeaking,
   speakerOn,
-  onTalkStart,
-  onTalkEnd,
+  onToggleMute,
   onToggleSpeaker,
   onEnd,
 }: {
@@ -1167,9 +1327,11 @@ function CallOverlay({
   friendText: string;
   talking: boolean;
   waiting: boolean;
+  listening: boolean;
+  muted: boolean;
+  friendSpeaking: boolean;
   speakerOn: boolean;
-  onTalkStart: () => void;
-  onTalkEnd: () => void;
+  onToggleMute: () => void;
   onToggleSpeaker: () => void;
   onEnd: () => void;
 }) {
@@ -1179,13 +1341,17 @@ function CallOverlay({
   const status =
     phase === "dialing"
       ? "正在连接…"
-      : talking
-        ? "正在听你说，松手就发出去"
-        : waiting
-          ? `${friend.name} 正在想怎么回你…`
-          : turns === 0
-            ? "免提已开 · 按住话筒说话"
-            : `已聊 ${turns} 轮 · 按住话筒继续说`;
+      : muted
+        ? "已静音，点一下话筒继续"
+        : friendSpeaking
+          ? `${friend.name} 正在说…`
+          : waiting
+            ? `${friend.name} 正在想怎么回你…`
+            : talking
+              ? "在听你说…"
+              : turns === 0
+                ? "免提中 · 你说完停顿一下，我就回你"
+                : `已聊 ${turns} 轮 · 继续说就好`;
 
   return (
     <div className="w4-call">
@@ -1224,7 +1390,7 @@ function CallOverlay({
         <div className="w4-call-sub">
           {userText ? <div className="w4-call-line is-me">你：{userText}</div> : null}
           {friendText ? <div className="w4-call-line">{friendText}</div> : null}
-          {talking || waiting ? (
+          {talking || waiting || friendSpeaking ? (
             <span className="w4-call-wave" aria-hidden>
               <i /><i /><i /><i /><i /><i /><i />
             </span>
@@ -1237,16 +1403,13 @@ function CallOverlay({
       <div className="w4-call-keys">
         <div className="w4-call-key">
           <button
-            className={`w4-call-keybtn is-talk${talking ? " is-rec" : ""}`}
-            onPointerDown={() => void onTalkStart()}
-            onPointerUp={onTalkEnd}
-            onPointerCancel={onTalkEnd}
-            onPointerLeave={() => talking && onTalkEnd()}
-            aria-label="按住说话"
+            className={`w4-call-keybtn is-talk${talking ? " is-rec" : ""}${muted ? " is-off" : ""}`}
+            onClick={onToggleMute}
+            aria-label={muted ? "打开麦克风" : "静音"}
           >
-            <Mic size={27} strokeWidth={1.9} />
+            {muted ? <MicOff size={27} strokeWidth={1.9} /> : <Mic size={27} strokeWidth={1.9} />}
           </button>
-          <span>{talking ? "松开发送" : "按住说话"}</span>
+          <span>{muted ? "已静音" : talking ? "正在听你说" : "免提中"}</span>
         </div>
 
         <div className="w4-call-key">

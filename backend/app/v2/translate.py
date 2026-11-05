@@ -184,7 +184,7 @@ async def translate_text(
     ]
     try:
         chunks: list[str] = []
-        async for token in llm.stream_chat(messages, temperature=0.15, max_tokens=600):
+        async for token in llm.stream_chat(messages, temperature=0.15, max_tokens=1200):
             if token:
                 chunks.append(token)
         out = "".join(chunks).strip().strip('"').strip("“”").strip()

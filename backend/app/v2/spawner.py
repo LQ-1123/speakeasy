@@ -766,7 +766,7 @@ class PersonaSpawner:
                 schema_hint=_PERSONA_SCHEMA_HINT,
                 fallback=lambda: dict(fallback),
                 temperature=0.9,
-                max_tokens=500,
+                max_tokens=1500,
             )
         except Exception as exc:  # noqa: BLE001 - 兜底不能失败
             log.warning("捏人 LLM 调用异常（%s: %s），使用确定性兜底", type(exc).__name__, exc)
@@ -789,7 +789,7 @@ class PersonaSpawner:
                 schema_hint='{"message": "..."}',
                 fallback=lambda: {"message": fallback},
                 temperature=0.9,
-                max_tokens=200,
+                max_tokens=800,
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("破冰 LLM 调用异常（%s: %s），使用确定性兜底", type(exc).__name__, exc)

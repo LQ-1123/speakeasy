@@ -114,7 +114,7 @@ class LLMSettings(BaseModel):
     api_key: str = ""
     model: str = "deepseek-chat"
     temperature: float = 0.85
-    max_tokens: int = 220
+    max_tokens: int = 1600
     top_p: float = 0.95
     timeout_s: float = 30.0
     max_retries: int = 1
@@ -122,7 +122,7 @@ class LLMSettings(BaseModel):
     # 建议服务用的小模型（可指向同一端点），留空则复用主模型
     suggestion_model: str = ""
     suggestion_temperature: float = 0.4
-    suggestion_max_tokens: int = 400
+    suggestion_max_tokens: int = 800
     suggestion_timeout_s: float = 20.0
     extra_headers: dict[str, str] = Field(default_factory=dict)
     # 调试/离线：不调用真实 API，用本地规则生成回复（便于无 key 演示)

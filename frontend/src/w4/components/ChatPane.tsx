@@ -778,33 +778,13 @@ export function ChatPane({
               <div className={`w4-composer-inner w4-cd${recording ? " is-recording" : ""}`}>
                 <div
                   className={`w4-cd-input${voiceMode ? " is-voice" : ""}${recording ? " is-rec" : ""}`}
-                  onPointerDown={(e) => {
-                    if (!voiceMode || e.pointerType === "touch") return;
-                    e.preventDefault();
-                    try {
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                    } catch {
-                      /* 合成事件可能没有真实 pointer，忽略 */
-                    }
-                    setRecMouse(true);
-                    void startRecording(e.clientY);
-                  }}
-                  onPointerUp={() => {
-                    if (voiceMode && recMouse && recording) {
-                      finishRecording(recZone === "cancel", voiceTranscribe);
-                    }
-                  }}
-                  onPointerCancel={() => {
-                    if (recMouse) finishRecording(true);
-                  }}
                 >
                   <textarea
                     ref={inputRef}
                     className="w4-composer-input"
                     rows={1}
                     value={draft}
-                    readOnly={voiceMode}
-                    placeholder={voiceMode ? "长按鼠标 语音输入" : `跟 ${friend.name} 说点什么`}
+                    placeholder={`跟 ${friend.name} 说点什么`}
                     onChange={(e) => {
                       setDraft(e.target.value);
                       const el = e.target;
@@ -847,14 +827,14 @@ export function ChatPane({
                   </div>
                   <div className="w4-cd-right">
                     <button
-                      className={`w4-cd-voice-btn${voiceMode ? " is-on" : ""}`}
+                      className={`w4-cd-voice-btn${recording ? " is-on" : ""}`}
                       onClick={() => {
                         if (recording) return;
-                        setVoiceMode((v) => !v);
-                        setDraft("");
+                        setRecMouse(true);
+                        void startRecording(0);
                       }}
-                      aria-label={voiceMode ? "切换到打字" : "语音输入"}
-                      title={voiceMode ? "切换回打字" : "点击后长按输入框说话"}
+                      aria-label="语音输入"
+                      title="点击开始录音"
                     >
                       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                         <circle cx="12" cy="12" r="9" />
@@ -881,25 +861,27 @@ export function ChatPane({
                     >
                       <X size={17} strokeWidth={2.1} />
                     </button>
-                    <button
-                      className={`w4-cd-rec-pill${voiceTranscribe ? " is-text" : ""}`}
-                      onClick={() => setVoiceTranscribe((v) => !v)}
-                      aria-label="转文字"
-                    >
-                      <Languages size={16} strokeWidth={1.9} />
-                      <span className="w4-cd-rec-word">{voiceTranscribe ? "转文字" : "转文字"}</span>
+                    <div className="w4-cd-rec-pill">
+                      <button
+                        className="w4-cd-rec-text"
+                        onClick={() => finishRecording(false, true)}
+                        aria-label="转文字发送"
+                      >
+                        <Languages size={16} strokeWidth={1.9} />
+                        <span>转文字</span>
+                      </button>
                       <span className="w4-cd-rec-dots" aria-hidden>
                         <i /><i /><i /><i /><i /><i />
                       </span>
                       <span className="w4-cd-rec-time">{recSeconds}"</span>
-                    </button>
-                    <button
-                      className="w4-cd-rec-send"
-                      onClick={() => finishRecording(false, voiceTranscribe)}
-                      aria-label="发送录音"
-                    >
-                      <ArrowUp size={20} strokeWidth={2.6} />
-                    </button>
+                      <button
+                        className="w4-cd-rec-send"
+                        onClick={() => finishRecording(false, false)}
+                        aria-label="发送录音"
+                      >
+                        <ArrowUp size={19} strokeWidth={2.6} />
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>

@@ -21,7 +21,7 @@ import {
 import { saveLlm, saveStt, saveTts } from "../api";
 
 import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
-import { playVoiceUrl, synthesizeVoice } from "../apiFacade";
+import { exportLocalData, importLocalData, playVoiceUrl, synthesizeVoice, wipeLocalData } from "../apiFacade";
 import type { Route } from "../model";
 import { useApp, type Settings } from "../store";
 import { Icon, Segmented, Switch } from "../ui";
@@ -602,8 +602,60 @@ function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "er
       >
         测试声音
       </button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+        <button
+          className="w4-btn"
+          onClick={() =>
+            void (async () => {
+              const data = await exportLocalData();
+              if (!data) return toast("导出失败", "error");
+              const blob = new Blob([data], { type: "application/json" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `speakeasy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+              a.click();
+              URL.revokeObjectURL(a.href);
+              toast("备份已导出");
+            })()
+          }
+        >
+          导出数据
+        </button>
+        <label className="w4-btn" style={{ cursor: "pointer" }}>
+          导入数据
+          <input
+            type="file"
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files && e.target.files[0];
+              if (!file) return;
+              void (async () => {
+                const text = await file.text();
+                const ok = await importLocalData(text);
+                toast(ok ? "导入成功，正在刷新…" : "导入失败：不是有效的备份文件", ok ? "success" : "error");
+                if (ok) window.setTimeout(() => window.location.reload(), 800);
+              })();
+            }}
+          />
+        </label>
+        <button
+          className="w4-btn"
+          onClick={() =>
+            void (async () => {
+              if (!window.confirm("清空本机所有好友、聊天、动态？此操作不可撤销。")) return;
+              await wipeLocalData();
+              toast("已清空，正在刷新…");
+              window.setTimeout(() => window.location.reload(), 800);
+            })()
+          }
+        >
+          清空数据
+        </button>
+      </div>
       <p className="w4-hint" style={{ marginTop: 10 }}>
         Key 只存在这台手机上，用于直接调用云端接口；不会上传到任何服务器。
+        数据也只在本机，换手机时用「导出数据」备份、新手机「导入数据」。
       </p>
     </div>
   );

@@ -169,6 +169,15 @@ const engine = require("./build/local/engine.js");
   const mems = await engine.localLoadExpressions();
   console.log("   记忆提炼已触发（聊满 3 轮自动执行）");
 
+  console.log("8) 数据导出 / 导入…");
+  const backup = await engine.localExportData();
+  const wiped = await engine.localWipeData();
+  const afterWipe = await engine.localLoadFriendList();
+  const imported = await engine.localImportData(backup);
+  const afterImport = await engine.localLoadFriendList();
+  console.log("   导出大小:", (backup || "").length, "| 清空:", wiped, "| 清空后好友:", afterWipe.friends.length);
+  console.log("   导入:", imported, "| 导入后好友:", afterImport.friends.length, "| 消息:", (await engine.localFetchMessages(req.id) || []).length);
+
   const pass =
     requests.length > 0 &&
     theirs.length > 0 &&
@@ -181,7 +190,9 @@ const engine = require("./build/local/engine.js");
     Boolean(published) &&
     Boolean(commented) &&
     Boolean(expr) &&
-    expressions.length >= 1;
+    expressions.length >= 1 &&
+    imported &&
+    afterImport.friends.length === 1;
   console.log(`\n结果: ${pass ? "PASS" : "FAIL"}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s）`);
   process.exit(pass ? 0 : 2);
 })().catch((e) => {

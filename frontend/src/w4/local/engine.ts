@@ -708,3 +708,64 @@ export async function localExtractMemory(friendId: string): Promise<void> {
     /* 忽略 */
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* 数据导出 / 导入 / 清空（换手机用）                                  */
+/* ------------------------------------------------------------------ */
+
+export async function localExportData(): Promise<string> {
+  const st = await getState();
+  const payload = {
+    app: "speakeasy-local",
+    version: 1,
+    exportedAt: nowIso(),
+    profile: st.profile,
+    friends: st.friends,
+    requests: st.requests,
+    // 音频是 blob URL，导出时去掉（导入后播放会自动重新合成）
+    messages: st.messages.map((m) => ({ ...m, audio: undefined })),
+    moments: st.moments.map((m) => ({ ...m, comments: m.comments ?? [] })),
+    expressions: st.expressions,
+    memories: st.memories,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+export async function localImportData(json: string): Promise<boolean> {
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    if (!data || data.app !== "speakeasy-local") return false;
+    const next: LocalState = {
+      profile: (data.profile as Profile | null) ?? null,
+      friends: Array.isArray(data.friends) ? (data.friends as Friend[]) : [],
+      requests: Array.isArray(data.requests) ? (data.requests as Friend[]) : [],
+      messages: Array.isArray(data.messages) ? (data.messages as Message[]) : [],
+      moments: Array.isArray(data.moments) ? (data.moments as Moment[]) : [],
+      expressions: Array.isArray(data.expressions) ? (data.expressions as Expression[]) : [],
+      memories: (data.memories as LocalState["memories"]) ?? {},
+    };
+    state = next;
+    await dbSet(STATE_KEY, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function localWipeData(): Promise<boolean> {
+  try {
+    await dbSet(STATE_KEY, {
+      profile: null,
+      friends: [],
+      requests: [],
+      messages: [],
+      moments: [],
+      expressions: [],
+      memories: {},
+    });
+    state = null;
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -209,3 +209,18 @@ export async function playVoiceUrl(url: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function exportLocalData(): Promise<string | null> {
+  if (!isLocalMode()) return null;
+  return (await local()).localExportData();
+}
+
+export async function importLocalData(json: string): Promise<boolean> {
+  if (!isLocalMode()) return false;
+  return (await local()).localImportData(json);
+}
+
+export async function wipeLocalData(): Promise<boolean> {
+  if (!isLocalMode()) return false;
+  return (await local()).localWipeData();
+}

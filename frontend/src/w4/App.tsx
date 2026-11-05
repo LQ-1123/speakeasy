@@ -20,6 +20,7 @@ import "./w4-part2.css";
 
 import type { Route, Section } from "./model";
 import { AppProvider, useApp } from "./store";
+import { isLocalMode } from "./local/keys";
 import { Icon } from "./ui";
 import { Rail } from "./components/Rail";
 import { ChatList } from "./components/ChatList";
@@ -327,6 +328,8 @@ function Shell() {
         ) : null}
       </div>
 
+      <LocalWelcome />
+
       {toast ? (
         <div className="w4-toast" key={toast.id} role="status">
           {toast.tone === "success" ? (
@@ -346,5 +349,61 @@ export function App() {
     <AppProvider>
       <Shell />
     </AppProvider>
+  );
+}
+
+/** 本地模式首次进入：三步上手引导 */
+function LocalWelcome() {
+  const { profile } = useApp();
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    if (!isLocalMode()) return;
+    try {
+      const dismissed = window.localStorage.getItem("speakeasy.welcome.dismissed") === "1";
+      if (!dismissed && !profile?.name) setShow(true);
+    } catch {
+      /* ignore */
+    }
+  }, [profile?.name]);
+
+  const dismiss = () => {
+    try {
+      window.localStorage.setItem("speakeasy.welcome.dismissed", "1");
+    } catch {
+      /* ignore */
+    }
+    setShow(false);
+  };
+
+  if (!show) return null;
+  return (
+    <div className="w4-overlay" role="dialog" aria-modal="true">
+      <div className="w4-dialog" style={{ maxWidth: 420 }}>
+        <div className="w4-dialog-title">欢迎使用 SpeakEasy 本地版</div>
+        <p className="w4-hint" style={{ marginTop: 8 }}>
+          所有数据只存在这台设备上，不需要服务器。三步就能开始：
+        </p>
+        <ol className="w4-hint" style={{ margin: "10px 0 0 18px", lineHeight: 1.9 }}>
+          <li>设置 → 本地与密钥：填 DeepSeek 和 SiliconFlow 两个 Key</li>
+          <li>我 → 右上角铅笔：填昵称、目标语言</li>
+          <li>发现 → 偶遇：捏个好友，通过后就能聊天 / 语音 / 通话</li>
+        </ol>
+        <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+          <button
+            className="w4-btn is-primary"
+            onClick={() => {
+              dismiss();
+              window.location.hash = "#/settings/local";
+            }}
+          >
+            去填 Key
+          </button>
+          <button className="w4-btn" onClick={dismiss}>
+            先逛逛
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

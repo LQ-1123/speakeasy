@@ -129,6 +129,8 @@ export function ChatPane({
   const cancelZoneRef = useRef<HTMLDivElement | null>(null);
   const transcribeZoneRef = useRef<HTMLDivElement | null>(null);
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingUrl, setPendingUrl] = useState("");
   const [infoOpen, setInfoOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceList, setVoiceList] = useState<ArchetypeLite[]>([]);
@@ -219,7 +221,16 @@ export function ChatPane({
     const file = e.target.files?.[0];
     e.target.value = "";
     setPhotoOpen(false);
-    if (file) void sendImage(friendId, file);
+    if (!file) return;
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    setPendingImage(file);
+    setPendingUrl(URL.createObjectURL(file));
+  };
+
+  const clearPendingImage = () => {
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    setPendingImage(null);
+    setPendingUrl("");
   };
 
   /* 未读清零 */
@@ -326,6 +337,13 @@ export function ChatPane({
 
   const send = () => {
     const text = draft.trim();
+    if (pendingImage) {
+      void sendImage(friendId, pendingImage, text);
+      clearPendingImage();
+      setDraft("");
+      inputRef.current?.focus();
+      return;
+    }
     if (!text) return;
     sendText(friendId, text);
     setDraft("");
@@ -872,6 +890,20 @@ export function ChatPane({
 
           {/* 输入区 */}
           <div className="w4-composer">
+      {pendingImage ? (
+        <div className="w4-attach">
+          <img src={pendingUrl} alt="" />
+          <button onClick={clearPendingImage} aria-label="移除图片">×</button>
+        </div>
+      ) : null}
+
+      {pendingImage ? (
+        <div className="w4-attach">
+          <img src={pendingUrl} alt="" />
+          <button onClick={clearPendingImage} aria-label="移除图片">×</button>
+        </div>
+      ) : null}
+
             {deskUI ? (
               /* 电脑：上面输入、下面工具条；语音输入 = 长按鼠标 */
               <div className={`w4-composer-inner w4-cd${recording ? " is-recording" : ""}`}>
@@ -966,7 +998,7 @@ export function ChatPane({
                         </button>
                         <button
                           className="w4-send-btn"
-                          disabled={!draft.trim()}
+                          disabled={!draft.trim() && !pendingImage}
                           onClick={send}
                         >
                           发送

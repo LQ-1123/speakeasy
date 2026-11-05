@@ -111,7 +111,7 @@ interface Store {
     opts?: { openTranscript?: boolean },
   ) => Promise<void>;
   sendVoice: (friendId: string, durationMs: number) => void;
-  sendImage: (friendId: string, file: Blob) => void;
+  sendImage: (friendId: string, file: Blob, text?: string) => void;
   markRead: (friendId: string) => void;
   toggleZh: (key: string) => void;
   /** 单条消息翻译：没有译文就现翻，有就收起/展开 */
@@ -700,7 +700,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const sendImage = useCallback(
-    async (friendId: string, file: Blob) => {
+    async (friendId: string, file: Blob, text = "") => {
       const localUrl = URL.createObjectURL(file);
       setMessages((list) => [
         ...list,
@@ -709,13 +709,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           friendId,
           from: "me",
           kind: "image",
-          text: "",
+          text,
           image: localUrl,
           time: new Date().toISOString(),
           read: false,
         },
       ]);
-      const ok = await apiUploadChatImage(friendId, file);
+      const ok = await apiUploadChatImage(friendId, file, text);
       if (!ok) {
         showToast("图片发送失败，请检查网络", "error");
         return;

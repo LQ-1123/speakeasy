@@ -57,6 +57,27 @@ const PHOTOS = [
   "/mock/photos/night.jpg",
 ];
 
+
+/* WebAudio 播放：荣耀/华为 WebView 对 <audio> 支持差，用 AudioContext 解码播放更稳 */
+let _waCtx: AudioContext | null = null;
+async function playWebAudio(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return false;
+    const buf = await res.arrayBuffer();
+    _waCtx = _waCtx ?? new AudioContext();
+    if (_waCtx.state === "suspended") await _waCtx.resume();
+    const audio = await _waCtx.decodeAudioData(buf);
+    const src = _waCtx.createBufferSource();
+    src.buffer = audio;
+    src.connect(_waCtx.destination);
+    src.start();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function ChatPane({
   friendId,
   onBack,
@@ -429,12 +450,9 @@ export function ChatPane({
           callAudioQueue.current.push(ev.audioUrl);
           void pumpCallAudio();
         } else if (ev.text) {
-          // 后端没给音频（拼接失败等）→ 前端现场用 /tts/sample 合成，保证通话有声音
+          // 后端没给音频 → 前端用 WebAudio 现场合成播放（绕过 <audio> 兼容问题）
           const fb = ttsSampleUrl(ev.text, friend.voice || "");
-          if (fb) {
-            callAudioQueue.current.push(fb);
-            void pumpCallAudio();
-          }
+          if (fb) void playWebAudio(fb);
         }
       } else if (ev.type === "done") {
         setCallWaiting(false);

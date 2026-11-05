@@ -722,8 +722,9 @@ export async function markThreadRead(friendId: string) {
 }
 
 /** 「新的朋友」试听：让后端按这句话 + 这个声线现合成一段 wav */
-export function ttsSampleUrl(text: string, voice: string): string {
+export function ttsSampleUrl(text: string, voice: string, friendId?: string): string {
   const q = new URLSearchParams({ text: text.slice(0, 200), voice: voice || "en-GB-RyanNeural" });
+  if (friendId) q.set("friend_id", friendId);
   return `${BASE}/tts/sample?${q.toString()}`;
 }
 

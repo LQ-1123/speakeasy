@@ -904,7 +904,7 @@ async def test_tts_settings(request: Request) -> dict:
             api_key=cfg.fish_api_key,
             base_url=cfg.fish_base_url,
             model=cfg.fish_model,
-            reference_id=cfg.fish_reference_id,
+            reference_id=_ref,
         )
     except Exception as exc:  # noqa: BLE001
         return {
@@ -1655,7 +1655,7 @@ async def get_audio(request: Request, filename: str) -> FileResponse:
 
 
 @router.get("/tts/sample")
-async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural") -> FileResponse:
+async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural", friend_id: str | None = None) -> FileResponse:
     services = _services(request)
     text = (text or "").strip()[:300]
     if not text:
@@ -1666,6 +1666,14 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
         from app.voice import fish_tts  # noqa: PLC0415
 
         cfg = _tts_store(request).load()
+        _ref = cfg.fish_reference_id
+        if friend_id:
+            try:
+                _fr = await asyncio.to_thread(services.db.get_friend, friend_id)
+                if _fr and (_fr.get("fish_voice_id") or "").strip():
+                    _ref = _fr["fish_voice_id"].strip()
+            except Exception:  # noqa: BLE001
+                pass
         if cfg.provider == "fish" and cfg.fish_api_key.strip():
             audio = await fish_tts.synthesize(
                 text,

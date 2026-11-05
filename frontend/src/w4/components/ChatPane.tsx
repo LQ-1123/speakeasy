@@ -446,12 +446,9 @@ export function ChatPane({
           if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
         });
         setCallFriendSpeaking(true);
-        if (ev.audioUrl) {
-          callAudioQueue.current.push(ev.audioUrl);
-          void pumpCallAudio();
-        } else if (ev.text) {
-          // 后端没给音频 → 前端用 WebAudio 现场合成播放（绕过 <audio> 兼容问题）
-          const fb = ttsSampleUrl(ev.text, friend.voice || "");
+        // 通话语音：忽略后端 audioUrl，统一由前端用 WebAudio 现场合成播放
+        if (ev.text) {
+          const fb = ttsSampleUrl(ev.text, friend.voice || "", friend.id);
           if (fb) void playWebAudio(fb);
         }
       } else if (ev.type === "done") {

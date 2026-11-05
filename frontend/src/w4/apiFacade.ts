@@ -160,3 +160,18 @@ export async function synthesizeVoice(text: string, friendId?: string): Promise<
   }
   return null;
 }
+
+export async function callTurnStream(
+  friendId: string,
+  blob: Blob,
+  durationMs: number,
+  onEvent: (e: import("./api").CallTurnEvent) => void,
+) {
+  if (isLocalMode()) {
+    const eng = await local();
+    return eng.localCallTurnStream(friendId, blob, durationMs, (e) =>
+      onEvent(e as unknown as import("./api").CallTurnEvent),
+    );
+  }
+  return server.callTurnStream(friendId, blob, durationMs, onEvent);
+}

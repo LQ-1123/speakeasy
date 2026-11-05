@@ -393,3 +393,77 @@ export async function localTranslate(text: string): Promise<string | null> {
 export function localHasLlmKey(): boolean {
   return Boolean(loadKeys().llmKey.trim());
 }
+
+function splitSentences(text: string): string[] {
+  const parts = text
+    .split(/(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return [text.trim()].filter(Boolean);
+  return parts.slice(0, 4);
+}
+
+export type LocalCallEvent =
+  | { type: "transcript"; text: string }
+  | { type: "sentence"; index: number; text: string; audioUrl: string }
+  | { type: "done"; totalTurns: number }
+  | { type: "error"; message: string };
+
+/** 本地语音通话一回合：STT → LLM → 逐句 TTS */
+export async function localCallTurnStream(
+  friendId: string,
+  blob: Blob,
+  durationMs: number,
+  onEvent: (e: LocalCallEvent) => void,
+): Promise<boolean> {
+  const s = await getState();
+  const friend = s.friends.find((f) => f.id === friendId);
+  if (!friend) {
+    onEvent({ type: "error", message: "好友不存在" });
+    return false;
+  }
+  let text = "";
+  try {
+    text = await transcribeBlob(blob);
+  } catch {
+    text = "";
+  }
+  onEvent({ type: "transcript", text });
+  if (!text.trim()) {
+    onEvent({ type: "error", message: "没有听清，再说一次？" });
+    return false;
+  }
+  appendMessage(
+    makeMessage({ friendId, from: "me", text, kind: "voice", durationMs, read: true }),
+  );
+  await persist();
+
+  try {
+    const reply = await generateReply(friend, text);
+    const sentences = splitSentences(reply);
+    let firstAudio: string | undefined;
+    for (let i = 0; i < sentences.length; i += 1) {
+      const audio = await fishTts(sentences[i], {
+        gender: friend.gender === "male" ? "male" : "female",
+      });
+      if (i === 0) firstAudio = audio?.url;
+      onEvent({ type: "sentence", index: i, text: sentences[i], audioUrl: audio?.url ?? "" });
+    }
+    appendMessage(
+      makeMessage({
+        friendId,
+        from: "friend",
+        text: reply,
+        kind: "call",
+        audio: firstAudio,
+      }),
+    );
+    friend.turns += 1;
+    await persist();
+    onEvent({ type: "done", totalTurns: friend.turns });
+    return true;
+  } catch (e) {
+    onEvent({ type: "error", message: String(e).slice(0, 120) });
+    return false;
+  }
+}

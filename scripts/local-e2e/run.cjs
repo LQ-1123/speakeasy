@@ -126,7 +126,43 @@ const engine = require("./build/local/engine.js");
   const zh = await engine.localTranslate(reply.text);
   console.log("   中文:", (zh || "").slice(0, 80));
 
-  const pass = requests.length > 0 && theirs.length > 0 && Boolean(reply.text) && Boolean(reply.audio);
+  console.log("6) 本地通话回合（合成语音 → STT → LLM → 逐句 TTS）…");
+  const speechResp = await fetch(keys.sttBase.replace(/\/+$/, "") + "/audio/speech", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + keys.sttKey,
+    },
+    body: JSON.stringify({
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      input: "Hello! I just finished a long day at work and I feel tired.",
+      voice: "FunAudioLLM/CosyVoice2-0.5B:anna",
+      response_format: "mp3",
+    }),
+  });
+  if (!speechResp.ok) {
+    console.log("FAIL: 无法生成测试语音", speechResp.status);
+    process.exit(1);
+  }
+  const speechBlob = new Blob([await speechResp.arrayBuffer()], { type: "audio/mpeg" });
+  const events = [];
+  const callOk = await engine.localCallTurnStream(req.id, speechBlob, 2500, (e) => events.push(e));
+  const transcript = events.find((e) => e.type === "transcript");
+  const sentences = events.filter((e) => e.type === "sentence");
+  const done = events.find((e) => e.type === "done");
+  console.log("   通话成功:", callOk, "| 转写:", transcript && transcript.text);
+  console.log("   回复句数:", sentences.length, "| 有音频:", sentences.filter((x) => x.audioUrl).length);
+  console.log("   首句:", sentences[0] && sentences[0].text);
+  console.log("   done:", done && done.totalTurns);
+
+  const pass =
+    requests.length > 0 &&
+    theirs.length > 0 &&
+    Boolean(reply.text) &&
+    Boolean(reply.audio) &&
+    callOk &&
+    sentences.length > 0 &&
+    sentences.some((x) => x.audioUrl);
   console.log(`\n结果: ${pass ? "PASS" : "FAIL"}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s）`);
   process.exit(pass ? 0 : 2);
 })().catch((e) => {

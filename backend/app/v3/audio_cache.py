@@ -71,10 +71,16 @@ def _fish_ref(cfg: Any) -> str:
     return str(getattr(cfg, "fish_reference_id", "") or "")
 
 
-def _fish_token(cfg: Any) -> str:
-    ref = _fish_ref(cfg)
+def _fish_token(cfg: Any, persona: dict | None = None) -> str:
+    ref = _persona_ref(cfg, persona)
     digest = hashlib.sha1(ref.encode("utf-8")).hexdigest()[:8] if ref else "default"
     return f"fish-{digest}"
+
+
+def _persona_ref(cfg: Any, persona: dict | None = None) -> str:
+    """人物专属音色优先，没有才用全局参考音色。"""
+    own = str((persona or {}).get("fish_voice_id") or "").strip()
+    return own or _fish_ref(cfg)
 
 
 def _voice_for(post: dict, persona: dict) -> tuple[str, str]:
@@ -129,7 +135,7 @@ class PersonaAudioCache:
         lang, voice = _voice_for(post, persona)
         cfg = _load_tts_cfg()
         if _fish_enabled(cfg):
-            voice = _fish_token(cfg)
+            voice = _fish_token(cfg, persona)
         safe_voice = voice.replace("/", "_")
         name = f"{post['id']}-{content_hash}-{safe_voice}.{self.ext}"
         return os.path.join(self.cache_dir, name), lang, voice
@@ -185,7 +191,7 @@ class PersonaAudioCache:
                         api_key=str(getattr(cfg, "fish_api_key", "") or ""),
                         base_url=str(getattr(cfg, "fish_base_url", "") or ""),
                         model=str(getattr(cfg, "fish_model", "") or ""),
-                        reference_id=_fish_ref(cfg),
+                        reference_id=_persona_ref(cfg, persona),
                         audio_format="wav",
                     )
                     if audio:

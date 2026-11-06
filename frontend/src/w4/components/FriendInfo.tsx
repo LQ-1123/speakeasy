@@ -45,7 +45,11 @@ export function FriendInfo({ friend }: { friend: Friend }) {
   };
 
   const previewCurrent = async () => {
-    const url = await previewVoice("Hi! This is how I sound when we talk.", currentVoice);
+    const url = await previewVoice(
+      "Hi! This is how I sound when we talk.",
+      currentVoice,
+      friend.id,
+    );
     if (!url) {
       showToast("试听失败：检查网络或 Key", "error");
       return;

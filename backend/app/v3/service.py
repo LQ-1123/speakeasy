@@ -810,6 +810,81 @@ class V3Service:
         except Exception:  # noqa: BLE001
             return set()
 
+    # -------------------------------------------------------------- #
+    # 每人固定一个 Fish 音色（发现/试听/聊天/电话一致）
+    # -------------------------------------------------------------- #
+    async def assign_fish_voices(self, limit: int = 40) -> int:
+        """给还没有 fish 音色的人物从音色库挑一个（按性别+语言），并同步给好友。"""
+        try:
+            from app.config import get_settings  # noqa: PLC0415
+            from app.voice import fish_tts  # noqa: PLC0415
+            from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+            cfg = TTSConfigStore(str(get_settings().data_path)).load()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("读取 TTS 配置失败: %s", exc)
+            return 0
+        if str(getattr(cfg, "provider", "")) != "fish":
+            return 0
+        key = str(getattr(cfg, "fish_api_key", "") or "").strip()
+        if not key:
+            return 0
+
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, language, gender FROM personas"
+                " WHERE COALESCE(fish_voice_id, '') = '' LIMIT ?",
+                (limit,),
+            ).fetchall()
+            used = {
+                str(r[0])
+                for r in self.conn.execute(
+                    "SELECT DISTINCT fish_voice_id FROM personas WHERE COALESCE(fish_voice_id, '') != ''"
+                ).fetchall()
+            }
+        assigned = 0
+        base_url = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "")
+        for row in rows:
+            lang = str(row["language"] or "en")
+            gender = str(row["gender"] or "")
+            # 先同语言+性别；不够不同就用同性别、再不行任意（保证尽量一人一色）
+            plan = [(lang, gender), (lang, gender), ("", gender), ("", gender), ("", ""), ("", "")]
+            ref = ""
+            for lang_arg, gender_arg in plan:
+                try:
+                    candidate = await fish_tts.pick_voice_for(
+                        language=lang_arg,
+                        gender=gender_arg,
+                        api_key=key,
+                        base_url=base_url,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("挑选 Fish 音色失败: %s", exc)
+                    continue
+                if candidate and candidate not in used:
+                    ref = candidate
+                    break
+                ref = ref or candidate or ""
+            if not ref:
+                continue
+            used.add(ref)
+            with self.lock, self.conn:
+                self.conn.execute(
+                    "UPDATE personas SET fish_voice_id=? WHERE id=?", (ref, row["id"])
+                )
+                self.conn.execute(
+                    "UPDATE friends SET fish_voice_id=? WHERE id IN"
+                    " (SELECT friend_id FROM friendships WHERE persona_id=?)",
+                    (ref, row["id"]),
+                )
+            assigned += 1
+        if assigned:
+            log.info("已为 %d 个 AI 人物分配专属 Fish 音色", assigned)
+        return assigned
+
+    def _persona_fish_voice(self, persona: dict) -> str:
+        return str((persona or {}).get("fish_voice_id") or "").strip()
+
     def discover_next(self, user_id: str | None = None, *, language: str | None = None) -> dict | None:
         """从 Persona 池里挑一位还没成为好友的人物。
 
@@ -956,6 +1031,7 @@ class V3Service:
             "avatar_options": str(persona.get("avatar_options") or ""),
             "archetype_id": str(persona.get("archetype_id") or ""),
             "voice_id": str(persona.get("voice_id") or ""),
+            "fish_voice_id": str(persona.get("fish_voice_id") or ""),
             "nationality": str(persona.get("country") or ""),
             "city": str(persona.get("city") or ""),
             "timezone": str(persona.get("timezone") or "UTC"),

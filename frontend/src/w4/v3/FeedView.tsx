@@ -428,10 +428,20 @@ export function FeedCard({
 }) {
   const isPersona = item.kind === "persona_post";
   const author = item.author;
-  // 用户动态（非 AI 人物）统一跟随「我」的资料，避免名字/头像不一致
+  // 用户动态跟随「我」的资料；AI 人物统一用客户端 Avataaars 渲染（与服务端头像二选一）
   const isUserPost = item.kind === "user_post";
   const displayName = isUserPost && myName ? myName : author.nickname;
-  const displayAvatar = isUserPost && myAvatar ? myAvatar : author.avatar;
+  const personaAvatar = isPersona
+    ? personaAvatarSrc(
+        author.avatar_seed || author.id,
+        author.avatar_style,
+        author.avatar_options,
+        author.avatar,
+      )
+    : "";
+  const displayAvatar = isUserPost
+    ? myAvatar || author.avatar
+    : personaAvatar || author.avatar;
 
   /* 翻译 / 朗读：信息流是英语内容，翻译走 V2 的 LLM 翻译链路，
      朗读用该人物自己的声线（后端 /persona-posts/{id}/speech 合成并缓存）。 */

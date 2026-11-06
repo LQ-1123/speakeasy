@@ -405,7 +405,53 @@ async def _llm_persona(
     return data
 
 
-def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tuple[str, int]:
+async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
+    """从 Fish 音色库挑一个尽量没被别人用过的音色（按语言+性别）。"""
+    try:
+        from app.config import get_settings  # noqa: PLC0415
+        from app.voice import fish_tts  # noqa: PLC0415
+        from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+        cfg = TTSConfigStore(str(get_settings().data_path)).load()
+        if str(getattr(cfg, "provider", "")) != "fish":
+            return ""
+        key = str(getattr(cfg, "fish_api_key", "") or "").strip()
+        if not key:
+            return ""
+        with db._lock:  # noqa: SLF001
+            used = {
+                str(r[0])
+                for r in db.conn.execute(
+                    "SELECT DISTINCT fish_voice_id FROM personas"
+                    " WHERE COALESCE(fish_voice_id, '') != ''"
+                ).fetchall()
+            }
+        base_url = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "")
+        plan = [
+            (language or "en", gender or ""),
+            (language or "en", gender or ""),
+            ("", gender or ""),
+            ("", gender or ""),
+            ("", ""),
+            ("", ""),
+        ]
+        candidate = ""
+        for lang_arg, gender_arg in plan:
+            candidate = await fish_tts.pick_voice_for(
+                language=lang_arg,
+                gender=gender_arg,
+                api_key=key,
+                base_url=base_url,
+            )
+            if candidate and candidate not in used:
+                return candidate
+        return candidate or ""
+    except Exception as exc:  # noqa: BLE001
+        log.debug("分配 Fish 音色失败: %s", exc)
+        return ""
+
+
+async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tuple[str, int]:
     """写入一位游客人物 + 它的动态，返回 (persona_id, 帖数)。"""
     from app.v3.avatar_style import default_options
 
@@ -416,12 +462,14 @@ def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tup
     created = now_local()
     posts = list(persona.get("posts") or [])[:POSTS_PER_PERSONA]
     options = json.dumps(default_options({**persona, "id": pid}), ensure_ascii=False)
+    fish_ref = await _pick_fish_voice(db, lang, str(persona.get("gender") or ""))
     with db._lock, db.conn:  # noqa: SLF001
         db.conn.execute(
             "INSERT INTO personas (id, nickname, avatar, avatar_seed, avatar_style, avatar_options,"
             " bio, personality, interests, language, country, city, timezone, occupation, age,"
-            " gender, voice_id, archetype_id, ai_config, status, created_at, lifecycle, expires_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " gender, voice_id, fish_voice_id, archetype_id, ai_config, status, created_at,"
+            " lifecycle, expires_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 pid,
                 str(persona.get("nickname") or "Guest")[:40],
@@ -440,6 +488,7 @@ def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tup
                 int(persona.get("age") or 27),
                 str(persona.get("gender") or "female"),
                 VOICE_BY_LANG[lang][len(pid) % len(VOICE_BY_LANG[lang])],
+                fish_ref,
                 "",
                 json.dumps({"generated": "daily", "day": day}, ensure_ascii=False),
                 "active",
@@ -511,7 +560,7 @@ async def generate_daily(
         if persona is None:
             persona = _fallback_persona(index, day, lang)
             source = "template" if index == 0 else source
-        pid, posts = _insert_persona(db, persona, day=day, expires_at=expires)
+        pid, posts = await _insert_persona(db, persona, day=day, expires_at=expires)
         created_personas += 1
         created_posts += posts
         persona_rows.append({**persona, "id": pid})

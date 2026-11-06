@@ -1902,7 +1902,7 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
                 api_key=cfg.fish_api_key,
                 base_url=cfg.fish_base_url,
                 model=cfg.fish_model,
-                reference_id=cfg.fish_reference_id,
+                reference_id=_ref or cfg.fish_reference_id,
                 audio_format=cfg.fish_format or "mp3",
             )
             if audio:

@@ -51,7 +51,7 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
 
   /** 试听：有预生成的语音文件就直接播（即时）；没有才现场合成兜底 */
   const playPreview = (friend: Friend) => {
-    const src = friend.greetingAudio || (friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice) : "");
+    const src = friend.greetingAudio || (friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice, friend.id) : "");
     if (!src) return;
     if (playingId === friend.id) {
       audioRef.current?.pause();
@@ -65,7 +65,7 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
     a.onended = () => setPlayingId(null);
     a.onerror = () => {
       // 预生成音频缺失（例如旧数据）→ 现场用 /tts/sample 合成
-      const fb = friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice) : "";
+      const fb = friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice, friend.id) : "";
       if (fb && !a.src.endsWith(fb)) {
         a.src = fb;
         a.play().then(() => setPlayingId(friend.id)).catch(() => setPlayingId(null));

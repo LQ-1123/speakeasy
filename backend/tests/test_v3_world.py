@@ -639,6 +639,53 @@ def test_profile_language_levels_and_feed_filter(world_db):
         assert "de" in langs
 
 
+def test_persona_fish_voice_assignment_and_friend_sync(world_db, monkeypatch):
+    """每个 AI 人物分到固定 Fish 音色；加好友后好友继承同一音色。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    db, tmp_path = world_db
+    app, service, _voice = _make_app(db, tmp_path)
+
+    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(personas)")}
+    assert "fish_voice_id" in cols
+
+    fake_cfg = SimpleNamespace(
+        provider="fish",
+        fish_api_key="test-key",
+        fish_base_url="https://api.fish.audio",
+    )
+    import app.voice.fish_tts as fish_tts
+    import app.voice.tts_config as tts_config
+
+    monkeypatch.setattr(tts_config.TTSConfigStore, "load", lambda self: fake_cfg)
+
+    picked: list[str] = []
+
+    async def fake_pick(**kwargs):
+        ref = f"fv-{kwargs.get('gender') or 'x'}-{kwargs.get('language') or 'en'}"
+        picked.append(ref)
+        return ref
+
+    monkeypatch.setattr(fish_tts, "pick_voice_for", fake_pick)
+
+    assigned = asyncio.run(service.assign_fish_voices(limit=5))
+    assert assigned == 5
+    rows = db.conn.execute(
+        "SELECT id, nickname, fish_voice_id FROM personas WHERE fish_voice_id != '' LIMIT 5"
+    ).fetchall()
+    assert len(rows) == 5
+    assert all(r["fish_voice_id"].startswith("fv-") for r in rows)
+
+    # 再加好友：好友行必须带上人物的 Fish 音色
+    pid = rows[0]["id"]
+    result = service.add_friend("u_fish_voice_test", pid)
+    friend_id = result["friend_id"]
+    friend = db.get_friend(friend_id, any_owner=True)
+    assert friend is not None
+    assert friend["fish_voice_id"] == rows[0]["fish_voice_id"]
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

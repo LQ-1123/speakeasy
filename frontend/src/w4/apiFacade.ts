@@ -259,8 +259,12 @@ export async function setFriendVoice(friendId: string, voice: string): Promise<b
 }
 
 /** 试听某个具体音色（本地模式） */
-export async function previewVoice(text: string, voice: string): Promise<string | null> {
-  if (!isLocalMode()) return null;
+export async function previewVoice(
+  text: string,
+  voice: string,
+  friendId?: string,
+): Promise<string | null> {
+  if (!isLocalMode()) return server.ttsSampleUrl(text, voice, friendId);
   const { fishTts } = await import("./local/tts");
   const r = await fishTts(text, { voiceId: voice });
   return r?.url ?? null;

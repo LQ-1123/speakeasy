@@ -262,6 +262,12 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 )
                 log.info("migrated personas: added %s column", col)
                 pcols.add(col)
+        if pcols and "fish_voice_id" not in pcols:
+            db.conn.execute(
+                "ALTER TABLE personas ADD COLUMN fish_voice_id TEXT NOT NULL DEFAULT ''"
+            )
+            log.info("migrated personas: added fish_voice_id column")
+            pcols.add("fish_voice_id")
         if pcols and "interaction_count" not in pcols:
             db.conn.execute(
                 "ALTER TABLE personas ADD COLUMN interaction_count INTEGER NOT NULL DEFAULT 0"
@@ -455,6 +461,11 @@ def sync_persona_friends(db: Any) -> int:
                     ),
                     voice_id = (
                         SELECT p.voice_id FROM friendships f
+                        JOIN personas p ON p.id = f.persona_id
+                        WHERE f.friend_id = friends.id LIMIT 1
+                    ),
+                    fish_voice_id = (
+                        SELECT p.fish_voice_id FROM friendships f
                         JOIN personas p ON p.id = f.persona_id
                         WHERE f.friend_id = friends.id LIMIT 1
                     )

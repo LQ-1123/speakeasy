@@ -77,6 +77,12 @@ async def lifespan(app: FastAPI):
         app.state.v3 = V3Service(app.state.v2.db, engines, str(settings.data_path))
         log.info("v3 服务就绪：world=%s social=%s", world, app.state.v3.config.public())
 
+        # 先分配每人的专属音色，再预热朗读音频（否则预合成会统一用全局参考音色）
+        try:
+            await app.state.v3.assign_fish_voices()
+        except Exception as exc:  # noqa: BLE001 - 失败不影响启动
+            log.debug("v3 Fish 音色分配失败: %s", exc)
+
         # 朗读毫秒级：后台把信息流第一条音频预先合成并落盘，点击直接读文件
         from app.v3.audio_cache import PersonaAudioCache  # noqa: PLC0415
 
@@ -99,6 +105,19 @@ async def lifespan(app: FastAPI):
                 media_dir=os.path.join(str(settings.data_path), "media"),
             ),
             name="v3-daily-world",
+        )
+
+        # 存量人物补 Fish 专属音色（按性别+语言从音色库挑，幂等，后台跑不阻塞）
+        async def _assign_voices() -> None:
+            try:
+                count = await app.state.v3.assign_fish_voices()
+                if count:
+                    log.info("v3 Fish 音色分配完成：%d 个", count)
+            except Exception as exc:  # noqa: BLE001 - 失败不影响主流程
+                log.debug("v3 Fish 音色分配失败: %s", exc)
+
+        app.state.v3_voice_task = asyncio.create_task(
+            _assign_voices(), name="v3-fish-voices"
         )
     except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
         log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
@@ -162,6 +181,9 @@ async def lifespan(app: FastAPI):
                 await v2.aclose()
             except Exception as exc:  # noqa: BLE001
                 log.debug("v2 关闭失败: %s", exc)
+        v3_voice_task = getattr(app.state, "v3_voice_task", None)
+        if v3_voice_task is not None and not v3_voice_task.done():
+            v3_voice_task.cancel()
         daily_task = getattr(app.state, "daily_task", None)
         if daily_task is not None and not daily_task.done():
             daily_task.cancel()

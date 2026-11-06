@@ -152,29 +152,22 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
       {editOpen ? (
         <EditProfileDialog
           onClose={() => setEditOpen(false)}
-          onSave={(patch) => {
+          onSave={async (patch) => {
+            const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday, {
+              city: patch.city,
+              job: patch.job,
+              interests: patch.interests,
+              gender: patch.gender,
+            });
+            if (!ok) {
+              showToast("资料没保存成功，请稍后再试");
+              return false;
+            }
             updateProfile(patch);
-            setEditOpen(false);
-            void (async () => {
-              const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday, {
-                city: patch.city,
-                job: patch.job,
-                interests: patch.interests,
-                gender: patch.gender,
-              });
-              if (!ok) {
-        showToast("资料没保存成功，稍后再试");
-        return;
-      }
-      showToast("正在按你的资料匹配语伴，约 20 秒…");
-      window.dispatchEvent(new Event("speakeasy:refresh"));
-      let tries = 0;
-      const timer = window.setInterval(() => {
-        window.dispatchEvent(new Event("speakeasy:refresh"));
-        tries += 1;
-        if (tries >= 8) window.clearInterval(timer);
-      }, 4_000);
-            })();
+            showToast("资料已保存");
+            /* 保存成功后再刷新，确保后端数据已落库 */
+            window.setTimeout(() => window.location.reload(), 400);
+            return true;
           }}
         />
       ) : null}
@@ -196,7 +189,7 @@ function EditProfileDialog({
     birthday: string;
     interests: string[];
     gender: "male" | "female" | "";
-  }) => void;
+  }) => Promise<boolean>;
 }) {
   const { profile } = useApp();
   const [name, setName] = useState(profile.name);
@@ -208,6 +201,8 @@ function EditProfileDialog({
   const [interests, setInterests] = useState<string[]>(profile.interests ?? []);
   const [interestInput, setInterestInput] = useState("");
   const [gender, setGender] = useState<"male" | "female" | "">(profile.gender ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   return (
     <Dialog
@@ -220,21 +215,30 @@ function EditProfileDialog({
           </button>
           <button
             className="w4-btn is-primary"
-            onClick={() => {
-              onSave({
-                name: name.trim() || profile.name,
-                city,
-                job,
-                targets,
-                level,
-                birthday,
-                interests,
-                gender,
-              });
-              window.setTimeout(() => window.location.reload(), 350);
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              setSaveError("");
+              try {
+                const ok = await onSave({
+                  name: name.trim() || profile.name,
+                  city,
+                  job,
+                  targets,
+                  level,
+                  birthday,
+                  interests,
+                  gender,
+                });
+                if (!ok) setSaveError("保存失败，请重试");
+              } catch {
+                setSaveError("保存失败，请检查网络");
+              } finally {
+                setSaving(false);
+              }
             }}
           >
-            保存
+            {saving ? "保存中…" : "保存"}
           </button>
         </>
       }
@@ -378,6 +382,11 @@ function EditProfileDialog({
         </div>
         <div className="w4-field-hint">好友会按这个调整语速和用词，不会一上来就说太难的话。</div>
       </div>
+      {saveError ? (
+        <div className="w4-field-hint" style={{ color: "#c0392b" }}>
+          {saveError}
+        </div>
+      ) : null}
     </Dialog>
   );
 }

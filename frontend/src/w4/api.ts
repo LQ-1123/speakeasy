@@ -403,7 +403,7 @@ export async function saveProfile(
     gender: extra?.gender,
   };
   if (birthday !== undefined) body.birthday = birthday;
-  const r = await getJson(`${BASE}/v3/profile`, {
+  const r = await getJson(`${API_ORIGIN}/api/v3/profile`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

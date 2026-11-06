@@ -691,6 +691,82 @@ class V3Service:
     # ------------------------------------------------------------------ #
     # 偶遇：从已经生成好的「世界」里挑一个人，不再现场捏人
     # ------------------------------------------------------------------ #
+    # -------------------------------------------------------------- #
+    # 个人资料（兴趣标签）
+    # -------------------------------------------------------------- #
+    PROFILE_TAG_MAX = 8
+    PROFILE_TAG_LEN = 16
+
+    def _clean_profile_tags(self, tags: Any) -> list[str]:
+        out: list[str] = []
+        for raw in tags or []:
+            tag = str(raw or "").strip().lstrip("#").strip()[: self.PROFILE_TAG_LEN]
+            if tag and tag not in out:
+                out.append(tag)
+            if len(out) >= self.PROFILE_TAG_MAX:
+                break
+        return out
+
+    def update_profile_fields(
+        self,
+        *,
+        nickname: str | None = None,
+        targets: list[str] | None = None,
+        birthday: str | None = None,
+        city: str | None = None,
+        job: str | None = None,
+        interests: list[str] | None = None,
+    ) -> dict:
+        """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。"""
+        try:
+            profile = self.db.get_profile() or {}
+        except Exception:  # noqa: BLE001
+            profile = {}
+        fact = profile.get("fact_sheet") or {}
+        if isinstance(fact, str):
+            import json  # noqa: PLC0415
+
+            try:
+                fact = json.loads(fact)
+            except ValueError:
+                fact = {}
+        fact = dict(fact) if isinstance(fact, dict) else {}
+        fact_profile = dict(fact.get("profile") or {})
+        if city is not None:
+            fact_profile["city"] = str(city)[:40]
+        if job is not None:
+            fact_profile["major_or_job"] = str(job)[:60]
+        fact["profile"] = fact_profile
+        if interests is not None:
+            fact["interests"] = self._clean_profile_tags(interests)
+
+        kwargs: dict[str, Any] = {"fact_sheet": fact}
+        if nickname:
+            kwargs["nickname"] = str(nickname)[:40]
+        if targets:
+            kwargs["target_languages"] = list(targets)[:3]
+        if birthday is not None:
+            kwargs["birthday"] = str(birthday)[:20]
+        try:
+            return self.db.update_profile(**kwargs) or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("更新个人资料失败: %s", exc)
+            return {}
+
+    def _user_interests(self) -> set[str]:
+        """读取当前用户 fact_sheet 里的兴趣标签（小写）。"""
+        try:
+            profile = self.db.get_profile() or {}
+            fact = profile.get("fact_sheet") or {}
+            if isinstance(fact, str):
+                import json  # noqa: PLC0415
+
+                fact = json.loads(fact)
+            tags = fact.get("interests") if isinstance(fact, dict) else None
+            return {str(t).strip().lower() for t in (tags or []) if str(t).strip()}
+        except Exception:  # noqa: BLE001
+            return set()
+
     def discover_next(self, user_id: str | None = None, *, language: str | None = None) -> dict | None:
         """从 Persona 池里挑一位还没成为好友的人物。
 
@@ -729,11 +805,19 @@ class V3Service:
             unseen = pool
 
         day = _now().strftime("%Y-%m-%d")
-        unseen = sorted(
-            unseen,
-            key=lambda p: hashlib.sha256(f"{uid}:{day}:{p['id']}".encode("utf-8")).hexdigest(),
-        )
+        user_interests = self._user_interests()
+
+        def _rank(p: dict) -> tuple:
+            tags = {str(t).strip().lower() for t in (p.get("interests") or [])}
+            overlap = len(tags & user_interests)
+            return (-overlap, hashlib.sha256(f"{uid}:{day}:{p['id']}".encode("utf-8")).hexdigest())
+
+        unseen = sorted(unseen, key=_rank)
         persona = unseen[0]
+        match_tags = [
+            t for t in (persona.get("interests") or [])
+            if str(t).strip().lower() in user_interests
+        ][:3]
         with self.lock, self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO v3_discover_views (user_id, persona_id, seen_at)"
@@ -758,6 +842,7 @@ class V3Service:
                 else "pending" if persona["id"] in pending
                 else "none"
             ),
+            "match_tags": match_tags,
             "remaining": max(0, len(fresh) - 1),
             "source": "world",  # 明确：来自已生成的世界，不是现场捏人
         }

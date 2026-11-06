@@ -574,3 +574,23 @@
   border-radius: 12px;
   display: block;
 }
+
+/* 朋友圈式多图：2 张并排、3 张一行、4 张 2×2，统一小方块 */
+.v3-moment .w4-moment-imgs.n2,
+.v3-moment .w4-moment-imgs.n3,
+.v3-moment .w4-moment-imgs.n4 {
+  display: grid;
+  gap: 4px;
+  max-width: 252px;
+}
+.v3-moment .w4-moment-imgs.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.v3-moment .w4-moment-imgs.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.v3-moment .w4-moment-imgs.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.v3-moment .w4-moment-imgs.n2 img,
+.v3-moment .w4-moment-imgs.n3 img,
+.v3-moment .w4-moment-imgs.n4 img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+}

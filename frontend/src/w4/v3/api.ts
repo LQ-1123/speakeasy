@@ -307,6 +307,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
 }
 
 export interface DiscoverNext {
+  match_tags?: string[];
   persona: PersonaBrief;
   greeting: string;
   post_id: string;

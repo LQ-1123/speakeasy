@@ -64,6 +64,15 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
                   );
                 })}
               </div>
+              {profile.interests?.length ? (
+                <div className="w4-chips" style={{ marginTop: 6 }}>
+                  {profile.interests.slice(0, 8).map((t) => (
+                    <span key={t} className="w4-chip">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <button className="w4-icon-btn" onClick={() => setEditOpen(true)} aria-label="编辑资料">
               <Pencil size={15} strokeWidth={1.8} />
@@ -148,7 +157,11 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
             updateProfile(patch);
             setEditOpen(false);
             void (async () => {
-              const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday);
+              const ok = await apiSaveProfile(patch.name, patch.targets, patch.birthday, {
+                city: patch.city,
+                job: patch.job,
+                interests: patch.interests,
+              });
               if (!ok) {
         showToast("资料没保存成功，稍后再试");
         return;
@@ -181,6 +194,7 @@ function EditProfileDialog({
     targets: string[];
     level: "刚开始" | "能聊几句" | "日常对话" | "比较流利";
     birthday: string;
+    interests: string[];
   }) => void;
 }) {
   const { profile } = useApp();
@@ -191,6 +205,8 @@ function EditProfileDialog({
   const [level, setLevel] = useState(profile.level);
   const [birthday, setBirthday] = useState(profile.birthday ?? "");
   const [styleId, setStyleId] = useState(getAvatarStyle());
+  const [interests, setInterests] = useState<string[]>(profile.interests ?? []);
+  const [interestInput, setInterestInput] = useState("");
 
   return (
     <Dialog
@@ -212,6 +228,7 @@ function EditProfileDialog({
                 targets,
                 level,
                 birthday,
+                interests,
               });
               window.setTimeout(() => window.location.reload(), 350);
             }}
@@ -250,6 +267,62 @@ function EditProfileDialog({
         <div className="w4-field">
           <div className="w4-field-label">在做什么</div>
           <input className="w4-input" value={job} onChange={(e) => setJob(e.target.value)} />
+        </div>
+      </div>
+      <div className="w4-field">
+        <div className="w4-field-label">兴趣标签（影响偶遇与人物匹配）</div>
+        <div className="w4-chips">
+          {["咖啡", "美食", "旅行", "音乐", "读书", "电影", "摄影", "运动", "科技", "艺术"].map((t) => (
+            <button
+              key={t}
+              className={`w4-chip ${interests.includes(t) ? "is-green" : ""}`}
+              style={{ cursor: "pointer" }}
+              onClick={() =>
+                setInterests((list) =>
+                  list.includes(t)
+                    ? list.filter((x) => x !== t)
+                    : list.length >= 8
+                      ? list
+                      : [...list, t],
+                )
+              }
+            >
+              {t}
+            </button>
+          ))}
+          {interests
+            .filter((t) => !["咖啡", "美食", "旅行", "音乐", "读书", "电影", "摄影", "运动", "科技", "艺术"].includes(t))
+            .map((t) => (
+              <button
+                key={`custom-${t}`}
+                className="w4-chip is-green"
+                style={{ cursor: "pointer" }}
+                title="点击删除"
+                onClick={() => setInterests((list) => list.filter((x) => x !== t))}
+              >
+                {t} ×
+              </button>
+            ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            className="w4-input"
+            style={{ flex: 1 }}
+            placeholder="自定义标签（最多 8 个）"
+            value={interestInput}
+            maxLength={16}
+            onChange={(e) => setInterestInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const tag = interestInput.trim().replace(/^#+/, "").slice(0, 16);
+              if (!tag) return;
+              setInterests((list) =>
+                list.includes(tag) || list.length >= 8 ? list : [...list, tag],
+              );
+              setInterestInput("");
+            }}
+          />
         </div>
       </div>
       <div className="w4-field">

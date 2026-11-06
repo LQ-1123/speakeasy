@@ -60,9 +60,14 @@ export async function loadFriendList() {
   return server.loadFriendList();
 }
 
-export async function saveProfile(nickname: string, targets: string[], birthday?: string) {
+export async function saveProfile(
+  nickname: string,
+  targets: string[],
+  birthday?: string,
+  extra?: { city?: string; job?: string; interests?: string[] },
+) {
   if (isLocalMode()) return (await local()).localSaveProfile(nickname, targets, birthday);
-  return server.saveProfile(nickname, targets, birthday);
+  return server.saveProfile(nickname, targets, birthday, extra);
 }
 
 /* ------- 以下 L1 阶段未实现，本地模式返回空值，保证 UI 不崩 ------- */

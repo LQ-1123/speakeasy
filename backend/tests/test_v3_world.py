@@ -517,6 +517,43 @@ def test_user_image_upload_and_post(world_db):
         assert bad.status_code == 400
 
 
+def test_profile_interests_saved_and_rank_discover(world_db):
+    """兴趣写入 fact_sheet（清洗后），偶遇优先返回兴趣重叠的人物。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_interest_0001")
+
+        long_tag = "x" * 30
+        res = client.put(
+            "/api/v3/profile",
+            headers=headers,
+            json={
+                "city": "上海",
+                "job": "软件工程学生",
+                "interests": ["咖啡", "#旅行", "咖啡", long_tag],
+            },
+        )
+        assert res.status_code == 200, res.text
+        profile = res.json()["profile"]
+        fact = profile["fact_sheet"]
+        assert fact["profile"]["city"] == "上海"
+        assert fact["profile"]["major_or_job"] == "软件工程学生"
+        # 去 #、去重、超长截断到 16 字
+        assert fact["interests"] == ["咖啡", "旅行", "x" * 16]
+
+        # 库里确实有人物带 coffee 兴趣 → 偶遇应优先返回兴趣重叠的人
+        rows = db.conn.execute("SELECT interests FROM personas").fetchall()
+        has_coffee = any("coffee" in str(r["interests"]).lower() for r in rows)
+        if has_coffee:
+            client.put(
+                "/api/v3/profile", headers=headers, json={"interests": ["coffee"]}
+            )
+            found = client.get("/api/v3/discover/next", headers=headers).json()
+            assert "match_tags" in found
+            assert found["match_tags"], "有共同兴趣时应返回 match_tags"
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

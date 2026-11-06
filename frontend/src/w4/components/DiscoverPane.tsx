@@ -60,7 +60,9 @@ function toCandidate(res: DiscoverNext, zh: string): DiscoverCandidate {
     voiceLabel: "",
     accent: "",
     online: false,
-    tags: (p.interests || []).slice(0, 3),
+    tags: Array.from(
+      new Set([...(res.match_tags || []), ...(p.interests || [])]),
+    ).slice(0, 3),
   };
 }
 

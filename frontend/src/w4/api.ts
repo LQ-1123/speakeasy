@@ -389,10 +389,17 @@ export async function saveProfile(
   nickname: string,
   targets: string[],
   birthday?: string,
+  extra?: { city?: string; job?: string; interests?: string[] },
 ): Promise<boolean> {
-  const body: Record<string, unknown> = { nickname, target_languages: targets };
+  const body: Record<string, unknown> = {
+    nickname,
+    target_languages: targets,
+    city: extra?.city,
+    job: extra?.job,
+    interests: extra?.interests,
+  };
   if (birthday !== undefined) body.birthday = birthday;
-  const r = await getJson(`${BASE}/memories`, {
+  const r = await getJson(`${BASE}/v3/profile`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

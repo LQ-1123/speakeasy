@@ -229,6 +229,35 @@ async def get_persona_posts(
 # --------------------------------------------------------------------------- #
 # 种子头像（确定性 SVG，无图片资源）
 # --------------------------------------------------------------------------- #
+class ProfileIn(BaseModel):
+    nickname: str | None = None
+    target_languages: list[str] | None = None
+    birthday: str | None = None
+    city: str | None = None
+    job: str | None = None
+    interests: list[str] | None = None
+
+
+@router.put("/profile")
+async def update_profile(
+    request: Request,
+    body: ProfileIn,
+    user_id: str = Depends(bind_current_user),
+) -> dict:
+    """更新个人资料：昵称/目标语言/生日/城市/职业/兴趣标签（兴趣进 fact_sheet）。"""
+    service = _v3(request)
+    profile = await _run(
+        service.update_profile_fields,
+        nickname=body.nickname,
+        targets=body.target_languages,
+        birthday=body.birthday,
+        city=body.city,
+        job=body.job,
+        interests=body.interests,
+    )
+    return {"profile": profile}
+
+
 @router.post("/media/upload")
 async def upload_media(
     request: Request,

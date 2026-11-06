@@ -686,6 +686,38 @@ def test_persona_fish_voice_assignment_and_friend_sync(world_db, monkeypatch):
     assert friend["fish_voice_id"] == rows[0]["fish_voice_id"]
 
 
+def test_speech_version_tracks_persona_voice(world_db):
+    """feed 返回 speech_version；人物音色变化后同一帖子的 speech_version 必须变化。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_speech_ver_0001")
+
+        feed = client.get("/api/v3/feed?limit=10", headers=headers).json()
+        posts = [it for it in feed["items"] if it["kind"] == "persona_post"]
+        assert posts, "演示世界应有 AI 人物动态"
+        post = posts[0]
+        v1 = post["speech_version"]
+        assert v1, "缺少 speech_version"
+
+        persona_id = post["author"]["id"]
+        with db._lock, db.conn:  # noqa: SLF001
+            db.conn.execute(
+                "UPDATE personas SET fish_voice_id='voice-B' WHERE id=?", (persona_id,)
+            )
+        # 模拟服务内部失效缓存（真实流程 assign_fish_voices 会做）
+        _service._persona_cache = {"at": 0.0, "rows": []}
+        _service._feed_cache = {"at": 0.0, "key": "", "items": []}
+
+        feed2 = client.get("/api/v3/feed?limit=10", headers=headers).json()
+        post2 = next(it for it in feed2["items"] if it["id"] == post["id"])
+        assert post2["speech_version"] != v1
+
+        # 偶遇接口也带 speech_version（没有最新帖时为空串）
+        found = client.get("/api/v3/discover/next", headers=headers).json()
+        assert "speech_version" in found
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

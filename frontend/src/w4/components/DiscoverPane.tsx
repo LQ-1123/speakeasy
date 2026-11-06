@@ -55,7 +55,7 @@ function toCandidate(res: DiscoverNext, zh: string): DiscoverCandidate {
     greetingZh: zh,
     /* 用**帖子语言对应的声线**朗读 TA 最新那条动态（后端合成并缓存） */
     greetingAudio: res.post_id
-      ? personaSpeechUrl(res.post_id, res.post_hash)
+      ? personaSpeechUrl(res.post_id, res.post_hash, res.speech_version)
       : undefined,
     voiceLabel: "",
     accent: "",

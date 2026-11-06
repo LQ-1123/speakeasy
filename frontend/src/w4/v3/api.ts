@@ -71,6 +71,7 @@ export interface FeedItem {
   tags: string[];
   language?: string;
   content_hash?: string;
+  speech_version?: string;
   visibility: "public" | "friends" | "private";
   created_at: string;
   like_count: number;
@@ -308,6 +309,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
 
 export interface DiscoverNext {
   match_tags?: string[];
+  speech_version?: string;
   persona: PersonaBrief;
   greeting: string;
   post_id: string;
@@ -367,8 +369,16 @@ export function fetchDiscoverNext(language?: string): Promise<DiscoverNext> {
  * 用**帖子语言对应的声线**朗读一条动态。
  * ``version`` 传帖子内容哈希：内容一改 URL 就变，避免浏览器/设备缓存播旧音频。
  */
-export function personaSpeechUrl(postId: string, version?: string): string {
-  const q = version ? `?v=${encodeURIComponent(version)}` : "";
+export function personaSpeechUrl(
+  postId: string,
+  version?: string,
+  voiceVersion?: string,
+): string {
+  const params = new URLSearchParams();
+  if (version) params.set("v", version);
+  /* 音色版本：同一内容换了音色后 URL 也会变，避免浏览器缓存播旧声音 */
+  if (voiceVersion) params.set("a", voiceVersion);
+  const q = params.toString() ? `?${params.toString()}` : "";
   return `${API_ORIGIN}/api/v3/persona-posts/${encodeURIComponent(postId)}/speech${q}`;
 }
 

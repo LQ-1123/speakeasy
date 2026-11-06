@@ -1912,7 +1912,12 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
                 with open(fpath, "wb") as fh:
                     fh.write(audio)
                 mime = "audio/mpeg" if ext == "mp3" else "audio/wav"
-                return FileResponse(fpath, media_type=mime, filename=fname)
+                return FileResponse(
+                    fpath,
+                    media_type=mime,
+                    filename=fname,
+                    headers={"Cache-Control": "no-store"},
+                )
     except Exception as _fish_exc:  # noqa: BLE001 - 回落 edge
         import logging as _logging
 
@@ -1923,7 +1928,12 @@ async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"合成失败: {exc}") from exc
-    return FileResponse(path, media_type="audio/wav", filename=os.path.basename(path))
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename=os.path.basename(path),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def _fish_languages(services: Any) -> set[str]:

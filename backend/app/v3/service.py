@@ -395,6 +395,13 @@ class V3Service:
             comment_count = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM persona_post_comments WHERE post_id=?", (post_id,)
             ).fetchone()["n"]
+        content_text = str(row["content"])
+        content_hash = hashlib.sha1(content_text.encode("utf-8")).hexdigest()[:12]
+        # 语音缓存版本 = 内容 + 当前音色：换人换声线后 URL 必须变化，否则浏览器会播旧音频
+        voice_key = str(persona.get("fish_voice_id") or persona.get("voice_id") or "")
+        speech_version = hashlib.sha1(
+            f"{content_hash}:{voice_key}".encode("utf-8")
+        ).hexdigest()[:10]
         return {
             "kind": "persona_post",
             "id": post_id,
@@ -406,7 +413,8 @@ class V3Service:
             "media_credit": _source_credit(row),
             "language": (row["language"] if "language" in row.keys() else "") or persona.get("language", "en"),
             # content_hash 供前端做语音缓存版本号：内容变了 URL 就变
-            "content_hash": hashlib.sha1(str(row["content"]).encode("utf-8")).hexdigest()[:12],
+            "content_hash": content_hash,
+            "speech_version": speech_version,
             "visibility": "public",
             "created_at": row["created_at"],
             "like_count": int(row["like_count"] or 0),
@@ -879,6 +887,9 @@ class V3Service:
                 )
             assigned += 1
         if assigned:
+            # 人物缓存 / 信息流缓存都含音色，必须立刻失效，否则预热和 speech_version 还是旧值
+            self._persona_cache = {"at": 0.0, "rows": []}
+            self._feed_cache = {"at": 0.0, "key": "", "items": []}
             log.info("已为 %d 个 AI 人物分配专属 Fish 音色", assigned)
         return assigned
 
@@ -949,11 +960,18 @@ class V3Service:
         post_hash = (
             hashlib.sha1(greeting.encode("utf-8")).hexdigest()[:12] if latest else ""
         )
+        speech_version = ""
+        if latest:
+            voice_key = str(persona.get("fish_voice_id") or persona.get("voice_id") or "")
+            speech_version = hashlib.sha1(
+                f"{post_hash}:{voice_key}".encode("utf-8")
+            ).hexdigest()[:10]
         return {
             "persona": self._persona_brief(persona),
             "greeting": greeting,
             "post_id": latest["id"] if latest else "",
             "post_hash": post_hash,
+            "speech_version": speech_version,
             "post_language": (latest.get("language") if latest else "") or persona.get("language", "en"),
             "friendship_status": (
                 "accepted" if persona["id"] in friends

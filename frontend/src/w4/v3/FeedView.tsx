@@ -149,7 +149,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
       .map((it) => {
         const audio = new Audio();
         audio.preload = "auto";
-        audio.src = personaSpeechUrl(it.id, it.content_hash);
+        audio.src = personaSpeechUrl(it.id, it.content_hash, it.speech_version);
         return audio;
       });
     return () => {
@@ -528,7 +528,7 @@ export function FeedCard({
   const togglePlay = async () => {
     if (!isPersona || playing) return;
     setPlaying(true);
-    const ok = await playVoiceUrl(personaSpeechUrl(item.id, item.content_hash)).catch(() => false);
+    const ok = await playVoiceUrl(personaSpeechUrl(item.id, item.content_hash, item.speech_version)).catch(() => false);
     setPlaying(false);
     if (!ok) onNotify?.("朗读失败，请稍后重试");
   };

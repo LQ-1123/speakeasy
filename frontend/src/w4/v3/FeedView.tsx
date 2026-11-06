@@ -193,36 +193,49 @@ export function FeedView({
   const [refreshing, setRefreshing] = useState(false);
   const [pull, setPull] = useState(0);
   const pullRef = useRef(0);
-  const pullStart = useRef<{ y: number; bottom: boolean } | null>(null);
+  /** mode: 顶部下拉 / 底部上拉；手势开始时不在两端就不参与刷新 */
+  const pullStart = useRef<{ y: number; mode: "top" | "bottom" | null } | null>(null);
   const updatePull = (v: number) => {
     pullRef.current = v;
     setPull(v);
   };
 
-  /** 手机手势：顶部下拉刷新；滚到底后继续上拉也刷新 */
+  /** 手机手势：内容已经在顶部时，继续下拉才刷新；已经在底部时，继续上拉也刷新 */
   const isMobileNow = () => window.matchMedia("(max-width: 900px)").matches;
   const onTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (!isMobileNow()) return;
     const el = e.currentTarget;
+    const atTop = el.scrollTop <= 0;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
     pullStart.current = {
       y: e.touches[0].clientY,
-      bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 8,
+      mode: atTop ? "top" : atBottom ? "bottom" : null,
     };
   };
   const onTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
     const start = pullStart.current;
-    if (!start) return;
+    if (!start || !start.mode) return;
+    const el = e.currentTarget;
     const dy = e.touches[0].clientY - start.y;
-    if (start.bottom && dy < 0) {
-      updatePull(Math.min(90, -dy * 0.6));
+    if (start.mode === "top") {
+      // 必须仍然在顶部：中途滚动过（用户先往上滑离开了顶部）就不算下拉刷新
+      if (dy > 0 && el.scrollTop <= 0) {
+        updatePull(Math.min(90, dy * 0.6));
+      } else if (dy <= 0) {
+        updatePull(0);
+      }
       return;
     }
-    if (!start.bottom && dy > 0) {
-      updatePull(Math.min(90, dy * 0.6));
+    // bottom 模式：到底后继续上拉
+    if (dy < 0) {
+      updatePull(Math.min(90, -dy * 0.6));
+    } else {
+      updatePull(0);
     }
   };
   const onTouchEnd = () => {
-    const fired = pullRef.current >= 45;
+    const started = pullStart.current;
+    const fired = Boolean(started?.mode) && pullRef.current >= 45;
     pullStart.current = null;
     updatePull(0);
     if (fired) void refresh();

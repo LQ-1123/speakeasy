@@ -30,7 +30,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_adrian",
         "nickname": "Adrian",
-        "avatar": "/mock/avatars/adrian.jpg",
+        "avatar_seed": "persona-adrian",
         "bio": "Product designer in Manchester. I make buttons line up and overthink coffee.",
         "personality": "Dry, self-deprecating British humour. Notices tiny design details. "
                        "Loves football, pub quizzes and complaining about meetings.",
@@ -49,7 +49,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_annika",
         "nickname": "Annika",
-        "avatar": "/mock/avatars/annika.jpg",
+        "avatar_seed": "persona-annika",
         "bio": "UX researcher in Seattle. Runner, coffee snob, amateur photographer of skies.",
         "personality": "Calm and curious, asks good questions, quietly competitive about running.",
         "interests": ["running", "coffee", "photography", "design"],
@@ -67,7 +67,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_callum",
         "nickname": "Callum",
-        "avatar": "/mock/avatars/callum.jpg",
+        "avatar_seed": "persona-callum",
         "bio": "Barista and cyclist in Melbourne. I will judge your coffee order, lovingly.",
         "personality": "Sarcastic, warm underneath, always outdoors before sunrise.",
         "interests": ["cycling", "coffee", "beach", "music"],
@@ -85,7 +85,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_camila",
         "nickname": "Camila",
-        "avatar": "/mock/avatars/camila.jpg",
+        "avatar_seed": "persona-camila",
         "bio": "Professora de dança em São Paulo. Samba, comida de rua e vizinhos muito barulhentos.",
         "personality": "Expressiva e física, fala com as mãos, sempre no meio de um ensaio.",
         "interests": ["dance", "music", "food", "fitness"],
@@ -103,7 +103,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_finn",
         "nickname": "Finn",
-        "avatar": "/mock/avatars/finn.jpg",
+        "avatar_seed": "persona-finn",
         "bio": "English teacher in Dublin. Books, traditional music, and one very old bicycle.",
         "personality": "Witty and a bit poetic, loves language, gently teases people he likes.",
         "interests": ["books", "teaching", "music", "writing"],
@@ -121,7 +121,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_giulia",
         "nickname": "Giulia",
-        "avatar": "/mock/avatars/giulia.jpg",
+        "avatar_seed": "persona-giulia",
         "bio": "Chef a Bologna. Pasta fatta in casa, jazz fino a chiusura, zero scorciatoie.",
         "personality": "Diretta e opinionata sul cibo, generosa con le persone, impaziente con le sciocchezze.",
         "interests": ["cooking", "food", "jazz", "music"],
@@ -139,7 +139,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_haruto",
         "nickname": "Haruto",
-        "avatar": "/mock/avatars/haruto.jpg",
+        "avatar_seed": "persona-haruto",
         "bio": "東京の写真家。フィルムと静かな駅と、九席しかないラーメン屋。",
         "personality": "寡黙で観察眼がある。短い文で、光や小さな違いに気づく。",
         "interests": ["photography", "film", "ramen", "cycling"],
@@ -157,7 +157,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_ines",
         "nickname": "Ines",
-        "avatar": "/mock/avatars/ines.jpg",
+        "avatar_seed": "persona-ines",
         "bio": "Arquitecta en Valencia. Luz, olas y edificios que discuten con sus clientes.",
         "personality": "Seca y precisa, se emociona con la luz y los materiales, surfea al amanecer.",
         "interests": ["architecture", "surfing", "travel", "design"],
@@ -175,7 +175,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_jiwoo",
         "nickname": "Jiwoo",
-        "avatar": "/mock/avatars/jiwoo.jpg",
+        "avatar_seed": "persona-jiwoo",
         "bio": "서울에서 컴퓨터공학 공부 중. 듣는 사람 400명짜리 인디밴드와 아주 늦은 밤.",
         "personality": "유쾌하고 자기 객관화가 잘 된 사람. 코딩의 좌절과 음악에 대한 열정을 섞어 말한다.",
         "interests": ["coding", "gaming", "music", "study"],
@@ -193,7 +193,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_lin",
         "nickname": "Lin",
-        "avatar": "/mock/avatars/lin.jpg",
+        "avatar_seed": "persona-lin",
         "bio": "新加坡做市场营销。熟食中心排队、河边跑步、做不完的简报。",
         "personality": "效率高、性格开朗、务实，喜欢好吃的和早起。",
         "interests": ["food", "running", "work", "travel"],
@@ -211,7 +211,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_mei",
         "nickname": "Mei",
-        "avatar": "/mock/avatars/mei.jpg",
+        "avatar_seed": "persona-mei",
         "bio": "Illustrator in Austin. Cats, tea, and a third attempt at the same sketch.",
         "personality": "Sleepy and funny, talks about her cat like a colleague, self-deprecating about art.",
         "interests": ["drawing", "cats", "tea", "books"],
@@ -229,7 +229,7 @@ PERSONAS: list[dict[str, Any]] = [
     {
         "id": "p_morten",
         "nickname": "Morten",
-        "avatar": "/mock/avatars/morten.jpg",
+        "avatar_seed": "persona-morten",
         "bio": "Ingenieur in Hamburg. Klettern, Synths und ein gnadenlos aufgeräumtes Postfach.",
         "personality": "Direkt und effizient, heimlich sentimental bei Musik, trockene Sprüche.",
         "interests": ["climbing", "music", "engineering", "fitness"],

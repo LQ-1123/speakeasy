@@ -27,6 +27,7 @@ from app.logging_utils import get_logger
 from app.v3.schema import (
     SEED_KEY,
     SEED_VERSION,
+    backfill_avatar_seeds,
     backfill_post_languages,
     seed_if_needed,
     sync_persona_friends,
@@ -102,7 +103,7 @@ Rules:
 - interests: 3-4 lowercase english tags (e.g. coffee, running, books) for matching only.
 
 Output JSON only:
-{"nickname","avatar","bio","personality","interests":[...],"language":"en|ja|ko|de|es|it|pt|zh",
+{"nickname","bio","personality","interests":[...],"language":"en|ja|ko|de|es|it|pt|zh",
  "country","city","timezone","occupation","age","gender":"male|female",
  "posts":[{"content","tags":[...]}]}
 """
@@ -120,13 +121,6 @@ _VOICE_BY_LANG: dict[str, list[str]] = {
     "fr": ["fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural"],
 }
 
-_AVATARS = [
-    "/mock/avatars/adrian.jpg", "/mock/avatars/annika.jpg", "/mock/avatars/callum.jpg",
-    "/mock/avatars/camila.jpg", "/mock/avatars/finn.jpg", "/mock/avatars/giulia.jpg",
-    "/mock/avatars/haruto.jpg", "/mock/avatars/ines.jpg", "/mock/avatars/jiwoo.jpg",
-    "/mock/avatars/lin.jpg", "/mock/avatars/mei.jpg", "/mock/avatars/morten.jpg",
-]
-
 
 def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
     """写入一位人物和 TA 的动态，返回写入的帖子数。"""
@@ -138,15 +132,19 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
     lang = str(persona.get("language") or "en").strip().lower()
     if lang not in _VOICE_BY_LANG:
         lang = "en"
+    # 头像不存图片：只存种子，由 /api/v3/avatar/{seed}.svg 确定性生成
+    avatar_seed = "persona-" + pid[2:]
     with db._lock, db.conn:  # noqa: SLF001
         db.conn.execute(
-            "INSERT INTO personas (id, nickname, avatar, bio, personality, interests, language,"
-            " country, city, timezone, occupation, age, gender, voice_id, archetype_id,"
-            " ai_config, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO personas (id, nickname, avatar, avatar_seed, bio, personality,"
+            " interests, language, country, city, timezone, occupation, age, gender,"
+            " voice_id, archetype_id, ai_config, status, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 pid,
                 str(persona.get("nickname") or "Friend")[:40],
-                str(persona.get("avatar") or "/mock/avatars/lin.jpg"),
+                "",
+                avatar_seed,
                 str(persona.get("bio") or "")[:400],
                 str(persona.get("personality") or "")[:600],
                 json.dumps(persona.get("interests") or [], ensure_ascii=False),
@@ -222,7 +220,6 @@ async def generate_world_llm(db: Any, llm: Any, *, count: int | None = None) -> 
             data["language"] = lang
             voices = _VOICE_BY_LANG[lang]
             data.setdefault("voice_id", voices[index % len(voices)])
-            data.setdefault("avatar", _AVATARS[index % len(_AVATARS)])
             posts = data.get("posts") or []
             if not isinstance(posts, list):
                 posts = []
@@ -257,6 +254,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
         # 每次启动都同步：人物语言/声线 → 已加好友；动态语言缺失 → 回填
         sync_persona_friends(db)
         backfill_post_languages(db)
+        backfill_avatar_seeds(db)
         return world_status(db)
 
     if world_path() == "llm":
@@ -266,6 +264,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
         _mark(db, "seed")
     sync_persona_friends(db)
     backfill_post_languages(db)
+    backfill_avatar_seeds(db)
     return world_status(db)
 
 

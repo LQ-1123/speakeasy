@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS personas (
     id TEXT PRIMARY KEY,
     nickname TEXT NOT NULL,
     avatar TEXT NOT NULL DEFAULT '',
+    avatar_seed TEXT NOT NULL DEFAULT '',
     bio TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     interests TEXT NOT NULL DEFAULT '[]',
@@ -179,8 +180,8 @@ CREATE TABLE IF NOT EXISTS v3_discover_views (
 
 #: ``v3_meta`` 里标记「语料已入库」的键
 SEED_KEY = "persona_seed_version"
-#: 语料版本：v2 = 多语言世界（人物用母语发动态，声线与语言一致）
-SEED_VERSION = "2026-11-06.2"
+#: 语料版本：v3 = 种子化头像（Persona 头像由 avatar_seed 生成，不再用 mock 图片）
+SEED_VERSION = "2026-11-06.3"
 
 
 def _now_utc() -> datetime:
@@ -208,6 +209,16 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 "ALTER TABLE persona_posts ADD COLUMN language TEXT NOT NULL DEFAULT ''"
             )
             log.info("migrated persona_posts: added language column")
+
+        pcols = {
+            row[1]
+            for row in db.conn.execute("PRAGMA table_info(personas)").fetchall()
+        }
+        if pcols and "avatar_seed" not in pcols:
+            db.conn.execute(
+                "ALTER TABLE personas ADD COLUMN avatar_seed TEXT NOT NULL DEFAULT ''"
+            )
+            log.info("migrated personas: added avatar_seed column")
     if seed:
         seed_if_needed(db)
 
@@ -234,11 +245,12 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         now = _now_utc()
         for p in PERSONAS:
             db.conn.execute(
-                "INSERT INTO personas (id, nickname, avatar, bio, personality, interests,"
-                " language, country, city, timezone, occupation, age, gender, voice_id,"
-                " archetype_id, ai_config, status, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-                " ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname, avatar=excluded.avatar,"
+                "INSERT INTO personas (id, nickname, avatar, avatar_seed, bio, personality,"
+                " interests, language, country, city, timezone, occupation, age, gender,"
+                " voice_id, archetype_id, ai_config, status, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname,"
+                " avatar=excluded.avatar, avatar_seed=excluded.avatar_seed,"
                 " bio=excluded.bio, personality=excluded.personality, interests=excluded.interests,"
                 " language=excluded.language, country=excluded.country, city=excluded.city,"
                 " timezone=excluded.timezone, occupation=excluded.occupation, age=excluded.age,"
@@ -246,7 +258,8 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
                 " archetype_id=excluded.archetype_id, ai_config=excluded.ai_config,"
                 " status=excluded.status",
                 (
-                    p["id"], p["nickname"], p["avatar"], p["bio"], p["personality"],
+                    p["id"], p["nickname"], "", p.get("avatar_seed", ""),
+                    p["bio"], p["personality"],
                     _json(p["interests"]), p["language"], p["country"], p["city"],
                     p["timezone"], p["occupation"], int(p["age"]), p["gender"],
                     p["voice_id"], p["archetype_id"], _json(p["ai_config"]),
@@ -351,13 +364,38 @@ def sync_persona_friends(db: Any) -> int:
                 )
                 """
             )
+            rows = db.conn.execute(
+                "SELECT f.friend_id AS friend_id, p.* FROM friendships f"
+                " JOIN personas p ON p.id = f.persona_id"
+            ).fetchall()
+            for row in rows:
+                persona = dict(row)
+                friend_id = str(row["friend_id"])
+                from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+
+                db.conn.execute(
+                    "UPDATE friends SET avatar_url=?, avatar_seed=? WHERE id=?",
+                    (persona_avatar_url(persona), str(persona.get("avatar_seed") or ""), friend_id),
+                )
             return int(cur.rowcount or 0)
         except sqlite3.Error as exc:  # pragma: no cover - 老库可能没有 friendships 表
             log.debug("同步 Persona 好友语言失败（忽略）: %s", exc)
             return 0
-    if written:
-        log.info("v3 语料入库：%d 个人物 / %d 条动态", len(PERSONAS), written)
-    return written
+
+
+def backfill_avatar_seeds(db: Any) -> int:
+    """给没有 avatar_seed 的 Persona 回填种子（老库/LLM 生成的人物，幂等）。"""
+    with db._lock, db.conn:  # noqa: SLF001
+        rows = db.conn.execute(
+            "SELECT id, avatar_seed FROM personas WHERE COALESCE(avatar_seed,'') = ''"
+        ).fetchall()
+        for row in rows:
+            pid = str(row["id"])
+            seed = "persona-" + (pid[2:] if pid.startswith("p_") else pid)
+            db.conn.execute(
+                "UPDATE personas SET avatar_seed=?, avatar='' WHERE id=?", (seed, pid)
+            )
+        return len(rows)
 
 
 def _json(value: Any) -> str:

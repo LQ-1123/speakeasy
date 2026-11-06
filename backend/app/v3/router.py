@@ -20,7 +20,7 @@ import os
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from app.logging_utils import get_logger
@@ -204,6 +204,30 @@ async def get_persona_posts(
     if await _run(service.persona_by_id, persona_id) is None:
         raise HTTPException(status_code=404, detail="人物不存在")
     return await _run(service.persona_posts, persona_id, user_id=user_id, limit=limit, cursor=cursor)
+
+
+# --------------------------------------------------------------------------- #
+# 种子头像（确定性 SVG，无图片资源）
+# --------------------------------------------------------------------------- #
+@router.get("/avatar/{seed}.svg")
+async def avatar(seed: str, g: str = "", r: str = ""):
+    """按种子生成插画头像。
+
+    - 同一 seed 永远返回同一张脸（sha256 派生五官/发型/配色）
+    - ``g`` = male/female，``r`` = 地域（east_asian/latino/...），只影响肤色/发型/胡子
+    - 纯函数、无状态，可直接长缓存
+    """
+    from app.v3.avatar import avatar_svg  # noqa: PLC0415
+
+    svg = await asyncio.to_thread(avatar_svg, seed, gender=g, region=r)
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Avatar-Seed": seed,
+        },
+    )
 
 
 @router.get("/discover/next")

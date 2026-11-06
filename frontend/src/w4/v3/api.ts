@@ -248,6 +248,26 @@ export function installApiIdentity(): void {
 
 /* --------------------------------------------------------------- 请求 */
 
+/**
+ * 种子头像等媒体是后端相对路径（/api/v3/avatar/...）。
+ * APK 里页面源是 localhost，必须补上 API_ORIGIN，否则图片 404。
+ */
+function normalizeMedia<T>(value: T, depth = 0): T {
+  if (depth > 6 || value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map((v) => normalizeMedia(v, depth + 1)) as unknown as T;
+  }
+  if (typeof value !== "object") return value;
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  if (typeof out.avatar === "string" && out.avatar.startsWith("/")) {
+    out.avatar = `${API_ORIGIN}${out.avatar}`;
+  }
+  for (const key of Object.keys(out)) {
+    out[key] = normalizeMedia(out[key], depth + 1);
+  }
+  return out as unknown as T;
+}
+
 async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(`${API_ORIGIN}${path}`, {
     cache: "no-store",
@@ -272,7 +292,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
     }
     throw new Error(detail);
   }
-  return (await res.json()) as T;
+  return normalizeMedia((await res.json()) as T);
 }
 
 export interface DiscoverNext {

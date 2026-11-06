@@ -65,6 +65,18 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 中文用户看信息流/通知时用「翻译」看中文；评论与好友申请也可单独翻译。
 - LLM 世界生成（SE_WORLD_GEN=llm）同样要求按人物母语生成并匹配声线。
 
+### 3.4 种子头像（确定性生成）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/v3/avatar/{seed}.svg?g=male&r=east_asian | 按种子生成插画头像 SVG：同一 seed 永远同一张脸；g/
+ 只影响肤色/发型/胡子等；Cache-Control: immutable |
+
+- Persona 头像不再使用 public/mock/avatars/*.jpg，改为 personas.avatar_seed（persona-<id>）驱动；
+  数据库只存种子，图片由接口确定性生成，零图片资源、零网络依赖。
+- 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
+- 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
+
 ### 3.3 朗读性能（毫秒级）
 
 信息流是预生成语料，所以朗读音频**在用户点击前就合成好并落盘**：

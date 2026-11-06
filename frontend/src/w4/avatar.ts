@@ -50,9 +50,11 @@ export const AVATAR_STYLES = [
   { id: "thumbs", label: "手势", collection: thumbs },
 ] as const;
 
-const STYLE_KEY = "w4.avatarStyle";
+const STYLE_KEY = "w4.avatarStyle.v2";
+const DEFAULT_AVATAR_STYLE = "avataaars";
 let currentStyle =
-  (typeof window !== "undefined" && window.localStorage.getItem(STYLE_KEY)) || "personas";
+  (typeof window !== "undefined" && window.localStorage.getItem(STYLE_KEY)) ||
+  DEFAULT_AVATAR_STYLE;
 
 export function getAvatarStyle(): string {
   return currentStyle;
@@ -74,6 +76,10 @@ function styleCollection(id: string) {
 
 /** 指定风格生成头像（设置页预览用） */
 export function avatarWithStyle(seed: string, styleId: string): string {
+  if (styleId === "avataaars") {
+    const rendered = renderAvataaars(seed, friendlyAvataaarsOptions(seed));
+    if (rendered) return rendered;
+  }
   try {
     const avatar = createAvatar(styleCollection(styleId) as never, {
       seed: seed || "anonymous",
@@ -222,8 +228,45 @@ export function avatarForName(name: string): string {
 }
 
 /** 用户自己的头像：跟随设置里选择的风格 */
+/** 自己头像：按 seed 生成一套干净、稳定的 Avataaars 部件（不随机出胡子/墨镜） */
+export function friendlyAvataaarsOptions(seed: string): Record<string, unknown> {
+  const key = seed || "me";
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const pick = <T,>(arr: readonly T[], salt: number) => arr[(h >>> salt) % arr.length];
+  const tops = ["shortFlat", "shortRound", "shortCurly", "bob", "longButNotTooLong", "straight01", "bun"] as const;
+  const skin = ["ffdbb4", "edb98a", "f8d25c", "d08b5b", "ae5d29"] as const;
+  const hair = ["2c1b18", "4a312c", "724133", "a55728", "b58143", "d6b370"] as const;
+  const clothes = ["shirtCrewNeck", "shirtScoopNeck", "collarAndSweater", "hoodie", "blazerAndShirt"] as const;
+  const clothesColor = ["262e33", "25557c", "5199e4", "3c4f5c", "929598", "a7ffc4"] as const;
+  const mouths = ["smile", "twinkle", "default"] as const;
+  const eyes = ["default", "happy", "side"] as const;
+  const bg = ["e8f3ec", "eaf0f8", "f8efe6", "f3eaf3", "eef3e6"] as const;
+  return {
+    top: [pick(tops, 3)],
+    topProbability: 100,
+    skinColor: [pick(skin, 7)],
+    hairColor: [pick(hair, 11)],
+    clothing: [pick(clothes, 15)],
+    clothesColor: [pick(clothesColor, 19)],
+    eyes: [pick(eyes, 23)],
+    eyebrows: ["defaultNatural"],
+    mouth: [pick(mouths, 27)],
+    facialHairProbability: 0,
+    accessoriesProbability: 0,
+    backgroundColor: [pick(bg, 5)],
+  };
+}
+
 export function profileAvatar(name: string): string {
   const seed = (name || "me").trim() || "me";
+  if (currentStyle === "avataaars") {
+    const rendered = renderAvataaars(seed, friendlyAvataaarsOptions(seed));
+    if (rendered) return rendered;
+  }
   if (currentStyle === "personas") return diceAvatar(seed);
   try {
     const avatar = createAvatar(styleCollection(currentStyle) as never, {

@@ -34,7 +34,8 @@ from app.v3.service import V3Service  # noqa: E402
 
 
 @pytest.fixture()
-def daily_db(tmp_path):
+def daily_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("SE_MEDIA_ENABLED", "0")
     db = DB(str(tmp_path / "daily.db"))
     db.init()
     ensure_schema(db, seed=False)

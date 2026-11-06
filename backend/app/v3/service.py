@@ -55,6 +55,17 @@ def _uuid() -> str:
     return uuid.uuid4().hex
 
 
+def _source_credit(row: Any) -> str:
+    """从 source_ref 里取图片署名（图库要求 CC BY/CC BY-SA 必须署名）。"""
+    try:
+        if "source_ref" not in row.keys():
+            return ""
+        data = _loads(row["source_ref"], {})
+        return str(data.get("credit") or "") if isinstance(data, dict) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _loads(raw: Any, default: Any) -> Any:
     if raw is None or raw == "":
         return default
@@ -352,6 +363,9 @@ class V3Service:
             "content": row["content"],
             "media": _loads(row["media"], []),
             "tags": _loads(row["tags"], []),
+            "post_kind": (row["post_kind"] if "post_kind" in row.keys() else "") or "life_text",
+            "alt_text": (row["alt_text"] if "alt_text" in row.keys() else "") or "",
+            "media_credit": _source_credit(row),
             "language": (row["language"] if "language" in row.keys() else "") or persona.get("language", "en"),
             # content_hash 供前端做语音缓存版本号：内容变了 URL 就变
             "content_hash": hashlib.sha1(str(row["content"]).encode("utf-8")).hexdigest()[:12],

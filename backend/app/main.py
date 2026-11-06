@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -92,7 +93,12 @@ async def lifespan(app: FastAPI):
         from app.v3.daily_world import daily_loop  # noqa: PLC0415
 
         app.state.daily_task = asyncio.create_task(
-            daily_loop(app.state.v2.db, engines.llm), name="v3-daily-world"
+            daily_loop(
+                app.state.v2.db,
+                engines.llm,
+                media_dir=os.path.join(str(settings.data_path), "media"),
+            ),
+            name="v3-daily-world",
         )
     except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
         log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
@@ -216,12 +222,21 @@ def create_app() -> FastAPI:
     return app
 
 
+# Windows 的 mimetypes 缺 webp，补上（否则 /media/*.webp 返回 octet-stream）
+mimetypes.add_type("image/webp", ".webp")
+
+
 def _mount_static(app: FastAPI, settings) -> None:
     """挂载前端：优先 Next 构建产物，其次 standalone.html。"""
 
     if not settings.server.serve_frontend:
         log.info("serve_frontend=False，跳过静态挂载")
         return
+
+    # 开放图库图片：/media/*（必须在 "/" 之前挂载，否则被前端静态路由吞掉）
+    media_dir = os.path.join(str(settings.data_path), "media")
+    os.makedirs(media_dir, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
     if os.path.isdir(APP_DIR) and os.path.exists(os.path.join(APP_DIR, "index.html")):
         # Next static export 需要把 /_next/* 正确映射；直接整目录挂到 / 会被 /api 抢走

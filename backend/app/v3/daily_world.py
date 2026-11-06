@@ -29,7 +29,7 @@ log = get_logger(__name__)
 TZ_NAME = os.getenv("SE_TZ", "Asia/Shanghai")
 DAILY_HOUR = int(os.getenv("SE_DAILY_HOUR", "2"))
 DAILY_PERSONAS = max(1, int(os.getenv("SE_DAILY_PERSONAS", "5")))
-POSTS_PER_PERSONA = max(1, int(os.getenv("SE_DAILY_POSTS_PER_PERSONA", "6")))
+POSTS_PER_PERSONA = max(1, int(os.getenv("SE_DAILY_POSTS_PER_PERSONA", "3")))
 POST_TTL_HOURS = max(1, int(os.getenv("SE_POST_TTL_HOURS", "24")))
 POST_KEEP_DAYS = max(1, int(os.getenv("SE_POST_KEEP_DAYS", "7")))
 LAZY_REFILL_BELOW = max(1, int(os.getenv("SE_FEED_MIN_POOL", "10")))
@@ -301,7 +301,10 @@ def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tup
     return pid, written
 
 
-async def generate_daily(db: Any, llm: Any, *, day: str | None = None, force: bool = False) -> dict:
+async def generate_daily(
+    db: Any, llm: Any, *, day: str | None = None, force: bool = False,
+    media_dir: str | None = None,
+) -> dict:
     """生成「今日世界」：N 个游客人物 × M 条动态。同一天幂等。"""
     day = day or day_key()
     now = now_local()
@@ -319,14 +322,30 @@ async def generate_daily(db: Any, llm: Any, *, day: str | None = None, force: bo
     created_personas = 0
     created_posts = 0
     source = "llm"
+    persona_rows: list[dict] = []
     for index in range(DAILY_PERSONAS):
         persona = await _llm_persona(llm, index, day)
         if persona is None:
             persona = _fallback_persona(index, day)
             source = "template" if index == 0 else source
-        _, posts = _insert_persona(db, persona, day=day, expires_at=expires)
+        pid, posts = _insert_persona(db, persona, day=day, expires_at=expires)
         created_personas += 1
         created_posts += posts
+        persona_rows.append({**persona, "id": pid})
+
+    # 生活图文 + 纯文字（图库零 key 源，人设硬过滤）
+    life_stats = {"image_posts": 0, "text_posts": 0, "skipped_images": 0}
+    if persona_rows:
+        try:
+            from app.v3.life_posts import generate_life_posts  # noqa: PLC0415
+
+            media_root = media_dir or os.path.join(os.getenv("SE_DATA_DIR", "data"), "media")
+            life_stats = await generate_life_posts(
+                db, llm, persona_rows, media_dir=media_root, expires_at=expires
+            )
+            created_posts += life_stats["image_posts"] + life_stats["text_posts"]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("生活图文生成失败（不影响文字动态）: %s", exc)
 
     with db._lock, db.conn:  # noqa: SLF001
         db.conn.execute(
@@ -342,12 +361,13 @@ async def generate_daily(db: Any, llm: Any, *, day: str | None = None, force: bo
     return {
         "day": day, "skipped": False, "personas": created_personas,
         "posts": created_posts, "source": source, "expires_at": expires,
+        "life": life_stats,
     }
 
 
-async def ensure_today(db: Any, llm: Any) -> dict:
+async def ensure_today(db: Any, llm: Any, *, media_dir: str | None = None) -> dict:
     """确保今天有内容：没有生成过就生成（惰性补量）。"""
-    return await generate_daily(db, llm)
+    return await generate_daily(db, llm, media_dir=media_dir)
 
 
 def daily_status(db: Any) -> dict:
@@ -362,6 +382,7 @@ def daily_status(db: Any) -> dict:
         guests = db.conn.execute(
             "SELECT COUNT(*) AS n FROM personas WHERE lifecycle='guest'"
         ).fetchone()["n"]
+        media_count = db.conn.execute("SELECT COUNT(*) AS n FROM media_library").fetchone()["n"]
     return {
         "day": day,
         "generated": row is not None,
@@ -371,6 +392,7 @@ def daily_status(db: Any) -> dict:
         "source": str(row["source"]) if row is not None else "",
         "visible_posts": int(visible or 0),
         "guest_personas": int(guests or 0),
+        "media_library": int(media_count or 0),
         "next_run_at": next_run_at().strftime("%Y-%m-%dT%H:%M:%S%z"),
         "config": {
             "personas_per_day": DAILY_PERSONAS,
@@ -382,12 +404,12 @@ def daily_status(db: Any) -> dict:
     }
 
 
-async def daily_loop(db: Any, llm: Any, *, tick_s: float = 30.0) -> None:
+async def daily_loop(db: Any, llm: Any, *, tick_s: float = 30.0, media_dir: str | None = None) -> None:
     """后台循环：启动先补今天的内容，之后每天 02:00 生成；顺带跑 TTL 清理。"""
     from app.v3.lifecycle import cleanup  # noqa: PLC0415
 
     try:
-        await ensure_today(db, llm)
+        await ensure_today(db, llm, media_dir=media_dir)
         cleanup(db)
     except Exception as exc:  # noqa: BLE001
         log.warning("每日世界初始化失败: %s", exc)
@@ -401,10 +423,10 @@ async def daily_loop(db: Any, llm: Any, *, tick_s: float = 30.0) -> None:
             now = now_local()
             status = daily_status(db)
             if not status["generated"] and now.hour >= DAILY_HOUR:
-                await generate_daily(db, llm)
+                await generate_daily(db, llm, media_dir=media_dir)
             elif status["visible_posts"] < LAZY_REFILL_BELOW:
                 # 内容不够看：惰性补今天这一批（幂等，已生成则跳过）
-                await ensure_today(db, llm)
+                await ensure_today(db, llm, media_dir=media_dir)
             if _time.time() - last_cleanup > 600:
                 cleanup(db)
                 last_cleanup = _time.time()

@@ -504,9 +504,19 @@ export function FeedCard({
         {item.media.length ? (
           <div className={`w4-moment-imgs n${Math.min(4, item.media.length)}`}>
             {item.media.map((src) => (
-              <img key={src} src={src} alt="" onClick={() => onZoom(src)} />
+              <img
+                key={src}
+                src={src}
+                alt={item.alt_text || ""}
+                loading="lazy"
+                onClick={() => onZoom(src)}
+              />
             ))}
           </div>
+        ) : null}
+
+        {item.media.length && item.media_credit ? (
+          <div className="v3-media-credit">图：{item.media_credit}</div>
         ) : null}
 
         {item.tags.length ? (

@@ -86,6 +86,27 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.6 开放图库与生活动态（零 key）
+
+每日世界里，人物除了发文字，还会发「生活图文」：图片来自开放图库，文案由 LLM
+按人设 + 图片事实卡生成。
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| 图源 | Wikimedia Commons → Openverse | 零 key；Wikimedia 元数据更准优先，Openverse 数量更多兜底 |
+| 下载 | 900px webp 落盘 `data/media/` | 本地服务 `/media/*`，不热链、不依赖外部可用性 |
+| 授权 | CC0 / PDM / CC BY / CC BY-SA | 自动跳过 NC/ND；`media_library` 存作者、license、原页链接 |
+| 署名 | 动态下方「图：作者 · 来源 · 授权」 | CC BY/BY-SA 必须署名，`source_ref` 随动态下发 |
+| 人设硬过滤 | 有人物关键词（woman/man/portrait/selfie…）→ 丢弃；男性人设拒绝裙子/高跟鞋/手袋等；敏感词（酒/枪/血）→ 丢弃 | `app/v3/media.py:is_life_safe` |
+| 相关性 | 标题/标签须命中检索词（长度≥4） | 过滤 Openverse 错标图 |
+| 检索词 | 由人物 interests + occupation 映射到静物/场景词 | 如咖啡→espresso machine，海洋→ocean waves |
+| 文案规则 | 母语、≤180 字、不得说「照片里是我」、不得出现城市/国家/地标名、不得编造事实 | 违规自动降级为语言模板 |
+| 图文比例 | 每位人物 1 条图文 + 1 条纯文字 | 另有 3 条纯文字来自每日世界生成，合计约 25 条/天（5 人） |
+| 开关 | `SE_MEDIA_ENABLED=0` 关闭图库（测试用） | 关闭时只生成纯文字 |
+
+动态新增字段：`post_kind`（`life_photo` / `life_text`）、`alt_text`、`media_credit`、
+`source_ref`（署名与授权）。前端图片带 `alt`，支持点击放大。
+
 ### 3.5 每日世界（定时生成 + 生命周期）
 
 信息流不再是一份静态语料：每天本地时间 **02:00** 批量生成「今日世界」，并按下表回收。

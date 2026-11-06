@@ -65,6 +65,9 @@ export interface FeedItem {
   id: string;
   content: string;
   media: string[];
+  post_kind?: string;
+  alt_text?: string;
+  media_credit?: string;
   tags: string[];
   language?: string;
   content_hash?: string;
@@ -264,6 +267,11 @@ function normalizeMedia<T>(value: T, depth = 0): T {
   const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   if (typeof out.avatar === "string" && out.avatar.startsWith("/")) {
     out.avatar = `${API_ORIGIN}${out.avatar}`;
+  }
+  if (Array.isArray(out.media)) {
+    out.media = (out.media as unknown[]).map((v) =>
+      typeof v === "string" && v.startsWith("/") ? `${API_ORIGIN}${v}` : v,
+    );
   }
   for (const key of Object.keys(out)) {
     out[key] = normalizeMedia(out[key], depth + 1);

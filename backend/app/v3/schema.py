@@ -75,7 +75,10 @@ CREATE TABLE IF NOT EXISTS persona_posts (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL DEFAULT '',
     interacted INTEGER NOT NULL DEFAULT 0,
-    interaction_count INTEGER NOT NULL DEFAULT 0
+    interaction_count INTEGER NOT NULL DEFAULT 0,
+    post_kind TEXT NOT NULL DEFAULT 'life_text',
+    alt_text TEXT NOT NULL DEFAULT '',
+    source_ref TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_persona_posts_time ON persona_posts(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_persona_posts_persona ON persona_posts(persona_id, created_at DESC);
@@ -178,6 +181,20 @@ CREATE TABLE IF NOT EXISTS v3_meta (
     value TEXT NOT NULL DEFAULT ''
 );
 
+-- 开放图库：下载过的图片与授权信息（用于去重与署名）
+CREATE TABLE IF NOT EXISTS media_library (
+    external_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    license TEXT NOT NULL DEFAULT '',
+    author TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    fetched_at TEXT NOT NULL DEFAULT '',
+    used_count INTEGER NOT NULL DEFAULT 1
+);
+
 -- 每日世界：每天 02:00 批量生成，幂等（同一天只生成一次）
 CREATE TABLE IF NOT EXISTS daily_world (
     day TEXT PRIMARY KEY,
@@ -263,6 +280,15 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 )
                 log.info("migrated persona_posts: added %s column", col)
                 post_cols.add(col)
+        for col in ("post_kind", "alt_text", "source_ref"):
+            if post_cols and col not in post_cols:
+                default = "'life_text'" if col == "post_kind" else "''"
+                db.conn.execute(
+                    f"ALTER TABLE persona_posts ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}"
+                )
+                log.info("migrated persona_posts: added %s column", col)
+                post_cols.add(col)
+
         for col in ("interacted", "interaction_count"):
             if post_cols and col not in post_cols:
                 db.conn.execute(

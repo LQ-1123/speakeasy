@@ -604,3 +604,39 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* 好友资料页：TA 的动态 */
+.w4-detail-posts {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--w-divider, rgba(0, 0, 0, 0.07));
+}
+.w4-detail-post {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--w-divider, rgba(0, 0, 0, 0.06));
+}
+.w4-detail-post:last-child {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+.w4-detail-post-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+.w4-detail-post-meta {
+  font-size: 12px;
+  color: var(--w-text-3, #8a948d);
+}
+.w4-detail-post-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--w-text, #1f2a24);
+  white-space: pre-wrap;
+}
+.w4-detail-post .w4-moment-imgs {
+  margin-top: 7px;
+  max-width: 100%;
+}

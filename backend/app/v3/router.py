@@ -188,6 +188,18 @@ async def feed_summary(
 # --------------------------------------------------------------------------- #
 # Persona
 # --------------------------------------------------------------------------- #
+@router.get("/friends/{friend_id}/posts")
+async def friend_posts(
+    request: Request,
+    friend_id: str,
+    limit: int = Query(default=6, ge=1, le=20),
+    user_id: str = Depends(bind_current_user),
+) -> dict:
+    """好友资料页「TA 的动态」：人物帖子 / 老好友的朋友圈。"""
+    service = _v3(request)
+    return await _run(service.friend_posts, user_id, friend_id, limit=limit)
+
+
 @router.get("/personas")
 async def list_personas(
     request: Request,

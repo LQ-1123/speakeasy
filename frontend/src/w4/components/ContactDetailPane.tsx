@@ -2,12 +2,13 @@
 
 /** 通讯录 — 好友详情（微信资料页的排布：大头像 → 资料 → 操作）。 */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MessageCircle, Mic, Phone, Trash2 } from "lucide-react";
 
-import { CLOSENESS } from "../format";
+import { CLOSENESS, listTime } from "../format";
 import type { Route } from "../model";
 import { useApp } from "../store";
+import { fetchFriendPosts, type FriendPostItem } from "../v3/api";
 import { Avatar, Confirm, Icon } from "../ui";
 
 export function ContactDetailPane({
@@ -22,6 +23,28 @@ export function ContactDetailPane({
   const { friendById, messagesOf, deleteFriend, expressions } = useApp();
   const friend = friendById(friendId);
   const [confirm, setConfirm] = useState(false);
+  const [posts, setPosts] = useState<FriendPostItem[]>([]);
+
+  // 注意：hooks 必须放在 friend 的空值提前 return 之前，否则好友数据异步到达时 hooks 数量变化会崩
+  useEffect(() => {
+    const fid = friend?.id;
+    if (!fid) {
+      setPosts([]);
+      return;
+    }
+    let alive = true;
+    setPosts([]);
+    void fetchFriendPosts(fid, 6)
+      .then((res) => {
+        if (alive) setPosts(res.items || []);
+      })
+      .catch(() => {
+        if (alive) setPosts([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [friend?.id]);
 
   if (!friend) {
     return (
@@ -113,6 +136,42 @@ export function ContactDetailPane({
                 <span>{msgs.length} 条消息</span>
               </div>
             </div>
+
+            {posts.length ? (
+              <div className="w4-detail-posts">
+                <div className="w4-info-label">TA 的动态</div>
+                {posts.map((post) => (
+                  <div key={post.id} className="w4-detail-post">
+                    <div className="w4-detail-post-head">
+                      <Avatar friend={friend} size={26} round />
+                      <span className="w4-detail-post-meta">
+                        {friend.name} · {listTime(post.created_at)}
+                      </span>
+                    </div>
+                    {post.content ? (
+                      <p className="w4-detail-post-text">{post.content}</p>
+                    ) : null}
+                    {post.media?.length ? (
+                      <div
+                        className={`w4-moment-imgs n${Math.min(4, post.media.length)}`}
+                      >
+                        {post.media.slice(0, 4).map((src) => (
+                          <img
+                            key={src}
+                            src={src}
+                            alt={post.alt_text || ""}
+                            loading="lazy"
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    {post.media_credit ? (
+                      <div className="v3-media-credit">图：{post.media_credit}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {saved.length ? (
               <div className="w4-detail-saved">

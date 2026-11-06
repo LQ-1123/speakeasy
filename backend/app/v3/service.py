@@ -899,6 +899,44 @@ class V3Service:
     def _persona_fish_voice(self, persona: dict) -> str:
         return str((persona or {}).get("fish_voice_id") or "").strip()
 
+    def friend_posts(self, user_id: str, friend_id: str, *, limit: int = 6) -> dict:
+        """某个好友最近发的动态。
+
+        - V3 人物好友（friendships 有链接）→ 返回 TA 的 persona_posts
+        - 老好友（V2 archetype）→ 回落到 V2 moments（朋友圈）
+        """
+        limit = max(1, min(int(limit), 20))
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT persona_id FROM friendships WHERE friend_id=? LIMIT 1",
+                (friend_id,),
+            ).fetchone()
+        if row and row["persona_id"]:
+            persona_id = str(row["persona_id"])
+            data = self.persona_posts(persona_id, user_id=user_id, limit=limit)
+            return {"items": data["items"], "persona_id": persona_id, "source": "persona"}
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT * FROM moments WHERE friend_id=?"
+                " ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (friend_id, limit),
+            ).fetchall()
+        items = [
+            {
+                "kind": "friend_moment",
+                "id": r["id"],
+                "content": r["content"],
+                "media": [],
+                "tags": [],
+                "language": "",
+                "created_at": r["created_at"],
+                "like_count": 0,
+                "comment_count": 0,
+            }
+            for r in rows
+        ]
+        return {"items": items, "persona_id": "", "source": "moments"}
+
     def discover_next(self, user_id: str | None = None, *, language: str | None = None) -> dict | None:
         """从 Persona 池里挑一位还没成为好友的人物。
 

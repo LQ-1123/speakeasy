@@ -740,3 +740,46 @@ def test_translate_endpoint_still_works_for_feed(world_db):
         )
         assert response.status_code == 200
         assert "translation" in response.json()
+
+
+def test_friend_posts_persona_and_legacy_moments(world_db):
+    """好友动态：人物好友返回 TA 的帖子；老好友回落到 V2 朋友圈。"""
+    db, tmp_path = world_db
+    app, service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_friend_posts_0001")
+        uid = headers["X-User-Id"]
+
+        pid = db.conn.execute(
+            "SELECT id FROM personas WHERE status='active' LIMIT 1"
+        ).fetchone()["id"]
+        added = service.add_friend(uid, pid)
+        fid = added["friend_id"]
+
+        res = client.get(f"/api/v3/friends/{fid}/posts?limit=3", headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["source"] == "persona"
+        assert data["items"], "人物好友应有动态"
+        assert data["items"][0]["author"]["nickname"]
+
+        # 老好友（没有 friendships 链接）回落到 moments
+        db.create_friend(
+            {
+                "id": "legacy_friend_1",
+                "name": "Old Friend",
+                "owner_user_id": "local",
+            }
+        )
+        with db._lock, db.conn:  # noqa: SLF001
+            db.conn.execute(
+                "INSERT INTO moments"
+                " (id, friend_id, content, mood_tag, local_time_str, feed_date, is_replied, created_at)"
+                " VALUES ('m_legacy_test','legacy_friend_1','旧好友的一条动态','', '', '', 0,"
+                " '2026-01-01T00:00:00+00:00')"
+            )
+        res2 = client.get("/api/v3/friends/legacy_friend_1/posts?limit=3", headers=headers)
+        assert res2.status_code == 200, res2.text
+        data2 = res2.json()
+        assert data2["source"] == "moments"
+        assert data2["items"][0]["content"] == "旧好友的一条动态"

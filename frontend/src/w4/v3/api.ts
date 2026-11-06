@@ -369,6 +369,30 @@ export function fetchDiscoverNext(language?: string): Promise<DiscoverNext> {
  * 用**帖子语言对应的声线**朗读一条动态。
  * ``version`` 传帖子内容哈希：内容一改 URL 就变，避免浏览器/设备缓存播旧音频。
  */
+export interface FriendPostItem {
+  kind: string;
+  id: string;
+  content: string;
+  media: string[];
+  tags: string[];
+  language?: string;
+  alt_text?: string;
+  media_credit?: string;
+  created_at: string;
+  like_count?: number;
+  comment_count?: number;
+}
+
+/** 好友最近发的动态（V3 人物帖子 / 老好友朋友圈）。 */
+export async function fetchFriendPosts(
+  friendId: string,
+  limit = 6,
+): Promise<{ items: FriendPostItem[]; persona_id: string; source: string }> {
+  return request(
+    `/api/v3/friends/${encodeURIComponent(friendId)}/posts?limit=${Math.max(1, limit)}`,
+  );
+}
+
 export function personaSpeechUrl(
   postId: string,
   version?: string,

@@ -66,3 +66,7 @@ scripts/local-e2e/*.log
 static.zip
 sounds/dg_test*
 sounds/turn_body.json
+
+# Android 签名（不提交私钥）
+mobile/android/keystore.properties
+mobile/android/*.jks

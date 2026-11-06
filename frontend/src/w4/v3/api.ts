@@ -190,6 +190,20 @@ export function currentIdentity(): Identity | null {
   return identity;
 }
 
+/**
+ * 丢弃本地身份并允许重新注册。
+ * 触发场景：服务端数据库被重置 / token 轮换 / 身份被清理 —— 此时继续带旧头会一直 401。
+ */
+export function resetIdentity(): void {
+  identity = null;
+  ready = null;
+  try {
+    window.localStorage.removeItem(ID_STORE);
+  } catch {
+    /* ignore */
+  }
+}
+
 function isOurApi(url: string): boolean {
   if (url.startsWith("/api/")) return true;
   return Boolean(API_ORIGIN) && url.startsWith(`${API_ORIGIN}/api/`);
@@ -211,16 +225,28 @@ export function installApiIdentity(): void {
       id = readLocal<Identity>(ID_STORE);
     }
     if (!id) return original(input, init);
-    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-    headers.set("X-User-Id", id.user_id);
-    headers.set("X-User-Token", id.token);
-    return original(input, { ...(init ?? {}), headers });
+
+    const send = (who: Identity) => {
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      headers.set("X-User-Id", who.user_id);
+      headers.set("X-User-Token", who.token);
+      return original(input, { ...(init ?? {}), headers });
+    };
+
+    const res = await send(id);
+    if (res.status !== 401) return res;
+    /* 身份失效（服务端重置/轮换）：重注册后重试一次，避免整页一直报错 */
+    resetIdentity();
+    const next = await ensureIdentity();
+    return next ? send(next) : res;
   };
 }
 
 /* --------------------------------------------------------------- 请求 */
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(`${API_ORIGIN}${path}`, {
     cache: "no-store",
     ...init,
@@ -229,6 +255,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
+  if (res.status === 401 && !retried) {
+    resetIdentity();
+    await ensureIdentity();
+    return request<T>(path, init, true);
+  }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {

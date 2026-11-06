@@ -386,6 +386,35 @@ VOICE_LANG_PREFIX: dict[str, str] = {
 }
 
 
+_LATIN_STOPWORDS: dict[str, set[str]] = {
+    "en": {
+        "the", "and", "is", "it", "to", "of", "a", "in", "that", "this", "with", "for",
+        "on", "was", "but", "i", "you", "we", "my", "not", "just", "have", "been", "so",
+    },
+    "de": {
+        "der", "die", "das", "und", "ist", "ich", "nicht", "ein", "eine", "mit", "fuer",
+        "für", "auf", "war", "aber", "so", "wie", "mir", "mich", "zu", "den", "dem", "es",
+        "habe", "hat", "dass", "noch", "heute",
+    },
+    "es": {
+        "el", "la", "los", "las", "y", "es", "que", "de", "en", "un", "una", "con", "por",
+        "para", "pero", "mi", "me", "mas", "más", "como", "esta", "hoy", "he", "una",
+    },
+    "fr": {
+        "le", "la", "les", "et", "est", "je", "un", "une", "avec", "pour", "pas", "dans",
+        "sur", "mais", "que", "qui", "au", "des", "du", "ce", "j", "ai", "une", "mon",
+    },
+    "it": {
+        "il", "la", "e", "è", "un", "una", "che", "di", "per", "con", "non", "sono",
+        "piu", "più", "mi", "anche", "questo", "oggi", "della", "ho", "una",
+    },
+    "pt": {
+        "o", "a", "os", "as", "e", "é", "um", "uma", "que", "de", "em", "com", "para",
+        "por", "nao", "não", "mais", "este", "hoje", "do", "da", "eu", "uma",
+    },
+}
+
+
 def detect_language(text: str) -> str:
     """从文本字符集粗判语言（只用于「朗读声线」兜底，不用于翻译）。
 
@@ -404,6 +433,19 @@ def detect_language(text: str) -> str:
         return "zh"
     if any("\u0400" <= ch <= "\u04ff" for ch in text):
         return "ru"
+    # 拉丁字母语言：用高频停用词投票（长度足够时才判断）
+    latin = [ch.lower() for ch in text if ch.isalpha() and ch.isascii()]
+    if len(latin) >= 24:
+        words = "".join(ch if ch.isalpha() or ch.isspace() else " " for ch in text.lower()).split()
+        scores = {
+            lang: sum(1 for w in words if w in stops)
+            for lang, stops in _LATIN_STOPWORDS.items()
+        }
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        best, best_score = ranked[0]
+        second = ranked[1][1] if len(ranked) > 1 else 0
+        if best_score >= 2 and best_score > second:
+            return best
     return ""
 
 

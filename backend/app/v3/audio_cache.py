@@ -18,8 +18,10 @@ edge-TTS 合成一条动态需要 ~8 秒；用户点「朗读」再合成必然�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import shutil
+import time
 from typing import Any
 
 from app.logging_utils import get_logger
@@ -33,6 +35,46 @@ WARM_STARTUP_ITEMS = 8
 #: wav → mp3：体积约降 6-8 倍，传输/解码更快（有 ffmpeg 时启用）
 MP3_BITRATE = "64k"
 _FFMPEG = os.getenv("SE_FFMPEG") or shutil.which("ffmpeg") or ""
+
+
+_TTS_CFG: dict[str, Any] = {"at": 0.0, "cfg": None}
+
+
+def _load_tts_cfg() -> Any:
+    """读取用户 TTS 配置（30s 缓存）：provider=fish 时 v3 朗读也走 Fish。"""
+    if os.getenv("SE_TTS_FISH", "1") == "0":
+        return None
+    now = time.time()
+    if _TTS_CFG["cfg"] is not None and now - float(_TTS_CFG["at"]) < 30:
+        return _TTS_CFG["cfg"]
+    cfg = None
+    try:
+        from app.config import get_settings  # noqa: PLC0415
+        from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+        cfg = TTSConfigStore(str(get_settings().data_path)).load()
+    except Exception:  # noqa: BLE001
+        cfg = None
+    _TTS_CFG.update(at=now, cfg=cfg)
+    return cfg
+
+
+def _fish_enabled(cfg: Any) -> bool:
+    return bool(
+        cfg is not None
+        and str(getattr(cfg, "provider", "") or "") == "fish"
+        and str(getattr(cfg, "fish_api_key", "") or "").strip()
+    )
+
+
+def _fish_ref(cfg: Any) -> str:
+    return str(getattr(cfg, "fish_reference_id", "") or "")
+
+
+def _fish_token(cfg: Any) -> str:
+    ref = _fish_ref(cfg)
+    digest = hashlib.sha1(ref.encode("utf-8")).hexdigest()[:8] if ref else "default"
+    return f"fish-{digest}"
 
 
 def _voice_for(post: dict, persona: dict) -> tuple[str, str]:
@@ -85,6 +127,9 @@ class PersonaAudioCache:
         content = str(post.get("content") or "")
         content_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
         lang, voice = _voice_for(post, persona)
+        cfg = _load_tts_cfg()
+        if _fish_enabled(cfg):
+            voice = _fish_token(cfg)
         safe_voice = voice.replace("/", "_")
         name = f"{post['id']}-{content_hash}-{safe_voice}.{self.ext}"
         return os.path.join(self.cache_dir, name), lang, voice
@@ -128,9 +173,32 @@ class PersonaAudioCache:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._inflight[path] = fut
         try:
-            tmp, _duration = await self.voice.synth_to_wav(
-                str(post.get("content") or "")[:280], voice, out_dir=self.cache_dir
-            )
+            text = str(post.get("content") or "")[:280]
+            tmp = ""
+            cfg = _load_tts_cfg()
+            if _fish_enabled(cfg):
+                try:
+                    from app.voice import fish_tts  # noqa: PLC0415
+
+                    audio = await fish_tts.synthesize(
+                        text,
+                        api_key=str(getattr(cfg, "fish_api_key", "") or ""),
+                        base_url=str(getattr(cfg, "fish_base_url", "") or ""),
+                        model=str(getattr(cfg, "fish_model", "") or ""),
+                        reference_id=_fish_ref(cfg),
+                        audio_format="wav",
+                    )
+                    if audio:
+                        tmp = os.path.join(self.cache_dir, f".fish-{post['id']}.wav")
+                        with open(tmp, "wb") as fh:  # noqa: PTH123
+                            fh.write(audio)
+                except Exception as exc:  # noqa: BLE001 - Fish 失败回落 edge
+                    log.warning("v3 Fish TTS 失败（%s），回落 edge", exc)
+                    tmp = ""
+            if not tmp:
+                tmp, _duration = await self.voice.synth_to_wav(
+                    text, voice, out_dir=self.cache_dir
+                )
             target = path
             if self.ext == "mp3":
                 if not await self._to_mp3(tmp, path):

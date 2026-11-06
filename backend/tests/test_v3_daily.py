@@ -72,6 +72,19 @@ def _register(client: TestClient, device: str) -> dict:
     return {"X-User-Id": data["user_id"], "X-User-Token": data["token"]}
 
 
+def test_fallback_persona_matches_language():
+    """兜底人物必须用目标语言写内容，且 language 字段一致。"""
+    from app.v3.daily_world import _fallback_persona
+    from app.v3.seed_data import detect_language
+
+    for lang in ("en", "de", "es", "fr", "ja", "ko", "zh"):
+        persona = _fallback_persona(0, "2026-11-07", lang)
+        assert persona["language"] == lang
+        text = " ".join(str(p["content"]) for p in persona["posts"])
+        detected = detect_language(text)
+        assert detected == lang, (lang, detected, text[:60])
+
+
 def test_generate_daily_is_idempotent(daily_db):
     first = asyncio.run(generate_daily(daily_db, None, day="2026-11-06"))
     assert first["skipped"] is False

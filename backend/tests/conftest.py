@@ -12,6 +12,12 @@ from pathlib import Path
 
 import pytest
 
+import os
+
+# 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
+os.environ.setdefault("SE_TTS_FISH", "0")
+
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:

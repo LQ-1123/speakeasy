@@ -22,7 +22,7 @@ from typing import Any
 
 from app.logging_utils import get_logger
 from app.v3.schema import backfill_avatar_seeds, sync_persona_friends
-from app.v3.seed_data import LANGUAGE_NAMES
+from app.v3.seed_data import LANGUAGE_NAMES, detect_language
 
 log = get_logger(__name__)
 
@@ -174,7 +174,126 @@ _TEMPLATE_PERSONAS: list[dict] = [
 ]
 
 
-def _fallback_persona(index: int, day: str) -> dict:
+_FALLBACK_LANG: dict[str, dict[str, Any]] = {
+    "en": {
+        "names": ["Emma", "Noah", "Chloe"],
+        "city": "Bristol", "country": "United Kingdom", "occupation": "bookshop assistant",
+        "bio": "Slow mornings, second-hand books and a kettle that never stops.",
+        "posts": [
+            "The kettle has been on three times and I have not made tea once. A productive morning.",
+            "Someone put a tiny handwritten note inside a second-hand book today. I am keeping it.",
+            "Rain all afternoon, so I rearranged the window display twice. It looks the same.",
+        ],
+    },
+    "de": {
+        "names": ["Lena", "Jonas", "Mia"],
+        "city": "Leipzig", "country": "Germany", "occupation": "Grafikdesignerin",
+        "bio": "Zeichnet morgens, kocht abends, und trinkt viel zu viel Kaffee.",
+        "posts": [
+            "Der Kaffee war heute so stark, dass ich die Wohnung zweimal aufgeräumt habe.",
+            "Im Buchladen an der Ecke lag ein alter Reiseführer. Ich habe ihn nur angeschaut. Ehrlich.",
+            "Regen den ganzen Nachmittag. Perfektes Wetter für einen langen Nachmittag mit Musik.",
+        ],
+    },
+    "es": {
+        "names": ["Lucía", "Mateo", "Paula"],
+        "city": "Valencia", "country": "Spain", "occupation": "fotógrafa",
+        "bio": "Café por la mañana, cámara al hombro, siesta cuando se puede.",
+        "posts": [
+            "Hoy el café sabía mejor que ayer. No sé si es el café o el día.",
+            "Encontré una librería pequeña con sillas viejas. Me quedé una hora sin comprar nada.",
+            "Ha llovido toda la tarde. He hecho tres fotos desde la ventana y ninguna me convence.",
+        ],
+    },
+    "fr": {
+        "names": ["Camille", "Hugo", "Léa"],
+        "city": "Lyon", "country": "France", "occupation": "libraire",
+        "bio": "Je lis le matin, je cuisine le soir, et je perds mes marque-pages.",
+        "posts": [
+            "Le café était trop chaud, alors j'ai lu deux pages de plus. Bon compromis.",
+            "Quelqu'un a laissé un vieux billet dans un livre d'occasion. Je l'ai gardé.",
+            "Il pleut depuis midi. J'ai réorganisé la vitrine deux fois, sans résultat.",
+        ],
+    },
+    "it": {
+        "names": ["Giulia", "Marco", "Sara"],
+        "city": "Bologna", "country": "Italy", "occupation": "illustratrice",
+        "bio": "Caffè, matite e una scrivania sempre piena di fogli.",
+        "posts": [
+            "Il caffè di oggi era così forte che ho riordinato la scrivania due volte.",
+            "In libreria ho trovato una guida vecchia. L'ho solo sfogliata, giuro.",
+            "Piove da stamattina. Perfetto per disegnare con la musica alta.",
+        ],
+    },
+    "pt": {
+        "names": ["Beatriz", "Tiago", "Inês"],
+        "city": "Porto", "country": "Portugal", "occupation": "professora",
+        "bio": "Café de manhã, livros à tarde, e uma varanda com vista para telhados.",
+        "posts": [
+            "O café hoje ficou tão forte que arrumei a casa duas vezes.",
+            "Encontrei um livro antigo com uma dedicatória. Guardei como se fosse meu.",
+            "Choveu toda a tarde. Fiquei na varanda a ver os telhados a brilhar.",
+        ],
+    },
+    "ja": {
+        "names": ["美咲", "悠斗", "彩"],
+        "city": "金沢", "country": "Japan", "occupation": "編集者",
+        "bio": "朝はコーヒー、夜は本。古い本屋を巡るのが趣味です。",
+        "posts": [
+            "今朝のコーヒーが濃すぎて、部屋を二回片付けました。",
+            "古本屋で古い旅行ガイドを見つけました。買わずに一時間立ち読み。",
+            "午後はずっと雨。音楽をかけて、窓の外を眺めていました。",
+        ],
+    },
+    "ko": {
+        "names": ["지우", "민준", "서연"],
+        "city": "전주", "country": "Korea", "occupation": "편집자",
+        "bio": "아침엔 커피, 저녁엔 책. 오래된 책방을 찾아다니는 게 취미예요.",
+        "posts": [
+            "오늘 커피가 너무 진해서 방을 두 번이나 정리했어요.",
+            "동네 책방에서 오래된 여행 책을 봤어요. 그냥 한 시간 서서 읽었어요.",
+            "오후 내내 비가 왔어요. 음악 틀고 창밖을 봤습니다.",
+        ],
+    },
+    "zh": {
+        "names": ["小雨", "阿哲", "林林"],
+        "city": "杭州", "country": "China", "occupation": "编辑",
+        "bio": "早上咖啡，晚上书，喜欢在老书店里慢慢逛。",
+        "posts": [
+            "今天的咖啡太浓了，我把房间收拾了两遍。",
+            "在老书店翻到一本旧旅行指南，站着看了半小时，没买。",
+            "下午一直在下雨，放了音乐，看着窗外出神。",
+        ],
+    },
+}
+
+
+def _fallback_persona(index: int, day: str, language: str = "en") -> dict:
+    """分语言兜底人物：保证角标语言与内容语言一致。"""
+    lang = language if language in _FALLBACK_LANG else "en"
+    spec = _FALLBACK_LANG[lang]
+    suffix = hashlib.sha256(f"{day}:{index}".encode("utf-8")).hexdigest()[:4]
+    name = spec["names"][index % len(spec["names"])]
+    posts = [
+        {"content": text, "tags": []} if isinstance(text, str) else text
+        for text in spec["posts"]
+    ]
+    return {
+        "nickname": f"{name} {suffix[:2]}",
+        "gender": "female" if index % 2 == 0 else "male",
+        "age": 24 + (index * 3) % 12,
+        "country": spec["country"],
+        "city": spec["city"],
+        "language": lang,
+        "occupation": spec["occupation"],
+        "bio": spec["bio"],
+        "personality": "curious, calm, a little funny",
+        "interests": ["coffee", "books", "walking"],
+        "posts": posts,
+    }
+
+
+
     base = _TEMPLATE_PERSONAS[index % len(_TEMPLATE_PERSONAS)]
     suffix = hashlib.sha256(f"{day}:{index}".encode("utf-8")).hexdigest()[:4]
     persona = dict(base)
@@ -236,30 +355,54 @@ async def _llm_persona(
         parts.append(f"Write ALL text (bio, personality, posts) in language code '{language}'.")
     if level:
         parts.append(f"Reader level for {language}: {guide}.")
-    try:
-        from app.v2.llm_json import complete_json_safe  # noqa: PLC0415
+    from app.v2.llm_json import complete_json_safe  # noqa: PLC0415
 
-        data = await complete_json_safe(
-            llm,
-            [
-                # 注意：这个 prompt 用 system 角色时 DeepSeek 会返回空串，必须放 user 消息
-                {"role": "user", "content": " ".join(parts)},
-            ],
-            schema_hint='{"nickname","gender","age","country","city","language","occupation","posts":[]}',
-            fallback=lambda: {},
-            temperature=1.0,
-            max_tokens=2000,
-        )
+    async def _try(extra: str = "") -> dict | None:
+        msgs = " ".join(parts + ([extra] if extra else []))
+        try:
+            data = await complete_json_safe(
+                llm,
+                [
+                    # 注意：这个 prompt 用 system 角色时 DeepSeek 会返回空串，必须放 user 消息
+                    {"role": "user", "content": msgs},
+                ],
+                schema_hint='{"nickname","gender","age","country","city","language","occupation","posts":[]}',
+                fallback=lambda: {},
+                temperature=1.0,
+                max_tokens=2000,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("每日人物生成失败 #%d: %s", index, exc)
+            return None
         if not isinstance(data, dict) or not data.get("nickname"):
             return None
         if not isinstance(data.get("posts"), list) or not data["posts"]:
             return None
-        if language:
-            data["language"] = language
         return data
-    except Exception as exc:  # noqa: BLE001
-        log.debug("每日人物生成失败 #%d: %s", index, exc)
+
+    data = await _try()
+    if data is None:
         return None
+
+    # 校验真实语言：角标必须和内容一致
+    if language:
+        texts = [str(p.get("content") or "") for p in data["posts"] if isinstance(p, dict)]
+        detected = detect_language(" ".join(texts)) if texts else ""
+        if detected and detected != language:
+            log.info("人物语言不符（要求 %s，实际 %s），重试一次", language, detected)
+            data = await _try(
+                f"IMPORTANT: the previous attempt was written in '{detected}'. "
+                f"You MUST write every post in '{language}' this time."
+            )
+            if data is None:
+                return None
+            texts = [str(p.get("content") or "") for p in data["posts"] if isinstance(p, dict)]
+            detected = detect_language(" ".join(texts)) if texts else ""
+            if detected and detected != language:
+                log.warning("人物语言仍不符（要求 %s，实际 %s），改走兜底", language, detected)
+                return None
+        data["language"] = language
+    return data
 
 
 def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tuple[str, int]:
@@ -366,8 +509,7 @@ async def generate_daily(
         if persona is not None:
             persona["language"] = lang
         if persona is None:
-            persona = _fallback_persona(index, day)
-            persona["language"] = lang
+            persona = _fallback_persona(index, day, lang)
             source = "template" if index == 0 else source
         pid, posts = _insert_persona(db, persona, day=day, expires_at=expires)
         created_personas += 1

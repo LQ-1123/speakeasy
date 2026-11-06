@@ -86,6 +86,16 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.12 语言角标校验与 v3 朗读音色
+
+- **语言角标必须等于内容语言**：每日人物生成后对 posts 做语言检测（CJK 字符规则 + 拉丁语系
+  停用词投票，覆盖 en/de/es/fr/it/pt/ja/ko/zh）；与要求语言不符时带纠正提示重试一次，
+  仍不符则放弃该次生成、改用**分语言兜底模板**，保证角标不会骗人。
+- **v3 朗读优先用用户配置的 Fish TTS**：`PersonaAudioCache` 读取 `tts_config.json`，
+  `provider=fish` 且有 key 时调用 `app.voice.fish_tts`（带参考音色），失败才回落到 edge；
+  缓存文件名包含 fish 音色 token，切换音色/配置后旧缓存自动失效。
+- 环境变量 `SE_TTS_FISH=0` 可强制关闭 Fish（测试默认开启该开关，避免打真实 API）。
+
 ### 3.11 母语、在练语言与分语言水平
 
 - `PUT /api/v3/profile` 新增 `native_language`（母语，默认 `zh`）、`level`（兼容字段）、

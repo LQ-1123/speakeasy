@@ -13,6 +13,23 @@ if str(BACKEND) not in sys.path:
 from app.v3.media import MediaItem, credit_text, is_life_safe, queries_for  # noqa: E402
 
 
+def test_fish_tts_toggle_and_token():
+    """provider=fish 且有 key 时才启用；token 对同一参考音频稳定。"""
+    from types import SimpleNamespace
+
+    from app.v3.audio_cache import _fish_enabled, _fish_token
+
+    fish = SimpleNamespace(provider="fish", fish_api_key="k", fish_reference_id="ref-1")
+    assert _fish_enabled(fish) is True
+    assert _fish_token(fish) == _fish_token(fish)
+    assert _fish_token(fish).startswith("fish-")
+
+    no_key = SimpleNamespace(provider="fish", fish_api_key="", fish_reference_id="ref-1")
+    assert _fish_enabled(no_key) is False
+    edge = SimpleNamespace(provider="system", fish_api_key="k", fish_reference_id="")
+    assert _fish_enabled(edge) is False
+
+
 def _item(title: str, tags: list[str] | None = None) -> MediaItem:
     return MediaItem(
         external_id="openverse:x", source="Openverse", title=title,

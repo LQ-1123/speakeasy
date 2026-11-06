@@ -383,6 +383,51 @@ def test_persona_avatar_url_encodes_seed_and_identity():
     assert "g=female" in url and "r=east_asian" in url and "a=23" in url
 
 
+def test_avatar_options_defaults_are_valid_and_deterministic():
+    from app.v3 import avatar_style
+
+    persona = {
+        "id": "p_jiwoo", "nickname": "Jiwoo", "gender": "female",
+        "country": "Korea", "age": 23,
+    }
+    a = avatar_style.default_options(persona)
+    b = avatar_style.default_options(persona)
+    assert a == b, "同一人物必须得到同一组部件"
+    assert a["top"][0] in avatar_style.TOP
+    assert a["skinColor"][0] in avatar_style.SKIN
+    assert a["clothing"][0] in avatar_style.CLOTHING
+    # 不同性别/年龄 → 结果不同
+    male = avatar_style.default_options({**persona, "gender": "male"})
+    mature = avatar_style.default_options({**persona, "age": 40})
+    assert a != male and a != mature
+
+
+def test_api_persona_carries_avatar_options(world_db):
+    """补齐侧写部件后，人物接口返回 avatar_style + avatar_options。"""
+    import asyncio
+
+    from app.v3 import avatar_style as avatar_style_mod
+
+    db, tmp_path = world_db
+    app, service, _voice = _make_app(db, tmp_path)
+    rows = [dict(r) for r in db.conn.execute("SELECT * FROM personas").fetchall()]
+    updated = asyncio.run(avatar_style_mod.ensure_avatar_options(db, rows, None))
+    assert updated == 12
+
+    with TestClient(app) as client:
+        profile = client.get("/api/v3/personas/p_jiwoo").json()
+        assert profile["avatar_style"] == "avataaars"
+        options = profile["avatar_options"]
+        assert isinstance(options, dict) and options.get("top")
+        assert options["top"][0] in avatar_style_mod.TOP
+
+        headers = _register(client, "device_avatar_0001")
+        data = client.post("/api/v3/personas/p_jiwoo/friend", headers=headers).json()
+        friend = db.get_friend(data["friend_id"], any_owner=True)
+        assert friend["avatar_style"] == "avataaars"
+        assert friend["avatar_options"]
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

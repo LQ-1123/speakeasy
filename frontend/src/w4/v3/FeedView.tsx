@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import { playVoiceUrl } from "../apiFacade";
+import { personaAvatarSrc } from "../avatar";
 import { isLocalMode } from "../local/keys";
 import type { Route } from "../model";
 import { useApp } from "../store";
@@ -472,7 +473,16 @@ export function FeedCard({
   return (
     <article className="w4-moment">
       <button onClick={onOpenPersona} aria-label={author.nickname} className="v3-avatar-btn">
-        <Avatar src={author.avatar} name={author.nickname} size={42} />
+        <Avatar
+                src={personaAvatarSrc(
+                  author.avatar_seed || author.id,
+                  author.avatar_style,
+                  author.avatar_options,
+                  author.avatar,
+                )}
+                name={author.nickname}
+                size={42}
+              />
       </button>
       <div className="w4-moment-body">
         <div className={`w4-moment-name ${item.is_mine ? "is-me" : ""}`}>

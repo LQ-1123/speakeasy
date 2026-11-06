@@ -32,6 +32,7 @@ pending→accepted 升级、延迟事件物化与幂等、每日上限、人物�
 | F 原有功能回归 | `scripts/v3_scenario_f.py`（真实服务） | 好友列表 / 好友资料+记忆 / AI 文字聊天 4.5s / TTS 1.4s / **STT（把 TTS 音频喂回）识别正确** / 实时通话流式回合 / 表达本 / bootstrap / total_turns 累加 —— **10/10 通过** ✅ |
 | G 信息流翻译 | 点任意人物动态「翻译」 | 英文原文下方出现中文译文（LLM 链路），再点收起 ✅ |
 | H 信息流朗读 | 点任意人物动态「朗读」 | 用**该人物自己的声线**合成并播放（Adrian → `en-GB-RyanNeural`，Jiwoo → `ko-KR-SunHiNeural`），按钮显示「播放中」→ 播完恢复 ✅ |
+| O 头像切换 Avataaars | 信息流人物头像 | 头像改为 DiceBear Avataaars：LLM 读取人物资料侧写部件（top/hairColor/skinColor/clothing/eyes/accessories…）后存库，客户端离线渲染；12 位人物全部生成成功，信息流/主页/偶遇/聊天同源；无 LLM 时确定性映射兜底 ✅ |
 | N 头像维度 | 人种/性别/年龄 | SeedFace 支持三维度：地域→肤色/发色发质，性别→发型/胡须/耳环/唇色，年龄→灰白发/皱纹/眼镜（三档）；/api/v3/avatar/{seed}.svg?g=&r=&a= 全部生效；Avatar Lab 第 4 节矩阵可对比 5 地域×2 性别×3 年龄 ✅ |
 | M 种子头像 | 信息流头像来源 | 不再用 mock 图片：personas.avatar_seed → /api/v3/avatar/{seed}.svg 确定性生成（同 seed 同脸，12 人物各不相同）；信息流/主页/偶遇/聊天同一 URL；老库启动自动回填种子 ✅ |
 | L 朗读毫秒级 | 预热后点「朗读」 | 后台预生成 + mp3 + 浏览器预取：接口 3–17ms（冷启动 8400ms → 约 500×），浏览器 canplay 11–16ms；/health.audio 可看预热进度 ✅ |

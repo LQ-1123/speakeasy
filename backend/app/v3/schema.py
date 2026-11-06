@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS personas (
     nickname TEXT NOT NULL,
     avatar TEXT NOT NULL DEFAULT '',
     avatar_seed TEXT NOT NULL DEFAULT '',
+    avatar_style TEXT NOT NULL DEFAULT '',
+    avatar_options TEXT NOT NULL DEFAULT '',
     bio TEXT NOT NULL DEFAULT '',
     personality TEXT NOT NULL DEFAULT '',
     interests TEXT NOT NULL DEFAULT '[]',
@@ -181,7 +183,7 @@ CREATE TABLE IF NOT EXISTS v3_discover_views (
 #: ``v3_meta`` 里标记「语料已入库」的键
 SEED_KEY = "persona_seed_version"
 #: 语料版本：v3 = 种子化头像（Persona 头像由 avatar_seed 生成，不再用 mock 图片）
-SEED_VERSION = "2026-11-06.3"
+SEED_VERSION = "2026-11-06.4"
 
 
 def _now_utc() -> datetime:
@@ -219,6 +221,27 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 "ALTER TABLE personas ADD COLUMN avatar_seed TEXT NOT NULL DEFAULT ''"
             )
             log.info("migrated personas: added avatar_seed column")
+
+        for col in ("avatar_style", "avatar_options"):
+            if pcols and col not in pcols:
+                db.conn.execute(
+                    f"ALTER TABLE personas ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+                log.info("migrated personas: added %s column", col)
+                pcols.add(col)
+
+        # 好友表（V2 建的）也补上，聊天列表才能用同一套 Avataaars 部件
+        fcols = {
+            row[1]
+            for row in db.conn.execute("PRAGMA table_info(friends)").fetchall()
+        }
+        for col in ("avatar_style", "avatar_options"):
+            if fcols and col not in fcols:
+                db.conn.execute(
+                    f"ALTER TABLE friends ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+                log.info("migrated friends: added %s column", col)
+                fcols.add(col)
     if seed:
         seed_if_needed(db)
 
@@ -245,12 +268,13 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         now = _now_utc()
         for p in PERSONAS:
             db.conn.execute(
-                "INSERT INTO personas (id, nickname, avatar, avatar_seed, bio, personality,"
-                " interests, language, country, city, timezone, occupation, age, gender,"
-                " voice_id, archetype_id, ai_config, status, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                "INSERT INTO personas (id, nickname, avatar, avatar_seed, avatar_style,"
+                " bio, personality, interests, language, country, city, timezone, occupation,"
+                " age, gender, voice_id, archetype_id, ai_config, status, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname,"
                 " avatar=excluded.avatar, avatar_seed=excluded.avatar_seed,"
+                " avatar_style=excluded.avatar_style,"
                 " bio=excluded.bio, personality=excluded.personality, interests=excluded.interests,"
                 " language=excluded.language, country=excluded.country, city=excluded.city,"
                 " timezone=excluded.timezone, occupation=excluded.occupation, age=excluded.age,"
@@ -258,7 +282,7 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
                 " archetype_id=excluded.archetype_id, ai_config=excluded.ai_config,"
                 " status=excluded.status",
                 (
-                    p["id"], p["nickname"], "", p.get("avatar_seed", ""),
+                    p["id"], p["nickname"], "", p.get("avatar_seed", ""), "avataaars",
                     p["bio"], p["personality"],
                     _json(p["interests"]), p["language"], p["country"], p["city"],
                     p["timezone"], p["occupation"], int(p["age"]), p["gender"],
@@ -374,8 +398,15 @@ def sync_persona_friends(db: Any) -> int:
                 from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
 
                 db.conn.execute(
-                    "UPDATE friends SET avatar_url=?, avatar_seed=? WHERE id=?",
-                    (persona_avatar_url(persona), str(persona.get("avatar_seed") or ""), friend_id),
+                    "UPDATE friends SET avatar_url=?, avatar_seed=?, avatar_style=?, avatar_options=?"
+                    " WHERE id=?",
+                    (
+                        persona_avatar_url(persona),
+                        str(persona.get("avatar_seed") or ""),
+                        str(persona.get("avatar_style") or ""),
+                        str(persona.get("avatar_options") or ""),
+                        friend_id,
+                    ),
                 )
             return int(cur.rowcount or 0)
         except sqlite3.Error as exc:  # pragma: no cover - 老库可能没有 friendships 表

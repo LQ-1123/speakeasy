@@ -138,6 +138,36 @@ export function diceAvatar(
 }
 
 /** 国家名 → 上面的地域键（和 api.ts 的区域映射保持一致） */
+/** 用 Avataaars + LLM 侧写的部件渲染头像（离线、确定性） */
+export function renderAvataaars(seed: string, options?: Record<string, unknown>): string {
+  try {
+    // DiceBear avataaars 的 style=circle 会输出空画布，这里剔除
+    const { style: _style, ...rest } = (options || {}) as Record<string, unknown>;
+    const avatar = createAvatar(avataaars as never, {
+      seed: seed || "anonymous",
+      size: 128,
+      ...rest,
+    } as never);
+    return avatar.toDataUri();
+  } catch {
+    return "";
+  }
+}
+
+/** Persona 头像：有侧写部件就用 Avataaars，否则回落到兜底 URL */
+export function personaAvatarSrc(
+  seed: string,
+  style?: string,
+  options?: Record<string, unknown>,
+  fallback?: string,
+): string {
+  if (style === "avataaars" && options && Object.keys(options).length > 0) {
+    const rendered = renderAvataaars(seed, options);
+    if (rendered) return rendered;
+  }
+  return fallback || "";
+}
+
 export function avatarRegionOf(country: string): string {
   const c = (country || "").toLowerCase();
   if (/china|japan|korea|taiwan|hong kong/.test(c)) return "east_asian";

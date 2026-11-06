@@ -27,6 +27,9 @@ export interface PersonaBrief {
   id: string;
   nickname: string;
   avatar: string;
+  avatar_seed?: string;
+  avatar_style?: string;
+  avatar_options?: Record<string, unknown>;
   bio: string;
   interests: string[];
   country: string;
@@ -85,7 +88,7 @@ export interface Friendship {
   request_message: string;
   created_at: string;
   updated_at: string;
-  persona?: { id: string; nickname: string; avatar: string; is_ai: boolean } | null;
+  persona?: { id: string; nickname: string; avatar: string; avatar_seed?: string; avatar_style?: string; avatar_options?: Record<string, unknown>; is_ai: boolean } | null;
 }
 
 export interface PersonaProfile extends PersonaBrief {
@@ -111,7 +114,7 @@ export interface SocialEvent {
     persona_name?: string;
     post_excerpt?: string;
   };
-  persona: { id: string; nickname: string; avatar: string; bio: string; is_ai: boolean; ai_label: string };
+  persona: { id: string; nickname: string; avatar: string; avatar_seed?: string; avatar_style?: string; avatar_options?: Record<string, unknown>; bio: string; is_ai: boolean; ai_label: string };
 }
 
 export interface FeedSummary {

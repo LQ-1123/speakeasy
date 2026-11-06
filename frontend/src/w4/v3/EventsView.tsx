@@ -12,6 +12,7 @@ import { Bell, Check, Heart, MessageSquare, Sparkles, UserPlus, X } from "lucide
 
 import type { Route } from "../model";
 import { useApp } from "../store";
+import { personaAvatarSrc } from "../avatar";
 import { Avatar, Icon } from "../ui";
 import {
   acceptEvent,
@@ -191,7 +192,16 @@ export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
           {events.map((ev) => (
             <div key={ev.id} className={`v3-event ${ev.is_read ? "" : "is-unread"}`}>
               <button className="v3-event-avatar" onClick={() => void open(ev)} aria-label={ev.persona.nickname}>
-                <Avatar src={ev.persona.avatar} name={ev.persona.nickname} size={40} />
+                <Avatar
+                  src={personaAvatarSrc(
+                    ev.persona.avatar_seed || ev.persona.id,
+                    ev.persona.avatar_style,
+                    ev.persona.avatar_options,
+                    ev.persona.avatar,
+                  )}
+                  name={ev.persona.nickname}
+                  size={40}
+                />
                 <span className={`v3-event-icon ${ev.type}`}>
                   {ev.type === "like" ? (
                     <Heart size={10} strokeWidth={0} fill="currentColor" />

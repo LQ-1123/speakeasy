@@ -12,6 +12,7 @@ import { ArrowLeft, Check, MessageCircle, Sparkles, UserPlus, X } from "lucide-r
 
 import type { Route } from "../model";
 import { useApp } from "../store";
+import { personaAvatarSrc } from "../avatar";
 import { Avatar, Icon } from "../ui";
 import {
   acceptEvent,
@@ -190,11 +191,21 @@ export function PersonaProfileView({
             <div className="v3-profile-hero">
               <div
                 className="v3-profile-cover"
-                style={{ backgroundImage: `url(${profile.avatar})` }}
+                style={{ backgroundImage: `url(${personaAvatarSrc(profile.avatar_seed || profile.id, profile.avatar_style, profile.avatar_options, profile.avatar)})` }}
                 aria-hidden
               />
               <div className="v3-profile-id">
-                <Avatar src={profile.avatar} name={profile.nickname} size={78} round />
+                <Avatar
+                  src={personaAvatarSrc(
+                    profile.avatar_seed || profile.id,
+                    profile.avatar_style,
+                    profile.avatar_options,
+                    profile.avatar,
+                  )}
+                  name={profile.nickname}
+                  size={78}
+                  round
+                />
                 <div className="v3-profile-name">
                   {profile.nickname}
                   <span className="v3-ai-tag">AI 人物</span>

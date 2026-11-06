@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { API_ORIGIN } from "../api";
+import { personaAvatarSrc } from "../avatar";
 import type { Route } from "../model";
 import type { DiscoverCandidate } from "../mock";
 import { useApp } from "../store";
@@ -41,7 +42,7 @@ function toCandidate(res: DiscoverNext, zh: string): DiscoverCandidate {
   return {
     id: p.id,
     name: p.nickname,
-    avatar: p.avatar,
+    avatar: personaAvatarSrc(p.avatar_seed || p.id, p.avatar_style, p.avatar_options, p.avatar),
     age: p.age ?? 0,
     city: p.city,
     country: p.country,

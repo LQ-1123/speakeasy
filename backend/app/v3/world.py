@@ -32,6 +32,7 @@ from app.v3.schema import (
     seed_if_needed,
     sync_persona_friends,
 )
+from app.v3.avatar_style import ensure_avatar_options
 from app.v3.seed_data import PERSONAS, POSTS
 
 log = get_logger(__name__)
@@ -237,6 +238,18 @@ async def generate_world_llm(db: Any, llm: Any, *, count: int | None = None) -> 
     return {"source": "llm", "personas": created_personas, "posts": created_posts, "fallback": False}
 
 
+async def _ensure_avatar_options(db: Any, llm: Any) -> int:
+    """给缺少头像部件的人物做一次侧写（幂等）。"""
+    import os
+
+    with db._lock, db.conn:  # noqa: SLF001
+        rows = [dict(r) for r in db.conn.execute("SELECT * FROM personas").fetchall()]
+    if not rows:
+        return 0
+    use_llm = os.getenv("SE_AVATAR_LLM", "1").strip().lower() not in ("0", "false", "no", "off")
+    return await ensure_avatar_options(db, rows, llm if use_llm else None)
+
+
 async def ensure_world(db: Any, llm: Any) -> dict:
     """启动时确保世界存在：LLM 模式先生成，失败/未开启则用预置语料。
 
@@ -255,6 +268,10 @@ async def ensure_world(db: Any, llm: Any) -> dict:
         sync_persona_friends(db)
         backfill_post_languages(db)
         backfill_avatar_seeds(db)
+        updated = await _ensure_avatar_options(db, llm)
+        if updated:
+            sync_persona_friends(db)
+            log.info("v3 头像部件生成完成：%d 人", updated)
         return world_status(db)
 
     if world_path() == "llm":
@@ -265,6 +282,10 @@ async def ensure_world(db: Any, llm: Any) -> dict:
     sync_persona_friends(db)
     backfill_post_languages(db)
     backfill_avatar_seeds(db)
+    updated = await _ensure_avatar_options(db, llm)
+    if updated:
+        sync_persona_friends(db)
+        log.info("v3 头像部件生成完成：%d 人", updated)
     return world_status(db)
 
 

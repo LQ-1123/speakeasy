@@ -215,13 +215,15 @@ class V3Service:
     @staticmethod
     def _persona_brief(persona: dict) -> dict:
         from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+        from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
 
         return {
             "id": persona["id"],
             "nickname": persona["nickname"],
-            # 头像按种子确定性生成：同一 Persona 在任何端/任何时间都是同一张脸
+            # avatar 是兜底 URL（老客户端/封面用）；新客户端优先用 avatar_style + avatar_options
             "avatar": persona_avatar_url(persona),
             "avatar_seed": persona.get("avatar_seed", ""),
+            **persona_avatar_meta(persona),
             "bio": persona["bio"],
             "interests": persona["interests"],
             "country": persona["country"],
@@ -254,12 +256,14 @@ class V3Service:
     @staticmethod
     def _persona_public_from_full(persona: dict) -> dict:
         from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+        from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
 
         return {
             "id": persona["id"],
             "nickname": persona["nickname"],
             "avatar": persona_avatar_url(persona),
             "avatar_seed": persona.get("avatar_seed", ""),
+            **persona_avatar_meta(persona),
             "bio": persona["bio"],
             "personality": persona["personality"],
             "interests": persona["interests"],
@@ -749,6 +753,8 @@ class V3Service:
             "name": name,
             "avatar_seed": f"{persona['id']}-{name[:2].lower()}",
             "avatar_url": persona_avatar_url(persona),
+            "avatar_style": str(persona.get("avatar_style") or ""),
+            "avatar_options": str(persona.get("avatar_options") or ""),
             "archetype_id": str(persona.get("archetype_id") or ""),
             "voice_id": str(persona.get("voice_id") or ""),
             "nationality": str(persona.get("country") or ""),

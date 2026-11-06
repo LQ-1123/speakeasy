@@ -8,7 +8,7 @@
  */
 
 import type { Expression, Friend, Message, Moment, Profile } from "./model";
-import { avatarRegionOf, diceAvatar, profileAvatar } from "./avatar";
+import { avatarRegionOf, diceAvatar, profileAvatar, renderAvataaars } from "./avatar";
 
 /* ------------------------------------------------------------ 常量与工具 */
 
@@ -132,12 +132,29 @@ function mapFriend(raw: RawFriend): Friend {
   const lastAt = (raw.last_interaction_at as string) ?? null;
   const localTime = String(raw.local_time ?? "");
   const rawAvatar = String(raw.avatar_url ?? "").trim();
+  const rawStyle = String(raw.avatar_style ?? "").trim();
+  let rawOptions: Record<string, unknown> | undefined;
+  if (raw.avatar_options) {
+    try {
+      rawOptions =
+        typeof raw.avatar_options === "string"
+          ? (JSON.parse(raw.avatar_options) as Record<string, unknown>)
+          : (raw.avatar_options as Record<string, unknown>);
+    } catch {
+      rawOptions = undefined;
+    }
+  }
+  const renderedPersonaAvatar =
+    rawStyle === "avataaars" && rawOptions && Object.keys(rawOptions).length > 0
+      ? renderAvataaars(String(raw.avatar_seed || id || name), rawOptions)
+      : "";
   return {
     id,
     name,
     gender: String(raw.gender ?? ""),
     avatar:
-      rawAvatar
+      renderedPersonaAvatar ||
+      (rawAvatar
         ? mediaUrl(rawAvatar) ?? rawAvatar
         : diceAvatar(
             id || name,
@@ -145,7 +162,7 @@ function mapFriend(raw: RawFriend): Friend {
               ? (String(raw.gender) as "male" | "female")
               : NAME_GENDER[(name || "").toLowerCase().replace(/[^a-z]/g, "")] ?? "",
             avatarRegionOf(String(raw.nationality || raw.country || "")),
-          ),
+          )),
     city: String(raw.city ?? ""),
     country,
     flag: flagOf(country),

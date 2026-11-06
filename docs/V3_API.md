@@ -72,6 +72,14 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 | GET | /api/v3/avatar/{seed}.svg?g=male&r=east_asian&a=28 | 按种子生成插画头像 SVG：同一 seed 永远同一张脸；g/
  只影响肤色/发型/胡子等；Cache-Control: immutable |
 
+- 当前主头像：**DiceBear Avataaars**（`personas.avatar_style = "avataaars"`）。部件保存在
+  `personas.avatar_options`（JSON：top/hairColor/skinColor/clothing/eyes/eyebrows/mouth/
+  accessories/facialHair/backgroundColor…），由 **LLM 侧写**人物资料后选出，无 LLM 时用
+  确定性映射（地域→肤色、性别→发型池、年龄→灰发/眼镜概率）兜底。
+- 客户端渲染：`avatar_style + avatar_options` → 本地 Avataaars SVG（离线、确定性），
+  信息流/主页/偶遇/聊天/通知全部同源；`avatar` 字段始终返回 SeedFace URL 作为兜底。
+- 好友表 `friends.avatar_options` 会随人物同步，V2 聊天列表也能渲染同一套部件。
+- 老版 SeedFace 三维度（人种/性别/年龄）仍可由 `/api/v3/avatar/{seed}.svg` 使用：
 - 三个可区分维度：**人种/地域**（肤色 + 发色发质）、**性别**（发型/胡须/耳环/唇色）、**年龄**（灰白发/皱纹/眼镜/发型偏好，三档 <25 / 25-32 / ≥33）；`g` / `r` / `a` 分别对应这三个维度。
 - Persona 头像不再使用 public/mock/avatars/*.jpg，改为 personas.avatar_seed（persona-<id>）驱动；
   数据库只存种子，图片由接口确定性生成，零图片资源、零网络依赖。

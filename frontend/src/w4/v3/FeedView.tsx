@@ -94,11 +94,15 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
   const [commentFor, setCommentFor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const seq = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const localMode = isLocalMode();
 
   const load = useCallback(
-    async (reset: boolean, nextCursor = "") => {
+    async (reset: boolean, nextCursor = ""): Promise<{
+      items: FeedItem[];
+      next_cursor?: string;
+    } | null> => {
       const my = ++seq.current;
       if (reset) {
         setLoading(true);
@@ -108,13 +112,15 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
       }
       try {
         const page = await fetchFeed(reset ? undefined : nextCursor || undefined, 10);
-        if (seq.current !== my) return;
+        if (seq.current !== my) return null;
         setItems((prev) => (reset ? page.items : [...prev, ...page.items]));
         setCursor(page.next_cursor || "");
         void fetchFeedSummary().then((s) => setSummary(s)).catch(() => undefined);
+        return page;
       } catch (exc) {
-        if (seq.current !== my) return;
+        if (seq.current !== my) return null;
         setError(exc instanceof Error ? exc.message : "加载失败");
+        return null;
       } finally {
         if (seq.current === my) {
           setLoading(false);
@@ -178,6 +184,27 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
       window.clearInterval(timer);
     };
   }, [localMode, showToast]);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  /** 手动刷新：重新拉第一页，并明确告诉用户「有新内容」还是「已是最新」 */
+  const refresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const prevFirst = items[0]?.id ?? "";
+    try {
+      const page = await load(true);
+      if (!page) {
+        showToast("刷新失败，请稍后重试");
+        return;
+      }
+      scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      const same = Boolean(prevFirst) && page.items[0]?.id === prevFirst;
+      showToast(same ? "已是最新" : "已刷新", same ? undefined : "success");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (loading || loadingMore || !cursor) return;
@@ -280,11 +307,17 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
           </button>
           <button
             className="w4-icon-btn v3-secondary"
-            onClick={() => void load(true)}
+            onClick={() => void refresh()}
+            disabled={refreshing}
             title="刷新"
             aria-label="刷新"
+            aria-busy={refreshing}
           >
-            <RefreshCw size={16} strokeWidth={1.7} />
+            <RefreshCw
+              size={16}
+              strokeWidth={1.7}
+              className={refreshing ? "v3-spin" : undefined}
+            />
           </button>
           <button
             className="w4-icon-btn v3-secondary"
@@ -305,7 +338,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
         </div>
       </div>
 
-      <div className="w4-scroll" onScroll={onScroll}>
+      <div className="w4-scroll" onScroll={onScroll} ref={scrollRef}>
         <div className="w4-feed">
           {localMode ? (
             <div className="v3-notice">

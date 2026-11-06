@@ -79,7 +79,9 @@ $apk = Get-ChildItem "$apkDir/*.apk" | Sort-Object LastWriteTime -Descending | S
 if (-not $apk) { Fail "apk not found in $apkDir" }
 New-Item -ItemType Directory -Force -Path "$Root/deliverables" | Out-Null
 $gradle = Get-Content "app/build.gradle" -Raw
-$version = ([regex]'"versionName\s+"([^"]+)"').Match($gradle).Groups[1].Value
+$versionMatch = [regex]::Match($gradle, 'versionName\s+"([^"]+)"')
+if (-not $versionMatch.Success) { $versionMatch = [regex]::Match($gradle, 'versionName\s+["'']([^"'']+)["'']') }
+$version = if ($versionMatch.Success) { $versionMatch.Groups[1].Value } else { "0.0.0" }
 $dest = "$Root/deliverables/SpeakEasy-v$version-$Mode.apk"
 Copy-Item -Force $apk.FullName $dest
 

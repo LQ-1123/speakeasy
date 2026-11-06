@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import time
@@ -182,6 +183,14 @@ class V3Service:
             if persona["id"] == persona_id:
                 return persona
         return None
+
+    def get_persona_post_row(self, post_id: str) -> dict | None:
+        """取一条 Persona 动态原始行（朗读/详情用）。"""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM persona_posts WHERE id=?", (post_id,)
+            ).fetchone()
+        return dict(row) if row else None
 
     def _persona_map(self) -> dict[str, dict]:
         return {p["id"]: p for p in self._personas()}
@@ -584,6 +593,75 @@ class V3Service:
                 "UPDATE persona_posts SET comment_count=comment_count+1 WHERE id=?", (post_id,)
             )
         return {"id": cid, "post_id": post_id, "content": text, "created_at": _iso()}
+
+    # ------------------------------------------------------------------ #
+    # 偶遇：从已经生成好的「世界」里挑一个人，不再现场捏人
+    # ------------------------------------------------------------------ #
+    def discover_next(self, user_id: str | None = None, *, language: str | None = None) -> dict | None:
+        """从 Persona 池里挑一位还没成为好友的人物。
+
+        V3 的「捏人」发生在世界生成阶段（一次生成人物 + 信息流）；
+        偶遇只是**浏览**这个世界，因此这里绝不再调用 spawner/LLM。
+
+        选择策略：优先没加过好友的 → 按 (user, 日期, persona) 稳定哈希轮换，
+        保证同一天同一个用户多次点「换一个」会得到不同的人，且可复现。
+        """
+        uid = user_id or current_user_id()
+        personas = self._personas()
+        if language:
+            filtered = [p for p in personas if str(p.get("language")) == language]
+            personas = filtered or personas
+        if not personas:
+            return None
+
+        friends, pending = self._friendship_sets(uid)
+        fresh = [p for p in personas if p["id"] not in friends and p["id"] not in pending]
+        pool = fresh or personas
+
+        # 轮换：优先没看过的；都看过了就清空记录重新开始
+        with self.lock:
+            seen = {
+                str(r["persona_id"])
+                for r in self.conn.execute(
+                    "SELECT persona_id FROM v3_discover_views WHERE user_id=?", (uid,)
+                ).fetchall()
+            }
+        unseen = [p for p in pool if p["id"] not in seen]
+        if not unseen:
+            with self.lock, self.conn:
+                self.conn.execute(
+                    "DELETE FROM v3_discover_views WHERE user_id=?", (uid,)
+                )
+            unseen = pool
+
+        day = _now().strftime("%Y-%m-%d")
+        unseen = sorted(
+            unseen,
+            key=lambda p: hashlib.sha256(f"{uid}:{day}:{p['id']}".encode("utf-8")).hexdigest(),
+        )
+        persona = unseen[0]
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO v3_discover_views (user_id, persona_id, seen_at)"
+                " VALUES (?,?,?)",
+                (uid, persona["id"], _iso()),
+            )
+
+        posts = self.persona_posts(persona["id"], user_id=uid, limit=3)["items"]
+        latest = posts[0] if posts else None
+        greeting = str(latest["content"]) if latest else str(persona.get("bio") or "")
+        return {
+            "persona": self._persona_brief(persona),
+            "greeting": greeting,
+            "post_id": latest["id"] if latest else "",
+            "friendship_status": (
+                "accepted" if persona["id"] in friends
+                else "pending" if persona["id"] in pending
+                else "none"
+            ),
+            "remaining": max(0, len(fresh) - 1),
+            "source": "world",  # 明确：来自已生成的世界，不是现场捏人
+        }
 
     # ------------------------------------------------------------------ #
     # 好友关系（Persona）

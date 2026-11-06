@@ -68,9 +68,13 @@ async def lifespan(app: FastAPI):
 
     # SpeakEasy 3.0：Persona / Post / Friendship / SocialEvent（同库，自动迁移）
     try:
-        ensure_schema(app.state.v2.db)
+        from app.v3.world import ensure_world  # noqa: PLC0415
+
+        ensure_schema(app.state.v2.db, seed=False)
+        # 世界生成：一次捏出「人物 + 信息流」；之后偶遇只是从这个世界里挑人
+        world = await ensure_world(app.state.v2.db, engines.llm)
         app.state.v3 = V3Service(app.state.v2.db, engines, str(settings.data_path))
-        log.info("v3 服务就绪：social=%s", app.state.v3.config.public())
+        log.info("v3 服务就绪：world=%s social=%s", world, app.state.v3.config.public())
     except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
         log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
         app.state.v3 = None

@@ -273,6 +273,15 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
   return (await res.json()) as T;
 }
 
+export interface DiscoverNext {
+  persona: PersonaBrief;
+  greeting: string;
+  post_id: string;
+  friendship_status: "none" | "pending" | "accepted";
+  remaining: number;
+  source: string;
+}
+
 /* --------------------------------------------------------------- 接口 */
 
 export function fetchFeed(cursor?: string, limit = 12): Promise<{ items: FeedItem[]; next_cursor: string }> {
@@ -287,6 +296,26 @@ export function fetchFeedSummary(): Promise<FeedSummary> {
 
 export function fetchPersona(personaId: string): Promise<PersonaProfile> {
   return request(`/api/v3/personas/${encodeURIComponent(personaId)}`);
+}
+
+/** 偶遇：从已生成的世界里挑一个人（不重新捏人）。 */
+export function fetchDiscoverNext(language?: string): Promise<DiscoverNext> {
+  const q = language ? `?language=${encodeURIComponent(language)}` : "";
+  return request(`/api/v3/discover/next${q}`);
+}
+
+/** 用人物自己的声音朗读一条动态（公共音频，可直接给 <audio> / WebAudio 用）。 */
+export function personaSpeechUrl(postId: string): string {
+  return `${API_ORIGIN}/api/v3/persona-posts/${encodeURIComponent(postId)}/speech`;
+}
+
+/** 信息流内容翻译（复用 V2 的翻译链路：LLM 优先，带缓存）。 */
+export async function translateText(text: string, target = "zh"): Promise<string> {
+  const data = await request<{ translation?: string; ok?: boolean }>("/api/v2/translate", {
+    method: "POST",
+    body: JSON.stringify({ text, target }),
+  });
+  return data.translation ?? "";
 }
 
 export function fetchPersonas(limit = 24): Promise<{ items: PersonaBrief[] }> {

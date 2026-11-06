@@ -16,13 +16,16 @@ import {
   ImagePlus,
   Languages,
   MessageSquare,
+  Pause,
   PenSquare,
   RefreshCw,
   Send,
   Trash2,
   UserPlus,
+  Volume2,
 } from "lucide-react";
 
+import { playVoiceUrl } from "../apiFacade";
 import { isLocalMode } from "../local/keys";
 import type { Route } from "../model";
 import { useApp } from "../store";
@@ -36,7 +39,9 @@ import {
   fetchFeedSummary,
   likePersonaPost,
   commentPersonaPost,
+  personaSpeechUrl,
   relTimeOf,
+  translateText,
   VISIBILITY_LABEL,
   type FeedItem,
   type FeedSummary,
@@ -313,6 +318,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
               onQuickAdd={() => void quickAdd(item)}
               onDelete={() => void removePost(item)}
               onZoom={setZoom}
+              onNotify={showToast}
               commentOpen={commentFor === item.id}
               draft={draft}
               setDraft={setDraft}
@@ -365,6 +371,7 @@ export function FeedCard({
   onQuickAdd,
   onDelete,
   onZoom,
+  onNotify,
   commentOpen,
   draft,
   setDraft,
@@ -377,6 +384,7 @@ export function FeedCard({
   onQuickAdd: () => void;
   onDelete: () => void;
   onZoom: (src: string) => void;
+  onNotify?: (msg: string) => void;
   commentOpen: boolean;
   draft: string;
   setDraft: (v: string) => void;
@@ -384,6 +392,42 @@ export function FeedCard({
 }) {
   const isPersona = item.kind === "persona_post";
   const author = item.author;
+
+  /* 翻译 / 朗读：信息流是英语内容，翻译走 V2 的 LLM 翻译链路，
+     朗读用该人物自己的声线（后端 /persona-posts/{id}/speech 合成并缓存）。 */
+  const [zh, setZh] = useState("");
+  const [zhOpen, setZhOpen] = useState(false);
+  const [zhLoading, setZhLoading] = useState(false);
+  const [playing, setPlaying] = useState(false);
+
+  const toggleZh = async () => {
+    if (zhOpen) {
+      setZhOpen(false);
+      return;
+    }
+    if (zh) {
+      setZhOpen(true);
+      return;
+    }
+    setZhLoading(true);
+    const out = await translateText(item.content, "zh").catch(() => "");
+    setZhLoading(false);
+    if (out) {
+      setZh(out);
+      setZhOpen(true);
+    } else {
+      onNotify?.("翻译失败，请稍后重试");
+    }
+  };
+
+  const togglePlay = async () => {
+    if (!isPersona || playing) return;
+    setPlaying(true);
+    const ok = await playVoiceUrl(personaSpeechUrl(item.id)).catch(() => false);
+    setPlaying(false);
+    if (!ok) onNotify?.("朗读失败，请稍后重试");
+  };
+
   return (
     <article className="w4-moment">
       <button onClick={onOpenPersona} aria-label={author.nickname} className="v3-avatar-btn">
@@ -404,6 +448,7 @@ export function FeedCard({
         </div>
 
         {item.content ? <div className="w4-moment-text">{item.content}</div> : null}
+        {zhOpen && zh ? <div className="v3-post-zh">{zh}</div> : null}
 
         {item.media.length ? (
           <div className={`w4-moment-imgs n${Math.min(4, item.media.length)}`}>
@@ -426,6 +471,23 @@ export function FeedCard({
         <div className="w4-moment-foot">
           <span>{relTimeOf(item.created_at)}</span>
           <span style={{ flex: 1 }} />
+          <button
+            className="w4-moment-act"
+            onClick={() => void toggleZh()}
+            disabled={zhLoading}
+          >
+            <Languages size={13} strokeWidth={1.8} />
+            {zhLoading ? "翻译中…" : zhOpen ? "收起" : "翻译"}
+          </button>
+          {isPersona ? (
+            <button
+              className={`w4-moment-act ${playing ? "is-on" : ""}`}
+              onClick={() => void togglePlay()}
+            >
+              {playing ? <Pause size={13} strokeWidth={1.8} /> : <Volume2 size={13} strokeWidth={1.8} />}
+              {playing ? "播放中" : "朗读"}
+            </button>
+          ) : null}
           {isPersona ? (
             <>
               <button className={`w4-moment-act ${item.liked_by_me ? "is-on" : ""}`} onClick={onLike}>

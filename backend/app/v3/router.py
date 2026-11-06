@@ -20,6 +20,7 @@ import os
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.logging_utils import get_logger
@@ -81,11 +82,22 @@ async def _run(fn, *args, **kwargs):
 @router.get("/health")
 async def health(request: Request) -> dict:
     service = _v3(request)
+    services = getattr(request.app.state, "v2", None)
+    db = getattr(services, "db", None)
+    world = {}
+    if db is not None:
+        try:
+            from app.v3.world import world_status  # noqa: PLC0415
+
+            world = await asyncio.to_thread(world_status, db)
+        except Exception:  # noqa: BLE001
+            world = {}
     return {
         "status": "ok",
         "version": V3_VERSION,
         "social": service.config.public(),
-        "personas": len(service._personas()),  # noqa: SLF001 - 只读计数
+        "world": world,
+        "personas": world.get("personas") or len(service._personas()),  # noqa: SLF001 - 只读计数
     }
 
 
@@ -163,6 +175,62 @@ async def get_persona_posts(
     if await _run(service.persona_by_id, persona_id) is None:
         raise HTTPException(status_code=404, detail="人物不存在")
     return await _run(service.persona_posts, persona_id, user_id=user_id, limit=limit, cursor=cursor)
+
+
+@router.get("/discover/next")
+async def discover_next(
+    request: Request,
+    language: str | None = None,
+    user_id: str = Depends(bind_current_user),
+) -> dict:
+    """偶遇一个人：**从已生成的世界（Persona 池）里挑**，不重新捏人。
+
+    世界生成（人物 + 信息流一次性生成）发生在服务启动/首次初始化阶段，
+    见 docs/V3_API.md「世界生成」。
+    """
+    service = _v3(request)
+    data = await _run(service.discover_next, user_id, language=language)
+    if data is None:
+        raise HTTPException(status_code=404, detail="世界还没有生成人物")
+    return data
+
+
+@router.get("/persona-posts/{post_id}/speech")
+async def persona_post_speech(request: Request, post_id: str):
+    """用人物自己的声音朗读一条动态（公共内容，可被 <audio> 直接播放）。
+
+    合成结果落盘缓存：同一条动态只合成一次。TTS 失败时返回 503，
+    前端可回落到 /api/v2/tts/sample。
+    """
+    service = _v3(request)
+    post = await _run(service.get_persona_post_row, post_id)
+    if post is None:
+        raise HTTPException(status_code=404, detail="动态不存在")
+    persona = await _run(service.persona_by_id, str(post["persona_id"]))
+    if persona is None:
+        raise HTTPException(status_code=404, detail="人物不存在")
+
+    services = getattr(request.app.state, "v2", None)
+    voice_engine = getattr(services, "voice", None) if services is not None else None
+    if voice_engine is None:
+        raise HTTPException(status_code=503, detail="语音引擎未就绪")
+
+    try:
+        path, _duration = await voice_engine.synth_to_wav(
+            str(post["content"])[:280],
+            str(persona.get("voice_id") or "en-GB-RyanNeural"),
+            out_dir=services.audio.audio_dir,
+        )
+    except Exception as exc:  # noqa: BLE001 - 合成失败由前端回落
+        log.warning("动态朗读合成失败 %s: %s", post_id, exc)
+        raise HTTPException(status_code=503, detail="语音合成失败") from exc
+
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename=os.path.basename(path),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -18,15 +18,49 @@ POST /api/v3/auth/register   {"device_key": "<8-128位>", "display_name": "..."}
 - 带 id 但 token 缺失/错误 → `401`；非法 id → `400`。
 - token 只存 `sha256`；同一 `device_key` 重复注册会轮换 token（本地丢失可恢复）。
 
-## 2. 信息流
+## 2. 世界生成（一次捏人 = 人物 + 信息流）
+
+V3 的「捏人」只发生一次，产物就是整个信息流世界：
+
+| 模式 | 触发方式 | 说明 |
+|---|---|---|
+| `seed`（默认） | 首次启动 | 写入 `seed_data` 的 12 人物 / 36 动态，零模型调用、可复现 |
+| `llm` | `SE_WORLD_GEN=llm` 且空库 | 启动时用 LLM 生成 N 人物 × M 动态（`SE_WORLD_PERSONAS`，默认 8），失败自动回落 `seed` |
+
+- 生成结果记在 `v3_meta`（`world_source` / `world_generated_at`），`GET /api/v3/health` 的 `world` 字段可查。
+- 世界一旦存在就**不会重复生成/灌入**（`seed_if_needed` 对非空库直接跳过）。
+- 偶遇、信息流、主页都读同一个世界：人物头像、资料、声音完全一致。
+
+## 3. 信息流
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/v3/feed?cursor=&limit=12` | Persona 公共动态 + 用户动态（公开；自己的任意可见性）合并按时间倒序，游标分页 |
 | GET | `/api/v3/feed/summary` | `{persona_posts, my_posts, friends, unread_events}` |
-| GET | `/api/v3/personas?limit=&offset=` | Persona 列表（12 位预置人物） |
+| GET | `/api/v3/discover/next?language=` | **偶遇**：从已生成世界里挑一位（优先没加好友的，按用户+日期+人物稳定哈希轮换；看过的人记录在 `v3_discover_views`，全部看完自动重置） |
+| GET | `/api/v3/personas?limit=&offset=` | Persona 列表 |
 | GET | `/api/v3/personas/{id}` | 主页：资料 + 性格 + 兴趣 + 动态 + 好友状态 |
 | GET | `/api/v3/personas/{id}/posts?cursor=&limit=` | 该人物动态分页 |
+
+### 3.1 动态翻译与朗读
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v2/translate` | 信息流「翻译」复用 V2 翻译链路（LLM 优先 + 缓存），`{text,target:"zh"}` → `{translation}` |
+| GET | `/api/v3/persona-posts/{post_id}/speech` | **用人物自己的声线**朗读该动态，返回 `audio/wav`；服务端合成并缓存（同一内容命中进程内缓存）；公共内容，`<audio>` 可直接播放，失败 503 时前端回退 `/api/v2/tts/sample` |
+
+`/api/v3/discover/next` 返回：
+
+```json
+{
+  "persona": {"id": "p_jiwoo", "nickname": "Jiwoo", "avatar": "/mock/avatars/jiwoo.jpg", "is_ai": true, "...": "..."},
+  "greeting": "Three hours debugging. Missing comma. ...",
+  "post_id": "pp_jiwoo_24",
+  "friendship_status": "none",
+  "remaining": 11,
+  "source": "world"
+}
+```
 
 信息流条目：
 
@@ -47,7 +81,7 @@ POST /api/v3/auth/register   {"device_key": "<8-128位>", "display_name": "..."}
 }
 ```
 
-## 3. 好友关系（用户 ↔ Persona）
+## 4. 好友关系（用户 ↔ Persona）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -60,7 +94,7 @@ POST /api/v3/auth/register   {"device_key": "<8-128位>", "display_name": "..."}
 加好友会写入 `friends`（`owner_user_id` = 当前用户，`status=active`，`avatar_url`=人物头像），
 所以 `GET /api/v2/friends`、`/api/v2/chat/{friend_id}/text` 等立刻可用。
 
-## 4. 用户动态与可见性
+## 5. 用户动态与可见性
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -75,7 +109,7 @@ POST /api/v3/auth/register   {"device_key": "<8-128位>", "display_name": "..."}
 - `private`：只有作者自己可见
 - 发布前 UI 必须显式选择可见范围（弹窗内三档 + 文案说明），不会静默公开
 
-## 5. 社交事件引擎
+## 6. 社交事件引擎
 
 `POST /api/v3/posts` 发布公开动态后，服务端后台触发（幂等）：
 
@@ -106,7 +140,7 @@ SE_SOCIAL_SYNC=0                     # =1 时同步生成（测试用）
 `GET /api/v3/social/stats` 返回当前配置 + 判定统计（`evaluated / no_action / probability_miss` 等），
 `GET /api/v3/health` 返回引擎配置与人物数量。
 
-## 6. 数据表
+## 7. 数据表
 
 新增：`v3_users`、`personas`、`persona_posts`、`persona_post_likes`、`persona_post_comments`、
 `friendships`、`user_posts`、`user_post_likes`、`user_post_comments`、`social_events`、
@@ -118,9 +152,11 @@ SE_SOCIAL_SYNC=0                     # =1 时同步生成（测试用）
 隔离规则：`DB` 层通过 `app.v3.identity.current_user_id()` 过滤 `friends` / `user_moments` /
 `saved_expressions` / `moments`；V3 表全部按 `user_id` 过滤。越权访问一律 404。
 
-## 7. 内容成本控制
+## 8. 内容成本控制
 
-- 信息流内容为**预生成语料**（12 人物 / 36 动态）随服务启动一次性入库，读信息流**零模型调用**
+- 世界（人物 + 动态）**一次生成、长期复用**：默认预置语料，读信息流/偶遇**零模型调用**
 - 人物与动态是**全平台共享**的公共数据，不因某个用户访问而重新生成
+- 偶遇不再现场捏人（V2 的 spawner 只在旧链路里，V3 已不再调用）
 - 只有「用户发公开动态 → 可能的社交事件」会调用 LLM（概率触发，且每帖上限 2 次）
+- 翻译按文本缓存；朗读按（文本, 声线）缓存，同一动态重复播放不重复合成
 - 新用户不再自动捏人（`local` 用户保留旧引导），首屏直接进信息流

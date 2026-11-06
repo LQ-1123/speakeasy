@@ -281,6 +281,7 @@ export function PersonaProfileView({
                     onQuickAdd={() => void doAddFriend()}
                     onDelete={() => undefined}
                     onZoom={() => undefined}
+                    onNotify={showToast}
                     commentOpen={commentFor === item.id}
                     draft={draft}
                     setDraft={setDraft}

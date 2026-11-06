@@ -205,6 +205,17 @@
   padding: 3px 0;
 }
 
+/* 动态中文翻译（信息流「翻译」按钮展开） */
+.v3-post-zh {
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--w-fill);
+  color: var(--w-text-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
 /* ---------------------------------------------------------------- 骨架屏 */
 
 .v3-skeleton {
@@ -490,6 +501,17 @@
   margin-top: 6px;
   font-size: 11.5px;
   color: var(--w-green-ink);
+}
+
+/* 偶遇：说明「从世界里挑人」 */
+.v3-discover-note {
+  margin: 14px 20px 4px;
+  padding: 10px 12px;
+  border-radius: var(--w-radius-card);
+  background: var(--w-green-soft);
+  color: var(--w-green-ink);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .v3-events-note {

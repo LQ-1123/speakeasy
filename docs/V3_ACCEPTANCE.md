@@ -30,6 +30,9 @@ pending→accepted 升级、延迟事件物化与幂等、每日上限、人物�
 | D 好友申请 | 连发 5 条不同主题公开动态 | 产生 7 条事件，含 1 条 friend_request（Finn 申请语由 LLM 生成、贴合「读书+猫」主题）；通知页点「接受」→ Finn 出现在通讯录且状态 active，DB `friendships.status=accepted`，事件置为已读 ✅ |
 | E 用户隔离 | 第二个浏览器 profile（独立 device_key） | 好友 0、事件 0；只能看到公开动态；两种身份的 `user_id` 不同；伪造 token 请求返回 401；删除他人动态 404 ✅ |
 | F 原有功能回归 | `scripts/v3_scenario_f.py`（真实服务） | 好友列表 / 好友资料+记忆 / AI 文字聊天 4.5s / TTS 1.4s / **STT（把 TTS 音频喂回）识别正确** / 实时通话流式回合 / 表达本 / bootstrap / total_turns 累加 —— **10/10 通过** ✅ |
+| G 信息流翻译 | 点任意人物动态「翻译」 | 英文原文下方出现中文译文（LLM 链路），再点收起 ✅ |
+| H 信息流朗读 | 点任意人物动态「朗读」 | 用**该人物自己的声线**合成并播放（Adrian → `en-GB-RyanNeural`，Jiwoo → `ko-KR-SunHiNeural`），按钮显示「播放中」→ 播完恢复 ✅ |
+| I 偶遇（V3 重做） | 发现 → 偶遇 | 不再现场捏人：直接从已生成世界里挑人（Annika→Finn→Lin 连续「换一个」不重复）；头像/资料/声音与信息流完全一致；点「认识 TA」直接加好友进聊天 ✅ |
 
 截图：`docs/screenshots/v3/`
 - `v3-desktop-feed.png` / `v3-mobile-feed.png`：信息流（AI 人物卡片、AI 标识、兴趣标签）

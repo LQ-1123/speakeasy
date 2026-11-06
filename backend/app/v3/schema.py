@@ -165,6 +165,14 @@ CREATE TABLE IF NOT EXISTS v3_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+-- 偶遇轮换：记录每个用户看过哪些人物，保证「换一个」不会重复
+CREATE TABLE IF NOT EXISTS v3_discover_views (
+    user_id TEXT NOT NULL,
+    persona_id TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, persona_id)
+);
 """
 
 #: ``v3_meta`` 里标记「语料已入库」的键
@@ -180,11 +188,15 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
-def ensure_schema(db: Any) -> None:
-    """建表（幂等）+ 首次入库 Persona 语料。"""
+def ensure_schema(db: Any, *, seed: bool = True) -> None:
+    """建表（幂等）+ 首次入库 Persona 语料。
+
+    ``seed=False`` 时只建表，由调用方决定世界生成方式（见 ``app.v3.world``）。
+    """
     with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层共用连接与锁
         db.conn.executescript(DDL)
-    seed_if_needed(db)
+    if seed:
+        seed_if_needed(db)
 
 
 def seed_if_needed(db: Any, *, force: bool = False) -> int:
@@ -198,7 +210,9 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         ).fetchone()
         already = str(row["value"]) if row is not None else ""
         count = db.conn.execute("SELECT COUNT(*) AS n FROM personas").fetchone()["n"]
-        if not force and count and already == SEED_VERSION:
+        # 已经有世界（预置语料或 LLM 生成）就不要重复插入；
+        # 只有空库（首次启动）或显式 force 才写语料。
+        if not force and count:
             return 0
 
         now = _now_utc()

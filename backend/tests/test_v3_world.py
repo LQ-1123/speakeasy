@@ -1,0 +1,231 @@
+"""V3 · 世界生成 / 偶遇 / 动态朗读 测试。
+
+对应产品规则：
+1. 「捏人」只发生一次：生成世界 = 人物 + 他们的动态（一次生成，长期复用）
+2. 偶遇只是从已生成的世界里挑人，**不再现场捏人**，且头像/资料/声音与信息流一致
+3. 信息流内容可翻译、可用人物自己的声音朗读
+"""
+
+from __future__ import annotations
+
+import random
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+BACKEND = ROOT / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+from app.v2.db import DB  # noqa: E402
+from app.v2.router import router as v2_router  # noqa: E402
+from app.v3.identity import reset_current_user, set_current_user  # noqa: E402
+from app.v3.router import router as v3_router  # noqa: E402
+from app.v3.schema import ensure_schema, seed_if_needed  # noqa: E402
+from app.v3.service import V3Service  # noqa: E402
+from app.v3.world import ensure_world, world_status  # noqa: E402
+
+
+# --------------------------------------------------------------------------- #
+# fixtures
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def empty_db(tmp_path):
+    """空库（未生成世界），用于测试世界生成。"""
+    db = DB(str(tmp_path / "v3_empty.db"))
+    db.init()
+    ensure_schema(db, seed=False)
+    yield db, tmp_path
+    db.close()
+
+
+@pytest.fixture()
+def world_db(tmp_path):
+    """已生成世界的库（常规用例）。"""
+    db = DB(str(tmp_path / "v3_world.db"))
+    db.init()
+    ensure_schema(db, seed=False)
+    seed_if_needed(db)
+    yield db, tmp_path
+    db.close()
+
+
+@pytest.fixture()
+def service(world_db):
+    db, tmp_path = world_db
+    return V3Service(db, SimpleNamespace(llm=SimpleNamespace(uses_mock=True)), str(tmp_path))
+
+
+class _FakeVoice:
+    """假的语音合成：写一个最小 wav，避免测试依赖网络/模型。"""
+
+    def __init__(self, out_dir: Path) -> None:
+        self.out_dir = out_dir
+        self.calls: list[tuple[str, str]] = []
+
+    async def synth_to_wav(self, text, voice_id, *, rate="+0%", pitch="+0Hz", out_dir):
+        self.calls.append((text, voice_id))
+        path = Path(out_dir) / f"fake_{len(self.calls)}.wav"
+        path.write_bytes(b"RIFF" + b"\x00" * 64)
+        return str(path), 1234
+
+
+def _make_app(db, tmp_path: Path):
+    service = V3Service(db, SimpleNamespace(llm=SimpleNamespace(uses_mock=True)), str(tmp_path))
+    service.rng = random.Random(11)
+    voice = _FakeVoice(tmp_path)
+    services = SimpleNamespace(
+        db=db,
+        voice=voice,
+        audio=SimpleNamespace(audio_dir=str(tmp_path)),
+        engines=SimpleNamespace(llm=SimpleNamespace(uses_mock=True)),
+        onboarding_pending=False,
+        followup_inflight=set(),
+        spawn_bg=lambda coro: (coro.close(), None)[1],
+    )
+    app = FastAPI()
+    app.state.v2 = services
+    app.state.v3 = service
+    app.include_router(v2_router)
+    app.include_router(v3_router)
+    return app, service, voice
+
+
+def _register(client: TestClient, device: str) -> dict:
+    data = client.post("/api/v3/auth/register", json={"device_key": device}).json()
+    return {"X-User-Id": data["user_id"], "X-User-Token": data["token"]}
+
+
+# --------------------------------------------------------------------------- #
+# 世界生成
+# --------------------------------------------------------------------------- #
+async def test_ensure_world_seeds_once(empty_db):
+    db, _ = empty_db
+    first = await ensure_world(db, None)
+    assert first["personas"] == 12 and first["posts"] == 36
+    assert first["source"] == "seed"
+    assert first["generated_at"]
+
+    second = await ensure_world(db, None)
+    assert second["personas"] == 12 and second["posts"] == 36  # 不重复插入
+    assert world_status(db)["personas"] == 12
+
+
+def test_seed_is_skipped_when_world_exists(empty_db):
+    """已有世界（例如 LLM 生成的）不能被预置语料重复灌入。"""
+    db, _ = empty_db
+    assert seed_if_needed(db) == 36
+    assert seed_if_needed(db) == 0  # 第二次不再写入
+    assert db.conn.execute("SELECT COUNT(*) FROM personas").fetchone()[0] == 12
+
+
+# --------------------------------------------------------------------------- #
+# 偶遇：从世界里挑人（不现场捏人）
+# --------------------------------------------------------------------------- #
+def test_discover_next_uses_existing_world(service):
+    data = service.discover_next("u_alice")
+    assert data is not None
+    assert data["source"] == "world"
+    persona = data["persona"]
+    assert persona["id"].startswith("p_")
+    assert persona["avatar"].startswith("/mock/avatars/")
+    assert persona["is_ai"] is True
+    # 打招呼内容 = 该人物最新一条动态（因此声音/内容与信息流一致）
+    posts = service.persona_posts(persona["id"], user_id="u_alice", limit=3)["items"]
+    assert posts and data["greeting"] == posts[0]["content"]
+    assert data["post_id"] == posts[0]["id"]
+
+
+def test_discover_next_rotates_and_resets(service):
+    seen = []
+    for _ in range(12):
+        data = service.discover_next("u_bob")
+        assert data is not None
+        seen.append(data["persona"]["id"])
+    assert len(set(seen)) == 12  # 12 位人物都被轮换到，不重复
+
+    # 看完全部之后自动重置，仍然能继续挑
+    again = service.discover_next("u_bob")
+    assert again is not None and again["persona"]["id"] in seen
+
+
+def test_discover_next_skips_existing_friends(service):
+    first = service.discover_next("u_carol")
+    friend_id = first["persona"]["id"]
+    service.add_friend("u_carol", friend_id)
+
+    for _ in range(5):
+        nxt = service.discover_next("u_carol")
+        assert nxt is not None
+        assert nxt["persona"]["id"] != friend_id
+
+
+# --------------------------------------------------------------------------- #
+# API：偶遇 + 朗读
+# --------------------------------------------------------------------------- #
+def test_discover_next_api(world_db):
+    db, tmp_path = world_db
+    app, service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_world_0001")
+        response = client.get("/api/v3/discover/next", headers=headers)
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["source"] == "world"
+        assert data["persona"]["avatar"].startswith("/mock/avatars/")
+        assert data["post_id"]
+
+        # 加好友之后不再出现在偶遇里
+        persona_id = data["persona"]["id"]
+        assert client.post(f"/api/v3/personas/{persona_id}/friend", headers=headers).status_code == 200
+        for _ in range(4):
+            nxt = client.get("/api/v3/discover/next", headers=headers).json()
+            assert nxt["persona"]["id"] != persona_id
+
+
+def test_persona_post_speech_uses_persona_voice(world_db):
+    db, tmp_path = world_db
+    app, service, voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        post = service.get_persona_post_row("pp_adrian_00")
+        assert post is not None
+        persona = service.persona_by_id(post["persona_id"])
+        assert persona is not None
+
+        # 公共音频：不带身份头也能播放（<audio> 标签无法加自定义头）
+        response = client.get("/api/v3/persona-posts/pp_adrian_00/speech")
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("audio/wav")
+        assert response.content[:4] == b"RIFF"
+        assert voice.calls and voice.calls[0][1] == persona["voice_id"]
+
+        assert client.get("/api/v3/persona-posts/nope/speech").status_code == 404
+
+
+def test_health_reports_world(world_db):
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        data = client.get("/api/v3/health").json()
+        # 测试 app 没有走 ensure_world，world 统计可能为空；但 personas 计数必须正确
+        assert data["personas"] == 12
+
+
+def test_translate_endpoint_still_works_for_feed(world_db):
+    """信息流「翻译」复用 V2 翻译接口：mock LLM 下也要 200。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_world_0002")
+        response = client.post(
+            "/api/v2/translate",
+            headers=headers,
+            json={"text": "Spent 40 minutes aligning two buttons.", "target": "zh"},
+        )
+        assert response.status_code == 200
+        assert "translation" in response.json()

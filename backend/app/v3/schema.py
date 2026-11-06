@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS persona_posts (
     content TEXT NOT NULL,
     media TEXT NOT NULL DEFAULT '[]',
     tags TEXT NOT NULL DEFAULT '[]',
+    language TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'public',
     like_count INTEGER NOT NULL DEFAULT 0,
     comment_count INTEGER NOT NULL DEFAULT 0,
@@ -197,6 +198,16 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
     """
     with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层共用连接与锁
         db.conn.executescript(DDL)
+        # 轻量迁移：给老的 persona_posts 补 language 列（决定朗读声线）
+        cols = {
+            row[1]
+            for row in db.conn.execute("PRAGMA table_info(persona_posts)").fetchall()
+        }
+        if cols and "language" not in cols:
+            db.conn.execute(
+                "ALTER TABLE persona_posts ADD COLUMN language TEXT NOT NULL DEFAULT ''"
+            )
+            log.info("migrated persona_posts: added language column")
     if seed:
         seed_if_needed(db)
 
@@ -252,19 +263,22 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         for index, (pid, content, tags, media) in enumerate(POSTS):
             post_id = f"pp_{pid[2:]}_{index:02d}"
             created = now - timedelta(hours=(index * 5) % 120 + 1, minutes=(index * 17) % 60)
+            persona_lang = next(
+                (str(p.get("language") or "en") for p in PERSONAS if p["id"] == pid), "en"
+            )
             if post_id in existing:
-                # 已存在：只刷新文案/标签/媒体（保留原时间线），用于语料升级
+                # 已存在：刷新文案/标签/媒体/语言（保留原时间线），用于语料升级
                 db.conn.execute(
-                    "UPDATE persona_posts SET persona_id=?, content=?, media=?, tags=?"
+                    "UPDATE persona_posts SET persona_id=?, content=?, media=?, tags=?, language=?"
                     " WHERE id=?",
-                    (pid, content, _json(media), _json(tags), post_id),
+                    (pid, content, _json(media), _json(tags), persona_lang, post_id),
                 )
                 continue
             db.conn.execute(
-                "INSERT INTO persona_posts (id, persona_id, content, media, tags, visibility,"
-                " like_count, comment_count, created_at)"
-                " VALUES (?,?,?,?,?, 'public', 0, 0, ?)",
-                (post_id, pid, content, _json(media), _json(tags), _iso(created)),
+                "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
+                " visibility, like_count, comment_count, created_at)"
+                " VALUES (?,?,?,?,?,?, 'public', 0, 0, ?)",
+                (post_id, pid, content, _json(media), _json(tags), persona_lang, _iso(created)),
             )
             written += 1
 
@@ -276,6 +290,34 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
     if written:
         log.info("v3 语料入库：%d 个人物 / %d 条动态", len(PERSONAS), written)
     return written
+
+
+def backfill_post_languages(db: Any) -> int:
+    """给 ``language`` 为空的动态回填语言（老库升级用，幂等）。
+
+    优先级：人物母语 → 文本字符集推断 → ``en``。
+    返回回填的行数。
+    """
+    from app.v3.seed_data import detect_language  # noqa: PLC0415 - 避免循环导入
+
+    with db._lock, db.conn:  # noqa: SLF001
+        rows = db.conn.execute(
+            "SELECT pp.id, pp.content, p.language AS persona_lang FROM persona_posts pp"
+            " LEFT JOIN personas p ON p.id = pp.persona_id"
+            " WHERE COALESCE(pp.language,'') = ''"
+        ).fetchall()
+        updated = 0
+        for row in rows:
+            lang = (
+                str(row["persona_lang"] or "").strip().lower()
+                or detect_language(str(row["content"] or ""))
+                or "en"
+            )
+            db.conn.execute(
+                "UPDATE persona_posts SET language=? WHERE id=?", (lang, row["id"])
+            )
+            updated += 1
+        return updated
 
 
 def sync_persona_friends(db: Any) -> int:

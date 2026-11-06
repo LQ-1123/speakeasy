@@ -196,11 +196,13 @@ async def discover_next(
 
 
 @router.get("/persona-posts/{post_id}/speech")
-async def persona_post_speech(request: Request, post_id: str):
-    """用人物自己的声音朗读一条动态（公共内容，可被 <audio> 直接播放）。
+async def persona_post_speech(request: Request, post_id: str, v: str | None = None):
+    """用**帖子本身的语言**朗读一条动态（公共内容，可被 <audio> 直接播放）。
 
-    合成结果落盘缓存：同一条动态只合成一次。TTS 失败时返回 503，
-    前端可回落到 /api/v2/tts/sample。
+    规则：发帖语言决定朗读声线。
+    - 帖子语言 == 人物母语 → 用人物自己的声线（保持角色一致）
+    - 否则 → 按帖子语言挑一条该语言的声线（例如人物用中文发帖就读中文声线）
+    - ``?v=<content_hash>`` 只用于缓存版本：内容变了 URL 就变，避免浏览器播旧音频
     """
     service = _v3(request)
     post = await _run(service.get_persona_post_row, post_id)
@@ -215,11 +217,25 @@ async def persona_post_speech(request: Request, post_id: str):
     if voice_engine is None:
         raise HTTPException(status_code=503, detail="语音引擎未就绪")
 
+    from app.v3.seed_data import detect_language, voice_for_language  # noqa: PLC0415
+
+    content = str(post["content"] or "")
+    persona_lang = str(persona.get("language") or "en").strip().lower()
+    post_lang = (
+        str(post.get("language") or "").strip().lower()
+        or detect_language(content)
+        or persona_lang
+    )
+    persona_voice = str(persona.get("voice_id") or "")
+    if post_lang == persona_lang and persona_voice:
+        voice = persona_voice
+    else:
+        voice = voice_for_language(post_lang, seed=str(persona.get("id") or ""),
+                                   gender=str(persona.get("gender") or ""))
+
     try:
         path, _duration = await voice_engine.synth_to_wav(
-            str(post["content"])[:280],
-            str(persona.get("voice_id") or "en-GB-RyanNeural"),
-            out_dir=services.audio.audio_dir,
+            content[:280], voice, out_dir=services.audio.audio_dir
         )
     except Exception as exc:  # noqa: BLE001 - 合成失败由前端回落
         log.warning("动态朗读合成失败 %s: %s", post_id, exc)
@@ -229,7 +245,12 @@ async def persona_post_speech(request: Request, post_id: str):
         path,
         media_type="audio/wav",
         filename=os.path.basename(path),
-        headers={"Cache-Control": "public, max-age=86400"},
+        # URL 带内容版本（?v=hash）后才允许长缓存；没带版本就只缓存一次请求周期
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable" if v else "no-cache",
+            "X-Voice": voice,
+            "X-Language": post_lang,
+        },
     )
 
 

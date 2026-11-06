@@ -252,8 +252,41 @@ def test_persona_post_speech_uses_persona_voice(world_db):
         assert response.headers["content-type"].startswith("audio/wav")
         assert response.content[:4] == b"RIFF"
         assert voice.calls and voice.calls[0][1] == persona["voice_id"]
+        # 英文帖子 → 英文声线
+        assert response.headers["x-language"] == "en"
+        assert response.headers["x-voice"].startswith("en-")
 
         assert client.get("/api/v3/persona-posts/nope/speech").status_code == 404
+
+
+def test_speech_voice_follows_post_language(world_db):
+    """朗读声线跟随**帖子语言**，不是人物国籍。"""
+    db, tmp_path = world_db
+    app, service, voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        # Lin 是中文人物，帖子也是中文 → 中文声线
+        lin_post = service.get_persona_post_row("pp_lin_27")
+        assert lin_post is not None and lin_post["language"] == "zh"
+        r = client.get("/api/v3/persona-posts/pp_lin_27/speech")
+        assert r.status_code == 200
+        assert r.headers["x-language"] == "zh"
+        assert r.headers["x-voice"].startswith("zh-")
+
+        # 跨语言：让英文人物 Adrian 发一条韩语帖子 → 必须用韩语声线
+        with db._lock, db.conn:  # noqa: SLF001 - 测试内构造跨度数据
+            db.conn.execute(
+                "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
+                " visibility, like_count, comment_count, created_at)"
+                " VALUES ('pp_mixed_lang','p_adrian','오늘은 정말 피곤한 하루였다.','[]','[]','ko',"
+                " 'public',0,0,'2026-11-06T00:00:00+00:00')"
+            )
+        r2 = client.get("/api/v3/persona-posts/pp_mixed_lang/speech?v=abc123")
+        assert r2.status_code == 200
+        assert r2.headers["x-language"] == "ko"
+        assert r2.headers["x-voice"].startswith("ko-")
+        # URL 带内容版本时才允许长缓存
+        assert "immutable" in r2.headers.get("cache-control", "")
+        assert voice.calls[-1][1].startswith("ko-")
 
 
 def test_health_reports_world(world_db):

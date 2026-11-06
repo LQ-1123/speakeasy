@@ -446,7 +446,7 @@ export function FeedCard({
   const togglePlay = async () => {
     if (!isPersona || playing) return;
     setPlaying(true);
-    const ok = await playVoiceUrl(personaSpeechUrl(item.id)).catch(() => false);
+    const ok = await playVoiceUrl(personaSpeechUrl(item.id, item.content_hash)).catch(() => false);
     setPlaying(false);
     if (!ok) onNotify?.("朗读失败，请稍后重试");
   };

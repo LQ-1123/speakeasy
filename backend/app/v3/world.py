@@ -24,7 +24,13 @@ import uuid
 from typing import Any
 
 from app.logging_utils import get_logger
-from app.v3.schema import SEED_KEY, SEED_VERSION, seed_if_needed, sync_persona_friends
+from app.v3.schema import (
+    SEED_KEY,
+    SEED_VERSION,
+    backfill_post_languages,
+    seed_if_needed,
+    sync_persona_friends,
+)
 from app.v3.seed_data import PERSONAS, POSTS
 
 log = get_logger(__name__)
@@ -166,12 +172,13 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
             post_id = f"pp_{uuid.uuid4().hex[:12]}"
             created = now - timedelta(hours=1 + index * 6 + (written % 5))
             db.conn.execute(
-                "INSERT INTO persona_posts (id, persona_id, content, media, tags, visibility,"
-                " like_count, comment_count, created_at)"
-                " VALUES (?,?,?, '[]', ?, 'public', 0, 0, ?)",
+                "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
+                " visibility, like_count, comment_count, created_at)"
+                " VALUES (?,?,?, '[]', ?, ?, 'public', 0, 0, ?)",
                 (
                     post_id, pid, content,
                     json.dumps(post.get("tags") or persona.get("interests") or []),
+                    lang,
                     created.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                 ),
             )
@@ -247,8 +254,9 @@ async def ensure_world(db: Any, llm: Any) -> dict:
             seed_if_needed(db)  # 版本一致时内部直接返回 0
         if not status["generated_at"]:
             _mark(db, status["source"] or "seed")
-        # 每次启动都同步一次：已加好友的 Persona 语言/声线跟着人物走
+        # 每次启动都同步：人物语言/声线 → 已加好友；动态语言缺失 → 回填
         sync_persona_friends(db)
+        backfill_post_languages(db)
         return world_status(db)
 
     if world_path() == "llm":
@@ -257,6 +265,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
     if written:
         _mark(db, "seed")
     sync_persona_friends(db)
+    backfill_post_languages(db)
     return world_status(db)
 
 

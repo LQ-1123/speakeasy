@@ -327,6 +327,9 @@ class V3Service:
             "content": row["content"],
             "media": _loads(row["media"], []),
             "tags": _loads(row["tags"], []),
+            "language": (row["language"] if "language" in row.keys() else "") or persona.get("language", "en"),
+            # content_hash 供前端做语音缓存版本号：内容变了 URL 就变
+            "content_hash": hashlib.sha1(str(row["content"]).encode("utf-8")).hexdigest()[:12],
             "visibility": "public",
             "created_at": row["created_at"],
             "like_count": int(row["like_count"] or 0),
@@ -650,10 +653,15 @@ class V3Service:
         posts = self.persona_posts(persona["id"], user_id=uid, limit=3)["items"]
         latest = posts[0] if posts else None
         greeting = str(latest["content"]) if latest else str(persona.get("bio") or "")
+        post_hash = (
+            hashlib.sha1(greeting.encode("utf-8")).hexdigest()[:12] if latest else ""
+        )
         return {
             "persona": self._persona_brief(persona),
             "greeting": greeting,
             "post_id": latest["id"] if latest else "",
+            "post_hash": post_hash,
+            "post_language": (latest.get("language") if latest else "") or persona.get("language", "en"),
             "friendship_status": (
                 "accepted" if persona["id"] in friends
                 else "pending" if persona["id"] in pending

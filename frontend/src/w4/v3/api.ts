@@ -63,6 +63,8 @@ export interface FeedItem {
   content: string;
   media: string[];
   tags: string[];
+  language?: string;
+  content_hash?: string;
   visibility: "public" | "friends" | "private";
   created_at: string;
   like_count: number;
@@ -277,6 +279,8 @@ export interface DiscoverNext {
   persona: PersonaBrief;
   greeting: string;
   post_id: string;
+  post_hash?: string;
+  post_language?: string;
   friendship_status: "none" | "pending" | "accepted";
   remaining: number;
   source: string;
@@ -304,9 +308,13 @@ export function fetchDiscoverNext(language?: string): Promise<DiscoverNext> {
   return request(`/api/v3/discover/next${q}`);
 }
 
-/** 用人物自己的声音朗读一条动态（公共音频，可直接给 <audio> / WebAudio 用）。 */
-export function personaSpeechUrl(postId: string): string {
-  return `${API_ORIGIN}/api/v3/persona-posts/${encodeURIComponent(postId)}/speech`;
+/**
+ * 用**帖子语言对应的声线**朗读一条动态。
+ * ``version`` 传帖子内容哈希：内容一改 URL 就变，避免浏览器/设备缓存播旧音频。
+ */
+export function personaSpeechUrl(postId: string, version?: string): string {
+  const q = version ? `?v=${encodeURIComponent(version)}` : "";
+  return `${API_ORIGIN}/api/v3/persona-posts/${encodeURIComponent(postId)}/speech${q}`;
 }
 
 /** 信息流内容翻译（复用 V2 的翻译链路：LLM 优先，带缓存）。 */

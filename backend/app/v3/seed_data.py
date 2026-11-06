@@ -363,6 +363,67 @@ LANGUAGE_NAMES: dict[str, str] = {
     "zh": "Simplified Chinese",
 }
 
+#: 语言 → 可选声线（朗读严格按**帖子语言**选，人物声线只在同语言时复用）
+LANGUAGE_VOICES: dict[str, tuple[str, ...]] = {
+    "en": (
+        "en-GB-RyanNeural", "en-US-AvaMultilingualNeural", "en-AU-WilliamMultilingualNeural",
+        "en-GB-SoniaNeural", "en-US-AndrewMultilingualNeural", "en-IE-ConnorNeural",
+    ),
+    "ja": ("ja-JP-KeitaNeural", "ja-JP-NanamiNeural"),
+    "ko": ("ko-KR-InJoonNeural", "ko-KR-SunHiNeural"),
+    "de": ("de-DE-FlorianMultilingualNeural", "de-DE-SeraphinaMultilingualNeural"),
+    "es": ("es-ES-AlvaroNeural", "es-ES-XimenaNeural"),
+    "it": ("it-IT-GiuseppeMultilingualNeural", "it-IT-IsabellaNeural"),
+    "pt": ("pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"),
+    "zh": ("zh-CN-YunxiNeural", "zh-CN-XiaoyiNeural"),
+    "fr": ("fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural"),
+}
+
+#: 声线 id 的语言前缀（en-GB-... → en）
+VOICE_LANG_PREFIX: dict[str, str] = {
+    "en": "en-", "ja": "ja-", "ko": "ko-", "de": "de-",
+    "es": "es-", "it": "it-", "pt": "pt-", "zh": "zh-", "fr": "fr-",
+}
+
+
+def detect_language(text: str) -> str:
+    """从文本字符集粗判语言（只用于「朗读声线」兜底，不用于翻译）。
+
+    返回 ``""`` 表示判断不出（调用方回落到人物语言）。
+    """
+    if not text:
+        return ""
+    has_hangul = any("\uac00" <= ch <= "\ud7a3" for ch in text)
+    if has_hangul:
+        return "ko"
+    has_kana = any("\u3040" <= ch <= "\u30ff" for ch in text)
+    if has_kana:
+        return "ja"
+    has_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in text)
+    if has_cjk:
+        return "zh"
+    if any("\u0400" <= ch <= "\u04ff" for ch in text):
+        return "ru"
+    return ""
+
+
+def voice_for_language(language: str, *, seed: str = "", gender: str = "") -> str:
+    """按语言挑一个稳定声线（同一 seed 永远同一条）。"""
+    lang = (language or "en").strip().lower()
+    voices = LANGUAGE_VOICES.get(lang)
+    if not voices:
+        return "en-GB-RyanNeural"
+    if gender == "female":
+        female = tuple(v for v in voices if any(k in v for k in ("Ava", "Sonia", "Nanami", "SunHi", "Ximena", "Isabella", "Thalita", "Vivienne", "Xiaoyi", "Seraphina")))
+        if female:
+            voices = female
+    elif gender == "male":
+        male = tuple(v for v in voices if any(k in v for k in ("Ryan", "Andrew", "William", "Keita", "InJoon", "Alvaro", "Giuseppe", "Antonio", "Remy", "Yunxi", "Florian", "Connor")))
+        if male:
+            voices = male
+    idx = sum(ord(ch) for ch in f"{seed}:{lang}") % len(voices)
+    return voices[idx]
+
 #: 兴趣标签词表（中英文都认），用于用户动态主题匹配
 INTEREST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "coffee": ("coffee", "latte", "cafe", "espresso", "咖啡", "拿铁"),
@@ -408,7 +469,11 @@ __all__ = [
     "INTEREST_KEYWORDS",
     "LANGUAGE_LABELS",
     "LANGUAGE_NAMES",
+    "LANGUAGE_VOICES",
     "PERSONAS",
     "POSTS",
+    "VOICE_LANG_PREFIX",
+    "detect_language",
     "persona_by_id",
+    "voice_for_language",
 ]

@@ -716,3 +716,40 @@
   font-size: 12px;
   pointer-events: none;
 }
+
+
+/* 手机动态页：标题按整屏居中（返回键绝对定位，不挤占标题） */
+@media (max-width: 900px) {
+  .w4-head.v3-feed-head {
+    justify-content: center;
+  }
+  .w4-head.v3-feed-head > .w4-icon-btn {
+    position: absolute;
+    left: 6px;
+    z-index: 3;
+  }
+  .w4-head.v3-feed-head .w4-head-main {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0 62px;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+  }
+  .w4-head.v3-feed-head .w4-head-title {
+    width: 100%;
+    text-align: center;
+  }
+  /* 手机上标题两侧有返回/通知/发动态，统计文案会压到按钮上，直接不显示 */
+  .w4-head.v3-feed-head .w4-head-sub {
+    display: none;
+  }
+  .w4-head.v3-feed-head .w4-head-actions {
+    z-index: 4;
+  }
+}

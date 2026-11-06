@@ -314,7 +314,7 @@ export function FeedView({
 
   return (
     <div className="w4-main">
-      <div className="w4-head">
+      <div className="w4-head v3-feed-head">
         {onBack ? (
           <button className="w4-icon-btn" onClick={onBack} aria-label="返回">
             <ChevronLeft size={18} strokeWidth={2} />

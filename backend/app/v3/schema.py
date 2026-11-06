@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS personas (
     archetype_id TEXT NOT NULL DEFAULT '',
     ai_config TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'active',
-    created_at TEXT NOT NULL DEFAULT ''
+    created_at TEXT NOT NULL DEFAULT '',
+    lifecycle TEXT NOT NULL DEFAULT 'permanent',
+    expires_at TEXT NOT NULL DEFAULT '',
+    last_interaction_at TEXT NOT NULL DEFAULT '',
+    interaction_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_personas_status ON personas(status);
 
@@ -68,7 +72,10 @@ CREATE TABLE IF NOT EXISTS persona_posts (
     visibility TEXT NOT NULL DEFAULT 'public',
     like_count INTEGER NOT NULL DEFAULT 0,
     comment_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL DEFAULT '',
+    interacted INTEGER NOT NULL DEFAULT 0,
+    interaction_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_persona_posts_time ON persona_posts(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_persona_posts_persona ON persona_posts(persona_id, created_at DESC);
@@ -171,6 +178,15 @@ CREATE TABLE IF NOT EXISTS v3_meta (
     value TEXT NOT NULL DEFAULT ''
 );
 
+-- 每日世界：每天 02:00 批量生成，幂等（同一天只生成一次）
+CREATE TABLE IF NOT EXISTS daily_world (
+    day TEXT PRIMARY KEY,
+    generated_at TEXT NOT NULL,
+    personas INTEGER NOT NULL DEFAULT 0,
+    posts INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT ''
+);
+
 -- 偶遇轮换：记录每个用户看过哪些人物，保证「换一个」不会重复
 CREATE TABLE IF NOT EXISTS v3_discover_views (
     user_id TEXT NOT NULL,
@@ -221,6 +237,39 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 "ALTER TABLE personas ADD COLUMN avatar_seed TEXT NOT NULL DEFAULT ''"
             )
             log.info("migrated personas: added avatar_seed column")
+
+        for col in ("lifecycle", "expires_at", "last_interaction_at"):
+            if pcols and col not in pcols:
+                db.conn.execute(
+                    f"ALTER TABLE personas ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+                log.info("migrated personas: added %s column", col)
+                pcols.add(col)
+        if pcols and "interaction_count" not in pcols:
+            db.conn.execute(
+                "ALTER TABLE personas ADD COLUMN interaction_count INTEGER NOT NULL DEFAULT 0"
+            )
+            log.info("migrated personas: added interaction_count column")
+            pcols.add("interaction_count")
+
+        post_cols = {
+            row[1]
+            for row in db.conn.execute("PRAGMA table_info(persona_posts)").fetchall()
+        }
+        for col in ("expires_at",):
+            if post_cols and col not in post_cols:
+                db.conn.execute(
+                    f"ALTER TABLE persona_posts ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+                log.info("migrated persona_posts: added %s column", col)
+                post_cols.add(col)
+        for col in ("interacted", "interaction_count"):
+            if post_cols and col not in post_cols:
+                db.conn.execute(
+                    f"ALTER TABLE persona_posts ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
+                )
+                log.info("migrated persona_posts: added %s column", col)
+                post_cols.add(col)
 
         for col in ("avatar_style", "avatar_options"):
             if pcols and col not in pcols:

@@ -33,7 +33,7 @@ from app.v3.social_engine import SocialConfig
 log = get_logger(__name__)
 
 #: 信息流默认分页
-FEED_PAGE = 12
+FEED_PAGE = 10
 MAX_FEED_PAGE = 40
 
 #: 用户动态可见性
@@ -286,8 +286,13 @@ class V3Service:
     ) -> dict:
         uid = user_id or current_user_id()
         limit = max(1, min(int(limit), 40))
-        sql = "SELECT * FROM persona_posts WHERE persona_id=? AND visibility='public'"
-        params: list[Any] = [persona_id]
+        from app.v3.daily_world import iso as _iso, now_local as _now_local  # noqa: PLC0415
+
+        sql = (
+            "SELECT * FROM persona_posts WHERE persona_id=? AND visibility='public'"
+            " AND (expires_at='' OR expires_at>?)"
+        )
+        params: list[Any] = [persona_id, _iso(_now_local())]
         if cursor:
             ts, _, cid = str(cursor).partition("|")
             sql += " AND (created_at < ? OR (created_at = ? AND id < ?))"
@@ -507,9 +512,15 @@ class V3Service:
         limit = max(1, min(int(limit), MAX_FEED_PAGE))
         fetch_n = limit + 1
 
-        p_sql = "SELECT * FROM persona_posts WHERE visibility='public'"
+        from app.v3.daily_world import iso as _iso, now_local as _now_local  # noqa: PLC0415
+
+        now_iso = _iso(_now_local())
+        p_sql = (
+            "SELECT * FROM persona_posts WHERE visibility='public'"
+            " AND (expires_at='' OR expires_at>?)"
+        )
         u_sql = ("SELECT * FROM user_posts WHERE (visibility='public' OR user_id=?)")
-        p_params: list[Any] = []
+        p_params: list[Any] = [now_iso]
         u_params: list[Any] = [uid]
         if cursor:
             ts, _, cid = str(cursor).partition("|")
@@ -544,7 +555,13 @@ class V3Service:
     def feed_summary(self, user_id: str) -> dict:
         uid = user_id
         with self.lock:
-            p = self.conn.execute("SELECT COUNT(*) AS n FROM persona_posts").fetchone()["n"]
+            from app.v3.daily_world import iso as _iso, now_local as _now_local  # noqa: PLC0415
+
+            p = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM persona_posts"
+                " WHERE expires_at='' OR expires_at>?",
+                (_iso(_now_local()),),
+            ).fetchone()["n"]
             mine = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM user_posts WHERE user_id=?", (uid,)
             ).fetchone()["n"]

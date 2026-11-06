@@ -72,6 +72,16 @@ def _v3(request: Request) -> V3Service:
     return service
 
 
+def _mark_interaction(request: Request, service, *, persona_id: str = "", post_id: str = "") -> None:
+    """记录真实互动（失败不影响主流程）。"""
+    try:
+        from app.v3.lifecycle import mark_interaction  # noqa: PLC0415
+
+        mark_interaction(service.db, persona_id=persona_id, post_id=post_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _run(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
@@ -114,12 +124,21 @@ async def health(request: Request) -> dict:
             world = {}
     audio_cache = getattr(request.app.state, "v3_audio", None)
     audio_stats = audio_cache.stats() if audio_cache is not None else {}
+    daily: dict = {}
+    if db is not None:
+        try:
+            from app.v3.daily_world import daily_status  # noqa: PLC0415
+
+            daily = await asyncio.to_thread(daily_status, db)
+        except Exception:  # noqa: BLE001
+            daily = {}
     return {
         "status": "ok",
         "version": V3_VERSION,
         "social": service.config.public(),
         "world": world,
         "audio": audio_stats,
+        "daily": daily,
         "personas": world.get("personas") or len(service._personas()),  # noqa: SLF001 - 只读计数
     }
 
@@ -189,6 +208,7 @@ async def get_persona(
     profile = await _run(service.persona_profile, persona_id, user_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="人物不存在")
+    _mark_interaction(request, service, persona_id=persona_id)
     return profile
 
 
@@ -209,6 +229,15 @@ async def get_persona_posts(
 # --------------------------------------------------------------------------- #
 # 种子头像（确定性 SVG，无图片资源）
 # --------------------------------------------------------------------------- #
+@router.get("/world/daily")
+async def world_daily(request: Request) -> dict:
+    """今日世界状态：生成时间、今日人物/动态数、可见动态数、下次生成时间。"""
+    service = _v3(request)
+    from app.v3.daily_world import daily_status  # noqa: PLC0415
+
+    return await asyncio.to_thread(daily_status, service.db)
+
+
 @router.get("/avatar/{seed}.svg")
 async def avatar(seed: str, g: str = "", r: str = "", a: int | None = None):
     """按种子生成插画头像。
@@ -277,6 +306,8 @@ async def persona_post_speech(request: Request, post_id: str, v: str | None = No
     persona = await _run(service.persona_by_id, str(post["persona_id"]))
     if persona is None:
         raise HTTPException(status_code=404, detail="人物不存在")
+
+    _mark_interaction(request, service, post_id=post_id)
 
     cache = getattr(request.app.state, "v3_audio", None)
     if cache is not None:
@@ -356,6 +387,7 @@ async def add_persona_friend(
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="人物不存在") from None
+    _mark_interaction(request, service, persona_id=persona_id)
     return result
 
 
@@ -449,7 +481,9 @@ async def like_persona_post(
 ) -> dict:
     service = _v3(request)
     try:
-        return await _run(service.toggle_persona_post_like, user_id, post_id)
+        result = await _run(service.toggle_persona_post_like, user_id, post_id)
+        _mark_interaction(request, service, post_id=post_id)
+        return result
     except KeyError:
         raise HTTPException(status_code=404, detail="动态不存在") from None
 
@@ -463,7 +497,9 @@ async def comment_persona_post(
 ) -> dict:
     service = _v3(request)
     try:
-        return await _run(service.comment_persona_post, user_id, post_id, body.content)
+        result = await _run(service.comment_persona_post, user_id, post_id, body.content)
+        _mark_interaction(request, service, post_id=post_id)
+        return result
     except KeyError:
         raise HTTPException(status_code=404, detail="动态不存在") from None
     except ValueError as exc:

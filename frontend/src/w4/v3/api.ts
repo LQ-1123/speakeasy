@@ -311,7 +311,7 @@ export interface DiscoverNext {
 
 /* --------------------------------------------------------------- 接口 */
 
-export function fetchFeed(cursor?: string, limit = 12): Promise<{ items: FeedItem[]; next_cursor: string }> {
+export function fetchFeed(cursor?: string, limit = 10): Promise<{ items: FeedItem[]; next_cursor: string }> {
   const query = new URLSearchParams({ limit: String(limit) });
   if (cursor) query.set("cursor", cursor);
   return request(`/api/v3/feed?${query.toString()}`);

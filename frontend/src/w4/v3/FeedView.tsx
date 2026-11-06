@@ -97,7 +97,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
         setLoadingMore(true);
       }
       try {
-        const page = await fetchFeed(reset ? undefined : nextCursor || undefined, 12);
+        const page = await fetchFeed(reset ? undefined : nextCursor || undefined, 10);
         if (seq.current !== my) return;
         setItems((prev) => (reset ? page.items : [...prev, ...page.items]));
         setCursor(page.next_cursor || "");

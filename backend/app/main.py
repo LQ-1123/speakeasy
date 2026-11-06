@@ -87,6 +87,13 @@ async def lifespan(app: FastAPI):
         app.state.v3_audio.start()
         queued = app.state.v3_audio.warm(app.state.v3)
         log.info("v3 朗读预热已排队 %d 条（后台合成，不阻塞启动）", queued)
+
+        # 每日世界：启动补今天内容，之后每天 02:00 生成；顺带 TTL 清理
+        from app.v3.daily_world import daily_loop  # noqa: PLC0415
+
+        app.state.daily_task = asyncio.create_task(
+            daily_loop(app.state.v2.db, engines.llm), name="v3-daily-world"
+        )
     except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
         log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
         app.state.v3 = None
@@ -149,6 +156,13 @@ async def lifespan(app: FastAPI):
                 await v2.aclose()
             except Exception as exc:  # noqa: BLE001
                 log.debug("v2 关闭失败: %s", exc)
+        daily_task = getattr(app.state, "daily_task", None)
+        if daily_task is not None and not daily_task.done():
+            daily_task.cancel()
+            try:
+                await daily_task
+            except (asyncio.CancelledError, Exception):  # noqa: B014
+                pass
         audio_cache = getattr(app.state, "v3_audio", None)
         if audio_cache is not None:
             audio_cache.stop()

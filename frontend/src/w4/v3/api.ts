@@ -325,6 +325,29 @@ export function fetchFeed(cursor?: string, limit = 10): Promise<{ items: FeedIte
   return request(`/api/v3/feed?${query.toString()}`);
 }
 
+/** 上传一张动态配图（multipart），返回 /uploads/... 地址。 */
+export async function uploadImage(
+  file: File,
+): Promise<{ url: string; width: number; height: number }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_ORIGIN}/api/v3/media/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = "上传失败";
+    try {
+      const data = (await res.json()) as { detail?: unknown };
+      if (data?.detail) detail = String(data.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as { url: string; width: number; height: number };
+}
+
 export function fetchFeedSummary(): Promise<FeedSummary> {
   return request("/api/v3/feed/summary");
 }

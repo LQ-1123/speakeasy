@@ -19,7 +19,7 @@ import asyncio
 import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -229,6 +229,29 @@ async def get_persona_posts(
 # --------------------------------------------------------------------------- #
 # 种子头像（确定性 SVG，无图片资源）
 # --------------------------------------------------------------------------- #
+@router.post("/media/upload")
+async def upload_media(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(bind_current_user),
+) -> dict:
+    """上传一张动态配图：校验 → 去 EXIF → 1600px → webp，返回 /uploads/... URL。"""
+    service = _v3(request)
+    from app.v3.uploads import MAX_BYTES, UploadError, save_user_image  # noqa: PLC0415
+
+    raw = await file.read(MAX_BYTES + 1)
+    try:
+        data = await asyncio.to_thread(
+            save_user_image,
+            raw,
+            user_id,
+            os.path.join(service.data_dir or "data", "uploads"),
+        )
+    except UploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return data
+
+
 @router.get("/world/daily")
 async def world_daily(request: Request) -> dict:
     """今日世界状态：生成时间、今日人物/动态数、可见动态数、下次生成时间。"""

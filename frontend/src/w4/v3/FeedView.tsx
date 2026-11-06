@@ -43,6 +43,7 @@ import {
   personaSpeechUrl,
   relTimeOf,
   translateText,
+  uploadImage,
   VISIBILITY_LABEL,
   type FeedComment,
   type FeedItem,
@@ -683,6 +684,9 @@ function PublishDialog({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const customTags = tags.filter((t) => !TAGS.includes(t));
   const addTag = (raw: string) => {
@@ -737,7 +741,62 @@ function PublishDialog({
       />
 
       <div className="w4-field-hint" style={{ marginTop: 2 }}>
-        演示版仅可使用内置图片（暂不支持上传自己的照片）
+        可选内置图片，或上传自己的照片（JPG/PNG/WebP，≤8MB，最多 4 张）
+      </div>
+
+      {picked.length ? (
+        <div className="w4-publish-pics" style={{ marginTop: 8 }}>
+          {picked.map((p, i) => (
+            <button
+              key={p}
+              className="w4-publish-pic on"
+              title="点击移除"
+              onClick={() => setPicked((list) => list.filter((x) => x !== p))}
+            >
+              <img src={p} alt="" />
+              <span className="w4-pick-order">{i + 1}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button
+          className="w4-btn"
+          type="button"
+          disabled={uploading || picked.length >= 4}
+          onClick={() => fileRef.current?.click()}
+        >
+          {uploading ? "上传中…" : "上传照片"}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          multiple
+          hidden
+          onChange={async (e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = "";
+            if (!files.length) return;
+            setUploading(true);
+            setUploadError("");
+            try {
+              for (const file of files) {
+                if (picked.length >= 4) break;
+                const data = await uploadImage(file);
+                setPicked((list) => (list.length >= 4 || list.includes(data.url) ? list : [...list, data.url]));
+              }
+            } catch (exc) {
+              setUploadError(exc instanceof Error ? exc.message : "上传失败");
+            } finally {
+              setUploading(false);
+            }
+          }}
+        />
+        <span className="w4-field-hint" style={{ alignSelf: "center" }}>
+          {uploadError ? <span style={{ color: "#c0392b" }}>{uploadError}</span> : "最多 4 张"}
+        </span>
       </div>
 
       <div className="w4-publish-pics">

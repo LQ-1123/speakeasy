@@ -82,7 +82,7 @@ def _dumps(value: Any) -> str:
 
 
 #: 演示版用户动态只允许选内置图片（不允许上传自己的照片）
-USER_MEDIA_PREFIXES = ("/mock/photos/",)
+USER_MEDIA_PREFIXES = ("/mock/photos/", "/uploads/")
 USER_MEDIA_MAX = 4
 USER_TAGS_MAX = 6
 USER_TAG_MAX_LEN = 16
@@ -96,7 +96,7 @@ def _clean_user_media(media: Iterable[str] | None) -> list[str]:
         if not path:
             continue
         if not any(path.startswith(prefix) for prefix in USER_MEDIA_PREFIXES):
-            raise ValueError("演示版只能使用内置图片，暂不支持上传自己的照片")
+            raise ValueError("图片地址不合法，请重新上传")
         if path not in out:
             out.append(path)
         if len(out) >= USER_MEDIA_MAX:

@@ -461,7 +461,7 @@ def test_user_post_media_limited_to_mock_and_tags_cleaned(world_db):
                 json={"content": "nope", "media": [bad]},
             )
             assert res.status_code == 400, bad
-            assert "内置图片" in res.json()["detail"]
+            assert res.json()["detail"]
 
         # 标签上限 6 个
         many = client.post(
@@ -471,6 +471,50 @@ def test_user_post_media_limited_to_mock_and_tags_cleaned(world_db):
         )
         assert many.status_code == 200
         assert len(many.json()["post"]["tags"]) == 6
+
+
+def test_user_image_upload_and_post(world_db):
+    """上传真实图片 → /uploads/... → 动态可引用；非图片被拒。"""
+    import io as _io
+
+    from PIL import Image  # noqa: PLC0415
+
+    db, tmp_path = world_db
+    app, service, _voice = _make_app(db, tmp_path)
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (640, 480), (30, 120, 200)).save(buf, "PNG")
+    png = buf.getvalue()
+
+    with TestClient(app) as client:
+        headers = _register(client, "device_upload_0001")
+
+        up = client.post(
+            "/api/v3/media/upload",
+            headers=headers,
+            files={"file": ("photo.png", png, "image/png")},
+        )
+        assert up.status_code == 200, up.text
+        data = up.json()
+        assert data["url"].startswith("/uploads/") and data["url"].endswith(".webp")
+        assert data["width"] == 640 and data["height"] == 480
+        saved = Path(service.data_dir) / data["url"].lstrip("/")
+        assert saved.exists()
+
+        post = client.post(
+            "/api/v3/posts",
+            headers=headers,
+            json={"content": "my own photo", "media": [data["url"]]},
+        )
+        assert post.status_code == 200, post.text
+        assert post.json()["post"]["media"] == [data["url"]]
+
+        bad = client.post(
+            "/api/v3/media/upload",
+            headers=headers,
+            files={"file": ("note.txt", b"hello world", "text/plain")},
+        )
+        assert bad.status_code == 400
 
 
 def test_health_reports_world(world_db):

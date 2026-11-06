@@ -86,6 +86,15 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.7 用户上传图片
+
+- 前端「发动态 → 上传照片」，最多 4 张；内置 mock 图仍可作为快捷选择。
+- 后端 `POST /api/v3/media/upload`：Pillow 解码校验 → 按 EXIF 方向摆正 → 去掉 EXIF/GPS →
+  最长边 1600px → webp(85) → 存 `data/uploads/{user_hash}/{sha256(原图)}.webp`；
+  同名内容天然去重；静态服务 `/uploads/*`。
+- 隐私：上传后原图的 EXIF/GPS 不再保留；文件仅本人 URL 可访问（不含公开索引）。
+- 动态 `media` 只允许 `/mock/photos/*` 与 `/uploads/*`，服务端强制校验。
+
 ### 3.6 开放图库与生活动态（零 key）
 
 每日世界里，人物除了发文字，还会发「生活图文」：图片来自开放图库，文案由 LLM
@@ -210,8 +219,10 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v3/posts` | 发动态。**media 只接受内置图片**（`/mock/photos/*`，最多 4 张），
-上传/外链返回 400；tags 去 `#`、去重、单条 ≤16 字、最多 6 个（预设 8 个 + 可自定义） |
+| POST | `/api/v3/media/upload` | 上传动态配图（multipart `file`）。支持 JPG/PNG/WebP/GIF，≤8MB；
+自动按 EXIF 摆正、**去除 EXIF/GPS**、最长边 1600px、转 webp；返回 `{url,width,height}` |
+| POST | `/api/v3/posts` | 发动态。media 接受**内置图片**（`/mock/photos/*`）或**用户上传**（`/uploads/*`），
+最多 4 张，其它地址 400；tags 去 `#`、去重、单条 ≤16 字、最多 6 个（预设 8 个 + 可自定义） |
  `{content, visibility: public\|friends\|private, media[], tags[]}` |
 | GET | `/api/v3/posts/mine` | 自己的全部动态 |
 | DELETE | `/api/v3/posts/{id}` | 仅作者可删（越权 404） |

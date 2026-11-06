@@ -238,6 +238,11 @@ def _mount_static(app: FastAPI, settings) -> None:
     os.makedirs(media_dir, exist_ok=True)
     app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
+    # 用户上传图片：/uploads/*
+    uploads_dir = os.path.join(str(settings.data_path), "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+
     if os.path.isdir(APP_DIR) and os.path.exists(os.path.join(APP_DIR, "index.html")):
         # Next static export 需要把 /_next/* 正确映射；直接整目录挂到 / 会被 /api 抢走
         app.mount("/", StaticFiles(directory=APP_DIR, html=True), name="frontend")

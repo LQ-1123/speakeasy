@@ -265,9 +265,6 @@ export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
             </div>
           ))}
         </div>
-        <div className="v3-events-note">
-          <Sparkles size={12} /> 这些互动来自 AI 人物，频率、延迟和是否会回应都由后端控制。
-        </div>
         <div style={{ height: 24 }} />
       </div>
     </div>

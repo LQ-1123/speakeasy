@@ -241,11 +241,6 @@ export function PersonaProfileView({
                 </div>
               ) : null}
 
-              <div className="v3-ai-note">
-                <Sparkles size={13} /> {profile.nickname} 是平台中的 AI 人物，不是真人账号；TA
-                的记忆和性格由模型驱动。
-              </div>
-
               <div className="v3-profile-actions">
                 {isFriend ? (
                   <button

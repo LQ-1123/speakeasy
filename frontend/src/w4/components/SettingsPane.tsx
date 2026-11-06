@@ -158,7 +158,7 @@ function LlmSection({
     });
     setBusy(false);
     if (!res) {
-      toast("保存失败：检查接口地址和 Key", "error");
+      toast("保存失败：请检查地址和 Key", "error");
       return;
     }
     const cfg = (res as Record<string, any>).config ?? {};
@@ -196,7 +196,7 @@ function LlmSection({
       </div>
 
       <div className="w4-field">
-        <div className="w4-field-label">接口地址</div>
+        <div className="w4-field-label">服务地址</div>
         <input className="w4-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://…/v1" />
       </div>
       <div className="w4-field">
@@ -214,7 +214,7 @@ function LlmSection({
           autoComplete="off"
         />
         <div className="w4-field-hint">
-          <KeyRound size={11} style={{ verticalAlign: -1 }} /> Key 只存在这台设备上，接口不会回传明文。
+          <KeyRound size={11} style={{ verticalAlign: -1 }} /> Key 只存在这台设备上，不会上传到任何服务器。
         </div>
       </div>
 
@@ -229,7 +229,7 @@ function LlmSection({
             </>
           ) : (
             <>
-              <CircleAlert size={12} /> 未配置，当前演示模式
+              <CircleAlert size={12} /> 未配置
             </>
           )}
         </span>
@@ -357,7 +357,7 @@ function VoiceSection({
           className="w4-btn"
           onClick={() => {
             update({ tts: { ...settings.tts, cloned: !settings.tts.cloned } });
-            toast(settings.tts.cloned ? "已关闭音色克隆" : "已开启（原型演示）", "success");
+            toast(settings.tts.cloned ? "已关闭音色克隆" : "已开启", "success");
           }}
         >
           {settings.tts.cloned ? "已开启" : "去设置"}
@@ -590,7 +590,7 @@ function PrivacySection({ toast }: { toast: (t: string, t2?: "success") => void 
           <div className="w4-settings-row-title">聊天记录</div>
           <div className="w4-settings-row-desc">包含语音原文、译文和好友记住的事情。</div>
         </div>
-        <button className="w4-btn is-danger" onClick={() => toast("原型里不会真的删除", "success")}>
+        <button className="w4-btn is-danger" onClick={() => toast("当前版本暂不支持清除", "success")}>
           全部清除
         </button>
       </div>
@@ -599,7 +599,7 @@ function PrivacySection({ toast }: { toast: (t: string, t2?: "success") => void 
           <div className="w4-settings-row-title">导出数据</div>
           <div className="w4-settings-row-desc">把聊天、表达本导出成一个文件，随时带走。</div>
         </div>
-        <button className="w4-btn" onClick={() => toast("已生成下载（原型演示）", "success")}>
+        <button className="w4-btn" onClick={() => toast("当前版本暂不支持导出", "success")}>
           导出
         </button>
       </div>
@@ -623,7 +623,7 @@ function AboutSection() {
       <div className="w4-about">
         <div className="w4-about-row">
           <span>版本</span>
-          <span>2.4.0（原型）</span>
+          <span>2.4.0</span>
         </div>
         <div className="w4-about-row">
           <span>创作者</span>
@@ -754,7 +754,7 @@ function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "er
         </button>
       </div>
       <p className="w4-hint" style={{ marginTop: 10 }}>
-        Key 只存在这台手机上，用于直接调用云端接口；不会上传到任何服务器。
+        Key 只存在这台手机上，用于直接调用云端服务；不会上传到任何服务器。
         数据也只在本机，换手机时用「导出数据」备份、新手机「导入数据」。
       </p>
     </div>

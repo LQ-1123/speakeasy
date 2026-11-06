@@ -107,7 +107,7 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
                   <Sparkles size={15} strokeWidth={1.8} />
                 </span>
                 <span className="w4-cell-label">对话模型</span>
-                <span className="w4-cell-value">{settings.llm.hasKey ? settings.llm.model : "演示模式"}</span>
+                <span className="w4-cell-value">{settings.llm.hasKey ? settings.llm.model : "未配置"}</span>
                 <ChevronRight size={15} className="w4-cell-chevron" />
               </button>
               <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "voice" })}>

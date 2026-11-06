@@ -292,7 +292,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
         <div className="w4-head-main">
           <div className="w4-head-title">发现</div>
           <div className="w4-head-sub">
-            {summary ? `${summary.persona_posts} 条人物动态 · ${summary.friends} 位好友` : "AI 人物构成的社交世界"}
+            {summary ? `${summary.persona_posts} 条人物动态 · ${summary.friends} 位好友` : "TA 们的生活动态"}
           </div>
         </div>
         <div className="w4-head-actions">
@@ -342,8 +342,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
         <div className="w4-feed">
           {localMode ? (
             <div className="v3-notice">
-              当前是「本地模式」：发现信息流由服务器提供，本地模式无法加载。可在
-              设置 → 本地与密钥 里切回服务器模式。
+              当前处于离线模式，信息流暂不可用；可在设置 → 本地与密钥 切回在线模式。
             </div>
           ) : null}
 
@@ -375,7 +374,11 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
             <FeedCard
               key={item.id}
               item={item}
-              onOpenPersona={() => navigate({ name: "persona", personaId: item.author.id })}
+              onOpenPersona={() =>
+                item.kind === "persona_post"
+                  ? navigate({ name: "persona", personaId: item.author.id })
+                  : navigate({ name: "me" })
+              }
               onLike={() => void toggleLike(item)}
               onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
               onQuickAdd={() => void quickAdd(item)}

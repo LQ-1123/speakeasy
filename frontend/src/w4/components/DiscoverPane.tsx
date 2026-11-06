@@ -164,21 +164,16 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
         </button>
         <div className="w4-head-main">
           <div className="w4-head-title">偶遇</div>
-          <div className="w4-head-sub">从信息流的世界里认识一个人，先听 TA 的声音</div>
+          <div className="w4-head-sub">认识一位新朋友，先听听 TA 的声音</div>
         </div>
       </div>
 
       <div className="w4-scroll">
         <div className="w4-discover">
-          <div className="v3-discover-note">
-            这些人就是信息流里的人物：头像、资料、声音完全一致；点「换一个」继续浏览。
-          </div>
-
           {loading ? (
             <div className="w4-card w4-deck-loading">
               <div className="w4-deck-spinner" aria-hidden />
-              <div className="w4-deck-loading-title">正在从世界里挑一个人…</div>
-              <div className="w4-deck-loading-sub">不会再现场捏人，所以很快</div>
+              <div className="w4-deck-loading-title">正在找一个人…</div>
             </div>
           ) : error || !candidate ? (
             <div className="w4-card" style={{ padding: 30, textAlign: "center" }}>
@@ -201,13 +196,6 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
             />
           )}
 
-          <div className="w4-deck-note">
-            <Icon size={12} style={{ verticalAlign: -2 }}>
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 11v5M12 8h.01" />
-            </Icon>{" "}
-            世界在信息流里一次生成：人物、性格、动态和声音都是同一批；偶遇只是从里面挑人。
-          </div>
         </div>
       </div>
     </div>

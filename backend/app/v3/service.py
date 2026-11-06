@@ -471,7 +471,12 @@ class V3Service:
             "is_mine": author_id == viewer_id,
             "author": {
                 "id": author_id,
-                "nickname": row["author_name"] or self._user_name(author_id),
+                # 单用户 demo：用户动态的作者统一跟随个人资料（与「我」页一致）
+                "nickname": (
+                    (self.db.get_profile() or {}).get("nickname")
+                    or row["author_name"]
+                    or "Traveler"
+                ),
                 "avatar": "",
                 "is_ai": False,
                 "ai_label": "",
@@ -715,7 +720,9 @@ class V3Service:
         birthday: str | None = None,
         city: str | None = None,
         job: str | None = None,
+        gender: str | None = None,
         interests: list[str] | None = None,
+        user_id: str | None = None,
     ) -> dict:
         """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。"""
         try:
@@ -736,6 +743,9 @@ class V3Service:
             fact_profile["city"] = str(city)[:40]
         if job is not None:
             fact_profile["major_or_job"] = str(job)[:60]
+        if gender is not None:
+            value = str(gender).strip().lower()
+            fact_profile["gender"] = value if value in ("male", "female", "other") else ""
         fact["profile"] = fact_profile
         if interests is not None:
             fact["interests"] = self._clean_profile_tags(interests)
@@ -748,7 +758,14 @@ class V3Service:
         if birthday is not None:
             kwargs["birthday"] = str(birthday)[:20]
         try:
-            return self.db.update_profile(**kwargs) or {}
+            profile_row = self.db.update_profile(**kwargs) or {}
+            if nickname:
+                # 单用户 demo：所有「用户动态」共享同一份资料
+                with self.lock, self.conn:
+                    self.conn.execute(
+                        "UPDATE user_posts SET author_name=?", (str(nickname)[:40],)
+                    )
+            return profile_row
         except Exception as exc:  # noqa: BLE001
             log.warning("更新个人资料失败: %s", exc)
             return {}

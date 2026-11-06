@@ -82,7 +82,7 @@ function flagOf(country: string): string {
 }
 
 export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
-  const { reloadAll, showToast } = useApp();
+  const { reloadAll, showToast, profile } = useApp();
   const [items, setItems] = useState<FeedItem[]>([]);
   const [cursor, setCursor] = useState("");
   const [loading, setLoading] = useState(true);
@@ -353,6 +353,8 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
               draft={draft}
               setDraft={setDraft}
               onSubmitComment={(text) => void submitComment(item, text)}
+              myName={profile.name}
+              myAvatar={profile.avatar}
             />
           ))}
 
@@ -406,6 +408,8 @@ export function FeedCard({
   draft,
   setDraft,
   onSubmitComment,
+  myName,
+  myAvatar,
 }: {
   item: FeedItem;
   onOpenPersona: () => void;
@@ -419,9 +423,15 @@ export function FeedCard({
   draft: string;
   setDraft: (v: string) => void;
   onSubmitComment: (text: string) => void;
+  myName?: string;
+  myAvatar?: string;
 }) {
   const isPersona = item.kind === "persona_post";
   const author = item.author;
+  // 用户动态（非 AI 人物）统一跟随「我」的资料，避免名字/头像不一致
+  const isUserPost = item.kind === "user_post";
+  const displayName = isUserPost && myName ? myName : author.nickname;
+  const displayAvatar = isUserPost && myAvatar ? myAvatar : author.avatar;
 
   /* 翻译 / 朗读：信息流是英语内容，翻译走 V2 的 LLM 翻译链路，
      朗读用该人物自己的声线（后端 /persona-posts/{id}/speech 合成并缓存）。 */
@@ -482,22 +492,25 @@ export function FeedCard({
 
   return (
     <article className="w4-moment">
-      <button onClick={onOpenPersona} aria-label={author.nickname} className="v3-avatar-btn">
+      <button onClick={onOpenPersona} aria-label={displayName} className="v3-avatar-btn">
         <Avatar
-                src={personaAvatarSrc(
-                  author.avatar_seed || author.id,
-                  author.avatar_style,
-                  author.avatar_options,
-                  author.avatar,
-                )}
-                name={author.nickname}
+                src={
+                  displayAvatar ||
+                  personaAvatarSrc(
+                    author.avatar_seed || author.id,
+                    author.avatar_style,
+                    author.avatar_options,
+                    author.avatar,
+                  )
+                }
+                name={displayName}
                 size={42}
               />
       </button>
       <div className="w4-moment-body">
         <div className={`w4-moment-name ${item.is_mine ? "is-me" : ""}`}>
           <button className="v3-name-btn" onClick={onOpenPersona}>
-            {author.nickname}
+            {displayName}
           </button>
           {isPersona ? <span className="v3-ai-tag">AI</span> : null}
           {isPersona ? (

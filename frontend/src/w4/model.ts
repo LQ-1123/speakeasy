@@ -134,6 +134,8 @@ export interface Profile {
   targets: string[];
   level: "刚开始" | "能聊几句" | "日常对话" | "比较流利";
   interests: string[];
+  /** 性别：用于生成头像（male/female/other/空） */
+  gender?: "male" | "female" | "";
   weaknesses: string[];
   /** 生日 YYYY-MM-DD（用来匹配年龄相仿的人） */
   birthday?: string;

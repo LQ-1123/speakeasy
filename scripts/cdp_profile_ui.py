@@ -86,6 +86,7 @@ async def main():
                 "[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||'') === '编辑资料')?.click(), 'ok'"
             )
             time.sleep(1.2)
+            await cdp.shot(os.path.join(OUT, "v3-me-edit-top.png"))
             await cdp.eval(
                 """
                 (() => {

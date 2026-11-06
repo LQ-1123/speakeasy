@@ -372,7 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [moments, setMoments] = useState<Moment[]>(() => []);
   const [expressions, setExpressions] = useState<Expression[]>([]);
-  const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], birthday: '' });
+  const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], gender: '', birthday: '' });
   /* 是否已拿到真实后端数据（拿不到就一直用 mock，原型仍可浏览） */
   const [live, setLive] = useState(false);
   /* 提示音：跟踪未读数 / 好友申请数变化 */

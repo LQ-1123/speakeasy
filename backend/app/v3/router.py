@@ -235,6 +235,7 @@ class ProfileIn(BaseModel):
     birthday: str | None = None
     city: str | None = None
     job: str | None = None
+    gender: str | None = None
     interests: list[str] | None = None
 
 
@@ -253,7 +254,9 @@ async def update_profile(
         birthday=body.birthday,
         city=body.city,
         job=body.job,
+        gender=body.gender,
         interests=body.interests,
+        user_id=user_id,
     )
     return {"profile": profile}
 

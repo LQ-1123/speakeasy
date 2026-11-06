@@ -554,6 +554,37 @@ def test_profile_interests_saved_and_rank_discover(world_db):
             assert found["match_tags"], "有共同兴趣时应返回 match_tags"
 
 
+def test_profile_gender_and_user_post_author_consistency(world_db):
+    """性别写入资料；用户动态作者名跟随当前资料（不再出现 Traveler）。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_identity_0001")
+
+        created = client.post(
+            "/api/v3/posts", headers=headers, json={"content": "身份一致性测试"}
+        )
+        assert created.status_code == 200
+
+        res = client.put(
+            "/api/v3/profile",
+            headers=headers,
+            json={"nickname": "淮安", "gender": "female", "interests": ["咖啡"]},
+        )
+        assert res.status_code == 200, res.text
+        fact = res.json()["profile"]["fact_sheet"]
+        assert fact["profile"]["gender"] == "female"
+
+        feed = client.get("/api/v3/feed", headers=headers).json()
+        mine = [it for it in feed["items"] if it["kind"] == "user_post"]
+        assert mine, "应能看到自己发的动态"
+        assert mine[0]["author"]["nickname"] == "淮安"
+
+        # 非法性别值被清空
+        res2 = client.put("/api/v3/profile", headers=headers, json={"gender": "xyz"})
+        assert res2.json()["profile"]["fact_sheet"]["profile"]["gender"] == ""
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

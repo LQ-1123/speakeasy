@@ -25,7 +25,6 @@ import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
-import { AVATAR_STYLES, avatarWithStyle, getAvatarStyle, setAvatarStyle } from "../avatar";
 import { Avatar, Dialog, Icon } from "../ui";
 
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
@@ -161,6 +160,7 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
                 city: patch.city,
                 job: patch.job,
                 interests: patch.interests,
+                gender: patch.gender,
               });
               if (!ok) {
         showToast("资料没保存成功，稍后再试");
@@ -195,6 +195,7 @@ function EditProfileDialog({
     level: "刚开始" | "能聊几句" | "日常对话" | "比较流利";
     birthday: string;
     interests: string[];
+    gender: "male" | "female" | "";
   }) => void;
 }) {
   const { profile } = useApp();
@@ -204,9 +205,9 @@ function EditProfileDialog({
   const [targets, setTargets] = useState<string[]>(profile.targets);
   const [level, setLevel] = useState(profile.level);
   const [birthday, setBirthday] = useState(profile.birthday ?? "");
-  const [styleId, setStyleId] = useState(getAvatarStyle());
   const [interests, setInterests] = useState<string[]>(profile.interests ?? []);
   const [interestInput, setInterestInput] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | "">(profile.gender ?? "");
 
   return (
     <Dialog
@@ -220,7 +221,6 @@ function EditProfileDialog({
           <button
             className="w4-btn is-primary"
             onClick={() => {
-              setAvatarStyle(styleId);
               onSave({
                 name: name.trim() || profile.name,
                 city,
@@ -229,6 +229,7 @@ function EditProfileDialog({
                 level,
                 birthday,
                 interests,
+                gender,
               });
               window.setTimeout(() => window.location.reload(), 350);
             }}
@@ -239,21 +240,25 @@ function EditProfileDialog({
       }
     >
       <div className="w4-field">
-        <div className="w4-field-label">头像风格</div>
-        <div className="w4-avatar-styles">
-          {AVATAR_STYLES.map((st) => (
+        <div className="w4-field-label">性别（用于生成头像）</div>
+        <div className="w4-chips">
+          {(
+            [
+              ["female", "女"],
+              ["male", "男"],
+              ["", "不设置"],
+            ] as const
+          ).map(([value, label]) => (
             <button
-              key={st.id}
-              className={`w4-avatar-style ${styleId === st.id ? "is-on" : ""}`}
-              onClick={() => setStyleId(st.id)}
-              title={st.label}
+              key={value || "none"}
+              className={`w4-chip ${gender === value ? "is-green" : ""}`}
+              style={{ cursor: "pointer" }}
+              onClick={() => setGender(value)}
             >
-              <img src={avatarWithStyle(profile.name || "me", st.id)} alt={st.label} />
-              <span>{st.label}</span>
+              {label}
             </button>
           ))}
         </div>
-        <div className="w4-field-hint">保存后所有头像会换成这个风格</div>
       </div>
       <div className="w4-field">
         <div className="w4-field-label">名字</div>

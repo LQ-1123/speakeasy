@@ -293,7 +293,10 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
   const factProfile = (fact.profile ?? {}) as Record<string, any>;
   const profile: Partial<Profile> = {
     name: String(rawProfile.nickname ?? "我"),
-    avatar: profileAvatar(String(rawProfile.nickname ?? "me")),
+    avatar: profileAvatar(
+      String(rawProfile.nickname ?? "me"),
+      String((fact.profile as Record<string, unknown> | undefined)?.gender ?? ""),
+    ),
     city: String(factProfile.city ?? ""),
     job: String(factProfile.major_or_job ?? ""),
     targets: Array.isArray(rawProfile.target_languages)
@@ -389,7 +392,7 @@ export async function saveProfile(
   nickname: string,
   targets: string[],
   birthday?: string,
-  extra?: { city?: string; job?: string; interests?: string[] },
+  extra?: { city?: string; job?: string; interests?: string[]; gender?: "male" | "female" | "" },
 ): Promise<boolean> {
   const body: Record<string, unknown> = {
     nickname,
@@ -397,6 +400,7 @@ export async function saveProfile(
     city: extra?.city,
     job: extra?.job,
     interests: extra?.interests,
+    gender: extra?.gender,
   };
   if (birthday !== undefined) body.birthday = birthday;
   const r = await getJson(`${BASE}/v3/profile`, {

@@ -229,7 +229,10 @@ export function avatarForName(name: string): string {
 
 /** 用户自己的头像：跟随设置里选择的风格 */
 /** 自己头像：按 seed 生成一套干净、稳定的 Avataaars 部件（不随机出胡子/墨镜） */
-export function friendlyAvataaarsOptions(seed: string): Record<string, unknown> {
+export function friendlyAvataaarsOptions(
+  seed: string,
+  gender?: string,
+): Record<string, unknown> {
   const key = seed || "me";
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) {
@@ -237,7 +240,10 @@ export function friendlyAvataaarsOptions(seed: string): Record<string, unknown> 
     h = Math.imul(h, 16777619) >>> 0;
   }
   const pick = <T,>(arr: readonly T[], salt: number) => arr[(h >>> salt) % arr.length];
-  const tops = ["shortFlat", "shortRound", "shortCurly", "bob", "longButNotTooLong", "straight01", "bun"] as const;
+  const FEMALE_TOPS = ["bob", "longButNotTooLong", "straight01", "straight02", "bun", "curvy"] as const;
+  const MALE_TOPS = ["shortFlat", "shortRound", "shortCurly", "shortWaved", "theCaesar", "sides"] as const;
+  const tops =
+    gender === "female" ? FEMALE_TOPS : gender === "male" ? MALE_TOPS : [...FEMALE_TOPS, ...MALE_TOPS];
   const skin = ["ffdbb4", "edb98a", "f8d25c", "d08b5b", "ae5d29"] as const;
   const hair = ["2c1b18", "4a312c", "724133", "a55728", "b58143", "d6b370"] as const;
   const clothes = ["shirtCrewNeck", "shirtScoopNeck", "collarAndSweater", "hoodie", "blazerAndShirt"] as const;
@@ -261,20 +267,9 @@ export function friendlyAvataaarsOptions(seed: string): Record<string, unknown> 
   };
 }
 
-export function profileAvatar(name: string): string {
+export function profileAvatar(name: string, gender?: string): string {
   const seed = (name || "me").trim() || "me";
-  if (currentStyle === "avataaars") {
-    const rendered = renderAvataaars(seed, friendlyAvataaarsOptions(seed));
-    if (rendered) return rendered;
-  }
-  if (currentStyle === "personas") return diceAvatar(seed);
-  try {
-    const avatar = createAvatar(styleCollection(currentStyle) as never, {
-      seed,
-      size: 128,
-    } as never);
-    return avatar.toDataUri();
-  } catch {
-    return diceAvatar(seed);
-  }
+  const rendered = renderAvataaars(seed, friendlyAvataaarsOptions(seed, gender));
+  if (rendered) return rendered;
+  return diceAvatar(seed);
 }

@@ -86,6 +86,15 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.9 个人资料、性别与头像
+
+- `PUT /api/v3/profile` 支持 `nickname / target_languages / birthday / city / job / **gender** / interests`；
+  `gender ∈ {male, female, other, ""}`，存入 `fact_sheet.profile.gender`。
+- 头像不再由用户选风格：客户端按「昵称 + 性别」用 Avataaars 确定性生成（女性长发池、男性短发池），
+  原「头像风格」选择器已移除。
+- 用户动态（`user_posts`）的作者名/头像统一跟随当前个人资料：改昵称会同步历史动态，
+  前端渲染 user_post 时使用「我」的昵称与头像，避免「发帖人是 Traveler、资料里是另一个人」。
+
 ### 3.8 个人兴趣与偶遇匹配
 
 - `PUT /api/v3/profile`：更新昵称 / 目标语言 / 生日 / 城市 / 职业 / **兴趣标签**；

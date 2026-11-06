@@ -344,26 +344,6 @@ function VoiceSection({
         </>
       ) : null}
 
-      <div className="w4-settings-row">
-        <div>
-          <div className="w4-settings-row-title">我的音色克隆</div>
-          <div className="w4-settings-row-desc">
-            {settings.tts.cloned
-              ? "好友会用你的声音说外语。可以随时关掉。"
-              : "上传 30 秒录音，让好友用你的声音说外语。"}
-          </div>
-        </div>
-        <button
-          className="w4-btn"
-          onClick={() => {
-            update({ tts: { ...settings.tts, cloned: !settings.tts.cloned } });
-            toast(settings.tts.cloned ? "已关闭音色克隆" : "已开启", "success");
-          }}
-        >
-          {settings.tts.cloned ? "已开启" : "去设置"}
-        </button>
-      </div>
-
       <div className="w4-field" style={{ marginTop: 18 }}>
         <div className="w4-field-label">试听</div>
         <div className="w4-try-card">

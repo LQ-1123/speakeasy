@@ -77,7 +77,6 @@ export interface Settings {
     emotion: boolean;
     keyMasked: string;
     hasKey: boolean;
-    cloned: boolean;
   };
   notify: { messages: boolean; practice: boolean };
 }
@@ -199,7 +198,6 @@ function mapLiveSettings(
       emotion: Boolean(ttsCfg.fish_reference_id || ttsCfg.emotion),
       keyMasked: String(ttsCfg.api_key_masked ?? ttsCfg.fish_api_key_masked ?? ttsCfg.fish_api_key ?? ""),
       hasKey: Boolean(ttsCfg.api_key_set ?? ttsCfg.fish_api_key_set ?? ttsCfg.fish_api_key),
-      cloned: Boolean(ttsCfg.fish_reference_id),
     },
   };
 }
@@ -407,7 +405,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       emotion: true,
       keyMasked: "fa-••••••••2c91",
       hasKey: true,
-      cloned: false,
     },
     notify: { messages: true, practice: false },
   });

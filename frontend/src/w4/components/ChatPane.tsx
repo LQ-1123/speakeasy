@@ -1541,7 +1541,7 @@ export function ChatPane({
                       {friend.voiceLabel}
                     </span>
                     <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>
-                      {settings.tts.cloned ? "使用你的音色克隆" : "真人声线 · 可换"}
+                      "真人声线 · 可换"
                     </span>
                   </span>
                   <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>换</span>

@@ -200,9 +200,42 @@ Output JSON only:
 """
 
 
-async def _llm_persona(llm: Any, index: int, day: str) -> dict | None:
+LEVEL_GUIDE = {
+    "刚开始": "absolute beginner (A1): very short simple sentences, common words only",
+    "能聊几句": "elementary (A2-B1): short sentences, everyday vocabulary",
+    "日常对话": "intermediate (B1-B2): natural daily conversation, some idioms",
+    "比较流利": "advanced (C1): richer vocabulary, nuance and humour allowed",
+}
+
+
+def _user_lang_prefs(db: Any) -> tuple[list[str], dict[str, str]]:
+    """读取用户在练语言与各自水平。"""
+    try:
+        profile = db.get_profile() or {}
+        targets = [str(x) for x in (profile.get("target_languages") or []) if str(x).strip()]
+        fact = profile.get("fact_sheet") or {}
+        if isinstance(fact, str):
+            import json as _json  # noqa: PLC0415
+
+            fact = _json.loads(fact)
+        levels = ((fact.get("language_profile") or {}).get("levels") or {}) if isinstance(fact, dict) else {}
+        return targets, {str(k): str(v) for k, v in levels.items()}
+    except Exception:  # noqa: BLE001
+        return [], {}
+
+
+async def _llm_persona(
+    llm: Any, index: int, day: str, *, language: str = "", level: str = ""
+) -> dict | None:
+    """生成一个人物：语言必须是在练语言，文案难度跟随该语言的水平。"""
     if llm is None or getattr(llm, "uses_mock", False):
         return None
+    guide = LEVEL_GUIDE.get(level, LEVEL_GUIDE["能聊几句"]) if level else ""
+    parts = [_PROMPT, f"\n\nCreate persona #{index + 1} for {day}."]
+    if language:
+        parts.append(f"Write ALL text (bio, personality, posts) in language code '{language}'.")
+    if level:
+        parts.append(f"Reader level for {language}: {guide}.")
     try:
         from app.v2.llm_json import complete_json_safe  # noqa: PLC0415
 
@@ -210,7 +243,7 @@ async def _llm_persona(llm: Any, index: int, day: str) -> dict | None:
             llm,
             [
                 # 注意：这个 prompt 用 system 角色时 DeepSeek 会返回空串，必须放 user 消息
-                {"role": "user", "content": _PROMPT + f"\n\nCreate persona #{index + 1} for {day}."},
+                {"role": "user", "content": " ".join(parts)},
             ],
             schema_hint='{"nickname","gender","age","country","city","language","occupation","posts":[]}',
             fallback=lambda: {},
@@ -221,6 +254,8 @@ async def _llm_persona(llm: Any, index: int, day: str) -> dict | None:
             return None
         if not isinstance(data.get("posts"), list) or not data["posts"]:
             return None
+        if language:
+            data["language"] = language
         return data
     except Exception as exc:  # noqa: BLE001
         log.debug("每日人物生成失败 #%d: %s", index, exc)
@@ -323,10 +358,16 @@ async def generate_daily(
     created_posts = 0
     source = "llm"
     persona_rows: list[dict] = []
+    targets, levels = _user_lang_prefs(db)
     for index in range(DAILY_PERSONAS):
-        persona = await _llm_persona(llm, index, day)
+        lang = targets[index % len(targets)] if targets else "en"
+        level = levels.get(lang, "能聊几句")
+        persona = await _llm_persona(llm, index, day, language=lang, level=level)
+        if persona is not None:
+            persona["language"] = lang
         if persona is None:
             persona = _fallback_persona(index, day)
+            persona["language"] = lang
             source = "template" if index == 0 else source
         pid, posts = _insert_persona(db, persona, day=day, expires_at=expires)
         created_personas += 1

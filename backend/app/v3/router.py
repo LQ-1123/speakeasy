@@ -237,6 +237,9 @@ class ProfileIn(BaseModel):
     job: str | None = None
     gender: str | None = None
     interests: list[str] | None = None
+    native_language: str | None = None
+    level: str | None = None
+    levels: dict[str, str] | None = None
 
 
 @router.put("/profile")
@@ -256,6 +259,9 @@ async def update_profile(
         job=body.job,
         gender=body.gender,
         interests=body.interests,
+        native_language=body.native_language,
+        level=body.level,
+        levels=body.levels,
         user_id=user_id,
     )
     return {"profile": profile}

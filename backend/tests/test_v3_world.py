@@ -585,6 +585,60 @@ def test_profile_gender_and_user_post_author_consistency(world_db):
         assert res2.json()["profile"]["fact_sheet"]["profile"]["gender"] == ""
 
 
+def test_profile_language_levels_and_feed_filter(world_db):
+    """资料保存 native/level/levels；feed 只返回在练语言的人物动态；每日生成语言跟随。"""
+    import asyncio
+
+    from app.v3.daily_world import generate_daily
+
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_lang_0001")
+
+        res = client.put(
+            "/api/v3/profile",
+            headers=headers,
+            json={
+                "nickname": "淮安",
+                "gender": "female",
+                "native_language": "zh",
+                "target_languages": ["en", "de"],
+                "level": "能聊几句",
+                "levels": {"en": "能聊几句", "de": "刚开始"},
+                "interests": ["咖啡"],
+            },
+        )
+        assert res.status_code == 200, res.text
+        profile = res.json()["profile"]
+        assert profile["native_language"] == "zh"
+        fact = profile["fact_sheet"]
+        assert fact["profile"]["gender"] == "female"
+        assert fact["profile"]["level"] == "能聊几句"
+        assert fact["language_profile"]["levels"] == {"en": "能聊几句", "de": "刚开始"}
+
+        # feed：人物动态只保留 en/de
+        feed = client.get("/api/v3/feed?limit=40", headers=headers).json()
+        persona_langs = {
+            it["author"]["language"]
+            for it in feed["items"]
+            if it["kind"] == "persona_post"
+        }
+        assert persona_langs <= {"en", "de"}, persona_langs
+
+        # 每日生成：语言按在练语言轮换，水平写进 prompt（mock llm 走模板兜底）
+        result = asyncio.run(
+            generate_daily(db, None, day="2026-11-07", force=True, media_dir=str(tmp_path / "m"))
+        )
+        assert result["skipped"] is False
+        rows = db.conn.execute(
+            "SELECT language FROM personas WHERE lifecycle='guest'"
+        ).fetchall()
+        langs = {str(r["language"]) for r in rows}
+        assert langs <= {"en", "de"}, langs
+        assert "de" in langs
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

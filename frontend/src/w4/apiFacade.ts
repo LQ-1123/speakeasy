@@ -64,7 +64,15 @@ export async function saveProfile(
   nickname: string,
   targets: string[],
   birthday?: string,
-  extra?: { city?: string; job?: string; interests?: string[]; gender?: "male" | "female" | "" },
+  extra?: {
+    city?: string;
+    job?: string;
+    interests?: string[];
+    gender?: "male" | "female" | "";
+    nativeLanguage?: string;
+    level?: string;
+    levels?: Record<string, string>;
+  },
 ) {
   if (isLocalMode()) return (await local()).localSaveProfile(nickname, targets, birthday);
   return server.saveProfile(nickname, targets, birthday, extra);

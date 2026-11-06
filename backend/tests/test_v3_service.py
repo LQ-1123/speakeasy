@@ -106,6 +106,16 @@ def _event_count(db: DB, user_id: str) -> int:
 def test_feed_cursor_pagination_no_duplicates_no_gaps(tmp_path):
     db, service = make_service(tmp_path)
     try:
+        # feed 现在只返回「在练语言」的人物动态：本用例覆盖全部语言，保持 36 条
+        langs = [
+            str(r[0])
+            for r in db.conn.execute(
+                "SELECT DISTINCT language FROM persona_posts"
+            ).fetchall()
+            if r[0]
+        ]
+        db.update_profile(target_languages=langs)
+
         public_post = service.create_user_post("u_feed", "my public update")
         private_post = service.create_user_post(
             "u_feed", "my private diary", visibility="private"

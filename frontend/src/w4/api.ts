@@ -303,6 +303,17 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
       ? (rawProfile.target_languages as string[])
       : ["en"],
     interests: Array.isArray(fact.interests) ? (fact.interests as string[]) : undefined,
+    gender: String((fact.profile as Record<string, unknown> | undefined)?.gender ?? "") as
+      | "male"
+      | "female"
+      | "",
+    nativeLanguage: String(rawProfile.native_language ?? "zh"),
+    levels:
+      ((fact.language_profile as Record<string, unknown> | undefined)?.levels as Record<
+        string,
+        string
+      >) ?? {},
+    level: String((fact.profile as Record<string, unknown> | undefined)?.level ?? "能聊几句"),
     birthday: String(rawProfile.birthday ?? ""),
   } as Partial<Profile>;
 
@@ -392,7 +403,15 @@ export async function saveProfile(
   nickname: string,
   targets: string[],
   birthday?: string,
-  extra?: { city?: string; job?: string; interests?: string[]; gender?: "male" | "female" | "" },
+  extra?: {
+    city?: string;
+    job?: string;
+    interests?: string[];
+    gender?: "male" | "female" | "";
+    nativeLanguage?: string;
+    level?: string;
+    levels?: Record<string, string>;
+  },
 ): Promise<boolean> {
   const body: Record<string, unknown> = {
     nickname,
@@ -401,6 +420,9 @@ export async function saveProfile(
     job: extra?.job,
     interests: extra?.interests,
     gender: extra?.gender,
+    native_language: extra?.nativeLanguage,
+    level: extra?.level,
+    levels: extra?.levels,
   };
   if (birthday !== undefined) body.birthday = birthday;
   const r = await getJson(`${API_ORIGIN}/api/v3/profile`, {

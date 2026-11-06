@@ -86,6 +86,17 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.11 母语、在练语言与分语言水平
+
+- `PUT /api/v3/profile` 新增 `native_language`（母语，默认 `zh`）、`level`（兼容字段）、
+  `levels`（`{ "en": "能聊几句", "de": "刚开始" }`，按在练语言分别设置）。
+- 母语写 `user_profile.native_language`；各语言水平写 `fact_sheet.language_profile.levels`，
+  同时把第一门语言的水平写入 `fact_sheet.profile.level`（用于资料卡展示/兼容旧逻辑）。
+- **信息流按在练语言过滤**：`GET /api/v3/feed` 只返回 `language ∈ 在练语言` 的人物动态
+  （用户自己的动态不受限；在练语言为空时不过滤）。
+- **每日世界按在练语言生成**：每日人物语言按 `target_languages` 轮换（有 en+de 就交替生成），
+  并把该语言的水平写进生成 prompt：刚开始 → 短句常用词（A1），比较流利 → 可含习语与幽默（C1）。
+
 ### 3.10 朗读互斥（同一时刻只播一个）
 
 朗读/试听音频在前端由 `audioBus` 统一管理：拦截 `HTMLMediaElement.play`，播放前暂停上一段；

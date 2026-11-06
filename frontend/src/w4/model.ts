@@ -136,6 +136,10 @@ export interface Profile {
   interests: string[];
   /** 性别：用于生成头像（male/female/other/空） */
   gender?: "male" | "female" | "";
+  /** 母语（语言代码，如 zh/en） */
+  nativeLanguage?: string;
+  /** 各在练语言的当前水平：{ en: "能聊几句", de: "刚开始" } */
+  levels?: Record<string, string>;
   weaknesses: string[];
   /** 生日 YYYY-MM-DD（用来匹配年龄相仿的人） */
   birthday?: string;

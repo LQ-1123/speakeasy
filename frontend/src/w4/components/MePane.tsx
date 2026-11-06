@@ -27,6 +27,12 @@ import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
 import { Avatar, Dialog, Icon } from "../ui";
 
+/** 母语候选：中文 + 现有语言（LANGUAGES 只有在练语言，没有 zh） */
+const NATIVE_LANGUAGES: Array<{ code: string; label: string; flag: string }> = [
+  { code: "zh", label: "中文", flag: "🇨🇳" },
+  ...LANGUAGES,
+];
+
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
   const { profile, friends, expressions, updateProfile, settings, showToast } = useApp();
   const [editOpen, setEditOpen] = useState(false);
@@ -158,6 +164,9 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
               job: patch.job,
               interests: patch.interests,
               gender: patch.gender,
+              nativeLanguage: patch.nativeLanguage,
+              level: patch.levels[patch.targets[0]] || "能聊几句",
+              levels: patch.levels,
             });
             if (!ok) {
               showToast("资料没保存成功，请稍后再试");
@@ -189,6 +198,8 @@ function EditProfileDialog({
     birthday: string;
     interests: string[];
     gender: "male" | "female" | "";
+    nativeLanguage: string;
+    levels: Record<string, string>;
   }) => Promise<boolean>;
 }) {
   const { profile } = useApp();
@@ -201,6 +212,8 @@ function EditProfileDialog({
   const [interests, setInterests] = useState<string[]>(profile.interests ?? []);
   const [interestInput, setInterestInput] = useState("");
   const [gender, setGender] = useState<"male" | "female" | "">(profile.gender ?? "");
+  const [nativeLanguage, setNativeLanguage] = useState(profile.nativeLanguage ?? "zh");
+  const [levels, setLevels] = useState<Record<string, string>>(profile.levels ?? {});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -229,6 +242,8 @@ function EditProfileDialog({
                   birthday,
                   interests,
                   gender,
+                  nativeLanguage,
+                  levels,
                 });
                 if (!ok) setSaveError("保存失败，请重试");
               } catch {
@@ -346,6 +361,21 @@ function EditProfileDialog({
         <div className="w4-field-hint">填了之后，偶遇和自动匹配会优先找年龄相仿的人</div>
       </div>
       <div className="w4-field">
+        <div className="w4-field-label">母语（用于解释/翻译）</div>
+        <div className="w4-chips">
+          {NATIVE_LANGUAGES.map((l) => (
+            <button
+              key={`native-${l.code}`}
+              className={`w4-chip ${nativeLanguage === l.code ? "is-green" : ""}`}
+              style={{ cursor: "pointer", padding: "4px 9px", fontSize: 12 }}
+              onClick={() => setNativeLanguage(l.code)}
+            >
+              {l.flag} {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="w4-field">
         <div className="w4-field-label">在练</div>
         <div className="w4-chips">
           {LANGUAGES.map((l) => {
@@ -366,22 +396,32 @@ function EditProfileDialog({
         </div>
         <div className="w4-field-hint">可以多选。偶遇和好友回复会优先用这些语言。</div>
       </div>
-      <div className="w4-field">
-        <div className="w4-field-label">现在的水平</div>
-        <div className="w4-chips">
-          {(["刚开始", "能聊几句", "日常对话", "比较流利"] as const).map((lv) => (
-            <button
-              key={lv}
-              className={`w4-chip ${level === lv ? "is-green" : ""}`}
-              style={{ cursor: "pointer", padding: "4px 9px", fontSize: 12 }}
-              onClick={() => setLevel(lv)}
-            >
-              {lv}
-            </button>
-          ))}
-        </div>
-        <div className="w4-field-hint">好友会按这个调整语速和用词，不会一上来就说太难的话。</div>
-      </div>
+      {targets.map((code) => {
+        const lang = LANGUAGES.find((x) => x.code === code);
+        const value = levels[code] ?? "能聊几句";
+        return (
+          <div className="w4-field" key={`level-${code}`}>
+            <div className="w4-field-label">
+              {lang ? `${lang.flag} ${lang.label}` : code} 的水平
+            </div>
+            <div className="w4-chips">
+              {(["刚开始", "能聊几句", "日常对话", "比较流利"] as const).map((lv) => (
+                <button
+                  key={lv}
+                  className={`w4-chip ${value === lv ? "is-green" : ""}`}
+                  style={{ cursor: "pointer", padding: "4px 9px", fontSize: 12 }}
+                  onClick={() => setLevels((m) => ({ ...m, [code]: lv }))}
+                >
+                  {lv}
+                </button>
+              ))}
+            </div>
+            <div className="w4-field-hint">
+              该语言写多难由这个水平决定（越基础，句子越短、词越常用）。
+            </div>
+          </div>
+        );
+      })}
       {saveError ? (
         <div className="w4-field-hint" style={{ color: "#c0392b" }}>
           {saveError}

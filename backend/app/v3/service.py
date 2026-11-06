@@ -574,12 +574,22 @@ class V3Service:
         from app.v3.daily_world import iso as _iso, now_local as _now_local  # noqa: PLC0415
 
         now_iso = _iso(_now_local())
+        # 只推荐「在练语言」的人物动态（用户自己的动态不受限）
+        try:
+            profile = self.db.get_profile() or {}
+            targets = [str(x) for x in (profile.get("target_languages") or []) if str(x).strip()]
+        except Exception:  # noqa: BLE001
+            targets = []
+        lang_clause = ""
+        if targets:
+            lang_clause = " AND language IN (" + ",".join("?" * len(targets)) + ")"
+
         p_sql = (
             "SELECT * FROM persona_posts WHERE visibility='public'"
-            " AND (expires_at='' OR expires_at>?)"
+            " AND (expires_at='' OR expires_at>?)" + lang_clause
         )
         u_sql = ("SELECT * FROM user_posts WHERE (visibility='public' OR user_id=?)")
-        p_params: list[Any] = [now_iso]
+        p_params: list[Any] = [now_iso, *targets]
         u_params: list[Any] = [uid]
         if cursor:
             ts, _, cid = str(cursor).partition("|")
@@ -722,6 +732,9 @@ class V3Service:
         job: str | None = None,
         gender: str | None = None,
         interests: list[str] | None = None,
+        native_language: str | None = None,
+        level: str | None = None,
+        levels: dict[str, str] | None = None,
         user_id: str | None = None,
     ) -> dict:
         """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。"""
@@ -747,8 +760,19 @@ class V3Service:
             value = str(gender).strip().lower()
             fact_profile["gender"] = value if value in ("male", "female", "other") else ""
         fact["profile"] = fact_profile
+        if level is not None:
+            fact_profile["level"] = str(level)[:20]
         if interests is not None:
             fact["interests"] = self._clean_profile_tags(interests)
+        if levels is not None:
+            lang_profile = dict(fact.get("language_profile") or {})
+            cleaned_levels = {
+                str(k)[:8]: str(v)[:20]
+                for k, v in (levels or {}).items()
+                if str(k).strip() and str(v).strip()
+            }
+            lang_profile["levels"] = cleaned_levels
+            fact["language_profile"] = lang_profile
 
         kwargs: dict[str, Any] = {"fact_sheet": fact}
         if nickname:
@@ -757,6 +781,8 @@ class V3Service:
             kwargs["target_languages"] = list(targets)[:3]
         if birthday is not None:
             kwargs["birthday"] = str(birthday)[:20]
+        if native_language:
+            kwargs["native_language"] = str(native_language)[:12]
         try:
             profile_row = self.db.update_profile(**kwargs) or {}
             if nickname:

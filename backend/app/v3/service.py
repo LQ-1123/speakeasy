@@ -642,8 +642,11 @@ class V3Service:
             mine = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM user_posts WHERE user_id=?", (uid,)
             ).fetchone()["n"]
+            # 好友数同时兼容 V2 老好友（owner='local'）与 V3 新建好友
             friends = self.conn.execute(
-                "SELECT COUNT(*) AS n FROM friendships WHERE user_id=? AND status='accepted'", (uid,)
+                "SELECT COUNT(*) AS n FROM friends"
+                " WHERE (owner_user_id=? OR owner_user_id='local') AND status='active'",
+                (uid,),
             ).fetchone()["n"]
             events = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM social_events WHERE user_id=? AND is_read=0 AND status<>'declined'",

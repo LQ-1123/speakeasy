@@ -29,7 +29,9 @@ log "1/8 备份数据库与配置 → $BACKUP"
 mkdir -p "$BACKUP"
 if [[ "$DRY_RUN" == "0" ]]; then
   cp -a "$ROOT/data/speakeasy_v2.db" "$BACKUP/" 2>/dev/null || true
-  [[ -f "$ROOT/data/speakeasy_v2.db-wal" ]] && cp -a "$ROOT/data/speakeasy_v2.db-wal" "$BACKUP/" || true
+  for suffix in -wal -shm; do
+    [[ -f "$ROOT/data/speakeasy_v2.db$suffix" ]] && cp -a "$ROOT/data/speakeasy_v2.db$suffix" "$BACKUP/" || true
+  done
   for f in llm_config.json stt_config.json tts_config.json custom.json; do
     [[ -f "$ROOT/data/$f" ]] && cp -a "$ROOT/data/$f" "$BACKUP/" || true
   done
@@ -76,7 +78,9 @@ rollback() {
   log "!! 健康检查失败，开始回滚"
   if [[ -d "$BACKUP" ]]; then
     cp -a "$BACKUP/speakeasy_v2.db" "$ROOT/data/" 2>/dev/null || true
-    [[ -f "$BACKUP/speakeasy_v2.db-wal" ]] && cp -a "$BACKUP/speakeasy_v2.db-wal" "$ROOT/data/" || true
+    for suffix in -wal -shm; do
+      [[ -f "$BACKUP/speakeasy_v2.db$suffix" ]] && cp -a "$BACKUP/speakeasy_v2.db$suffix" "$ROOT/data/" || true
+    done
   fi
   systemctl restart speakeasy || true
   die "已回滚到部署前状态，请查看 journalctl -u speakeasy -n 200"
@@ -87,12 +91,13 @@ log "5/8 重启服务"
 sleep 6
 
 log "6/8 健康检查"
-for i in $(seq 1 12); do
+# 首次启动要生成头像/每日世界，最多等 120s（24 次 × 5s）
+for i in $(seq 1 24); do
   if curl -fsS "http://127.0.0.1:8000/api/v3/health" >/tmp/v3-health.json 2>/dev/null; then
     echo "   健康检查通过：$(head -c 160 /tmp/v3-health.json)…"
     break
   fi
-  [[ "$i" == "12" ]] && rollback
+  [[ "$i" == "24" ]] && rollback
   sleep 5
 done
 

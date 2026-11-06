@@ -107,6 +107,20 @@
   tr:last-child td { border-bottom: 0; }
   td b { font-weight: 650; }
 
+  .dim-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  .dim-row {
+    display: grid; grid-template-columns: 96px repeat(6, minmax(0, 1fr));
+    gap: 8px; align-items: center;
+    background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px;
+  }
+  .dim-label { font-size: 12px; font-weight: 650; color: var(--ink-2); }
+  .dim-head {
+    display: grid; grid-template-columns: 96px repeat(6, minmax(0, 1fr));
+    gap: 8px; padding: 0 12px; font-size: 10.5px; color: var(--ink-3); text-align: center;
+  }
+  .dim-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .dim-cell img { width: 56px; height: 56px; border-radius: 12px; display: block; background: #f2f5f2; }
+  .dim-cell span { font-size: 9.5px; color: var(--ink-3); }
   .note {
     background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--green);
     border-radius: 12px; padding: 14px 16px; margin-top: 14px; color: var(--ink-2); font-size: 13px;
@@ -165,7 +179,20 @@
 
   <section>
     <div class="sec-head">
-      <h2>四、横向对比</h2>
+      <h2>四、人种 × 性别 × 年龄</h2>
+      <span class="sec-sub">本项目 SeedFace：五个地域 × 两种性别 × 三个年龄段（22 / 29 / 40 岁）</span>
+    </div>
+    <div id="dimGrid" class="dim-grid"></div>
+    <div class="note" style="margin-top:12px">
+      说明：插画只能表达「可识别的视觉线索」——<b>人种</b>靠肤色与发色/发质，<b>性别</b>靠发型、胡须、耳环、唇色，
+      <b>年龄</b>靠灰白发、眼角/法令纹、眼镜概率与发型偏好。DiceBear 与 Avataaars <b>没有年龄维度</b>，
+      只能通过发色/配饰间接暗示；要做到接近真人的区分，仍需 AI 人像生成。
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>五、横向对比</h2>
       <span class="sec-sub">按「精致度 / 离线 / 授权 / 适用场景」选型</span>
     </div>
     <table>
@@ -187,7 +214,7 @@
 
   <section>
     <div class="sec-head">
-      <h2>五、本项目现状与接入方式</h2>
+      <h2>六、本项目现状与接入方式</h2>
       <span class="sec-sub">SpeakEasy V3 已把 Persona 头像改为服务端种子生成</span>
     </div>
     <div class="note">
@@ -343,10 +370,52 @@ GET /api/v3/avatar/{seed}.svg?g=female&r=east_asian
     });
   }
 
+  var DIM_REGIONS = [
+    ["east_asian", "东亚"],
+    ["south_asian", "南亚"],
+    ["latino", "拉美"],
+    ["black", "非洲裔"],
+    ["white", "白人"],
+  ];
+  var DIM_COLUMNS = [
+    ["female", 22, "女 22"],
+    ["female", 29, "女 29"],
+    ["female", 40, "女 40"],
+    ["male", 22, "男 22"],
+    ["male", 29, "男 29"],
+    ["male", 40, "男 40"],
+  ];
+
+  function renderDimensions() {
+    var box = document.getElementById("dimGrid");
+    if (!box) return;
+    box.innerHTML = "";
+    var head = el("div", "dim-head");
+    head.appendChild(el("div", "dim-label", "地域 / 性别·年龄"));
+    DIM_COLUMNS.forEach(function (c) { head.appendChild(el("div", "", c[2])); });
+    box.appendChild(head);
+    DIM_REGIONS.forEach(function (row) {
+      var line = el("div", "dim-row");
+      line.appendChild(el("div", "dim-label", row[1]));
+      DIM_COLUMNS.forEach(function (c) {
+        var cell = el("div", "dim-cell");
+        var seed = "demo-" + row[0] + "-" + c[0] + "-" + c[1];
+        var img = svgImg(safe(function () {
+          return window.AvatarLab.customSvg("seed-face", seed, { region: row[0], gender: c[0], age: c[1] });
+        }), row[1] + c[2]);
+        cell.appendChild(img);
+        cell.appendChild(el("span", "", c[2]));
+        line.appendChild(cell);
+      });
+      box.appendChild(line);
+    });
+  }
+
   function renderAll() {
     renderDice();
     renderSameSeed();
     renderCustom();
+    renderDimensions();
   }
 
   document.getElementById("apply").addEventListener("click", function () {

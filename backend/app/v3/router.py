@@ -210,7 +210,7 @@ async def get_persona_posts(
 # 种子头像（确定性 SVG，无图片资源）
 # --------------------------------------------------------------------------- #
 @router.get("/avatar/{seed}.svg")
-async def avatar(seed: str, g: str = "", r: str = ""):
+async def avatar(seed: str, g: str = "", r: str = "", a: int | None = None):
     """按种子生成插画头像。
 
     - 同一 seed 永远返回同一张脸（sha256 派生五官/发型/配色）
@@ -219,7 +219,7 @@ async def avatar(seed: str, g: str = "", r: str = ""):
     """
     from app.v3.avatar import avatar_svg  # noqa: PLC0415
 
-    svg = await asyncio.to_thread(avatar_svg, seed, gender=g, region=r)
+    svg = await asyncio.to_thread(avatar_svg, seed, gender=g, region=r, age=a)
     return Response(
         content=svg,
         media_type="image/svg+xml",

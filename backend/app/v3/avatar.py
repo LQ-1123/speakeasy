@@ -2,13 +2,18 @@
 
 设计
 ----
-- 输入一个 seed（这里就是 Persona 的 id）→ 输出固定的一张插画头像；
-  同一个 seed 永远得到同一张脸，跨设备/跨重启一致。
-- 全部用 sha256(seed) 派生的整数决定五官/发型/配色，因此**可复现、无状态**。
-- 输出 SVG（约 2-4 KB），接口带 immutable 缓存，客户端 `<img>` 直接用。
+- 输入 seed（Persona id）+ 可选属性（性别 gender / 地域 region / 年龄 age）
+  → 输出固定的一张插画头像；同样的输入永远得到同一张脸。
+- 全部用 sha256(派生串) 的整数决定五官/发型/配色，因此可复现、无状态。
+- 输出 SVG（约 2–5 KB），接口带 immutable 缓存，客户端 `<img>` 直接用。
 
-风格接近 DiceBear personas：扁平插画、柔和背景、半身像，
-和 V2 好友头像（前端 DiceBear）保持同一种「插画而非真人照片」的语感。
+三个可区分维度（受插画风格限制，只能做「可识别的视觉线索」）
+------------------------------------------------------------
+1. **人种/地域**：肤色板 + 发色/发质（东亚直发、非洲卷发、南亚黑发、拉美深棕、白人棕/金/红发）
+2. **性别**：发型集合、胡须概率、耳环、唇色
+3. **年龄**：青年/成年/中年三档 → 灰白发概率、皱纹、眼镜概率、发型偏好
+
+注意：插画只能表达「刻板但友好的视觉线索」，不代表真实人群；AI 人像生成才能做到接近真人的区分。
 """
 
 from __future__ import annotations
@@ -17,15 +22,27 @@ import hashlib
 
 #: 地域 → 肤色（与前端 avatar.ts 的 SKIN_BY_REGION 对齐）
 SKIN_BY_REGION: dict[str, tuple[str, ...]] = {
-    "east_asian": ("f5d0c5", "f0c8b4", "e8b89a"),
-    "south_asian": ("c68642", "a8683a", "8d5524"),
-    "latino": ("e0ac69", "c68642", "d4956a"),
-    "black": ("8d5524", "6b4226", "a26a42"),
-    "white": ("ffdbac", "f1c27d", "e0ac69"),
+    "east_asian": ("f5d0c5", "f0c8b4", "e8b89a", "f7d9c4"),
+    "south_asian": ("c68642", "a8683a", "8d5524", "b5713f"),
+    "latino": ("e0ac69", "c68642", "d4956a", "b97a4a"),
+    "black": ("8d5524", "6b4226", "a26a42", "7a4a2b"),
+    "white": ("ffdbac", "f1c27d", "e0ac69", "f7d6b5"),
 }
 _ALL_SKIN = tuple(v for group in SKIN_BY_REGION.values() for v in group)
 
-HAIR_COLORS = ("2c1b18", "3a2418", "4a312c", "5a3a24", "724133", "8a4b2a", "a55728", "b58143")
+#: 地域 → 发色（东亚/南亚/非洲偏黑，白人含棕/金/红）
+HAIR_BY_REGION: dict[str, tuple[str, ...]] = {
+    "east_asian": ("1c1410", "2c1b18", "3a2418", "241a14"),
+    "south_asian": ("1c1410", "2c1b18", "3a2418"),
+    "latino": ("1c1410", "2c1b18", "3a2418", "4a312c"),
+    "black": ("1c1410", "2c1b18", "33231b"),
+    "white": ("2c1b18", "4a312c", "724133", "a55728", "b58143", "8a3b1f"),
+}
+_ALL_HAIR = tuple(dict.fromkeys(v for group in HAIR_BY_REGION.values() for v in group))
+
+#: 灰白发（年龄线索用）
+GRAY_HAIR = ("9b9b9b", "b9b9b9", "d8d8d8", "cfcfcf")
+
 SHIRT_COLORS = (
     "3f6f57", "2f5d8a", "8a5a2f", "7a3f4f", "4b4b6a", "2f7a6a",
     "6a4a8a", "8a6a2f", "3a6a8a", "7a4a3a",
@@ -37,8 +54,21 @@ BACKGROUNDS = (
 )
 
 
+#: 年龄 → 档位（<25 青年 / 25-32 成年 / >=33 中年）
+def age_band(age: int | str | None) -> str:
+    try:
+        value = int(age)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "adult"
+    if value < 25:
+        return "young"
+    if value < 33:
+        return "adult"
+    return "mature"
+
+
 def _stream(seed: str) -> list[int]:
-    """把 seed 摊成稳定的伪随机整数流。"""
+    """把输入摊成稳定的伪随机整数流。"""
     digest = hashlib.sha256(("speakeasy-avatar:" + (seed or "anonymous")).encode("utf-8")).digest()
     out: list[int] = []
     for i in range(0, len(digest), 2):
@@ -103,6 +133,12 @@ def _hair(style: str, color: str, gender: str) -> str:
             f'<circle cx="88" cy="44" r="12"/><circle cx="30" cy="58" r="9"/>'
             f'<circle cx="98" cy="58" r="9"/></g>'
         )
+    if style == "afro":
+        return (
+            f'<g fill="{c}"><circle cx="64" cy="30" r="16"/><circle cx="42" cy="38" r="13"/>'
+            f'<circle cx="86" cy="38" r="13"/><circle cx="30" cy="52" r="10"/>'
+            f'<circle cx="98" cy="52" r="10"/></g>'
+        )
     # ponytail
     return (
         f'<path d="M32 58c0-18 14-31 32-31s32 13 32 31c0 4-3 6-6 3-5-10-15-16-26-16'
@@ -134,20 +170,35 @@ def _eyes(style: str) -> str:
     )
 
 
-def _mouth(style: str) -> str:
+def _mouth(style: str, lip_color: str = "#a4544b") -> str:
     if style == "bigSmile":
-        return (
-            '<path d="M54 90q10 10 20 0" stroke="#a4544b" stroke-width="3" fill="none" stroke-linecap="round"/>'
-        )
+        return f'<path d="M54 90q10 10 20 0" stroke="{lip_color}" stroke-width="3" fill="none" stroke-linecap="round"/>'
     if style == "smirk":
-        return (
-            '<path d="M55 91q9 6 19-2" stroke="#a4544b" stroke-width="2.8" fill="none" stroke-linecap="round"/>'
-        )
+        return f'<path d="M55 91q9 6 19-2" stroke="{lip_color}" stroke-width="2.8" fill="none" stroke-linecap="round"/>'
     if style == "neutral":
-        return '<path d="M56 91h16" stroke="#a4544b" stroke-width="2.6" stroke-linecap="round"/>'
-    return (
-        '<path d="M55 90q9 8 18 0" stroke="#a4544b" stroke-width="2.8" fill="none" stroke-linecap="round"/>'
-    )
+        return f'<path d="M56 91h16" stroke="{lip_color}" stroke-width="2.6" stroke-linecap="round"/>'
+    return f'<path d="M55 90q9 8 18 0" stroke="{lip_color}" stroke-width="2.8" fill="none" stroke-linecap="round"/>'
+
+
+def _wrinkles(band: str, skin: str) -> str:
+    """年龄线索：眼角细纹 + 法令纹。"""
+    if band == "young":
+        return ""
+    color = _shade(skin, 0.82)
+    strength = 0.9 if band == "mature" else 0.5
+    parts = [
+        f'<path d="M46 78q4 2 8 0" stroke="{color}" stroke-width="1.2" fill="none" opacity="{strength}" stroke-linecap="round"/>',
+        f'<path d="M74 78q4 2 8 0" stroke="{color}" stroke-width="1.2" fill="none" opacity="{strength}" stroke-linecap="round"/>',
+    ]
+    if band == "mature":
+        parts.append(
+            f'<path d="M52 89q4 3 12 0" stroke="{color}" stroke-width="1.1" fill="none" opacity="0.55" stroke-linecap="round"/>'
+        )
+        parts.append(
+            f'<path d="M58 62q-3 8 0 12" stroke="{color}" stroke-width="1" fill="none" opacity="0.35" stroke-linecap="round"/>'
+            f'<path d="M70 62q3 8 0 12" stroke="{color}" stroke-width="1" fill="none" opacity="0.35" stroke-linecap="round"/>'
+        )
+    return "".join(parts)
 
 
 def avatar_svg(
@@ -155,20 +206,52 @@ def avatar_svg(
     *,
     gender: str = "",
     region: str = "",
+    age: int | str | None = None,
     size: int = 128,
 ) -> str:
-    """按 seed 生成确定性插画头像 SVG。"""
-    p = _Pick(_stream(f"{seed}|{gender}|{region}"))
+    """按 seed + 性别/地域/年龄生成确定性插画头像 SVG。"""
+    gender = (gender or "").strip().lower()
+    region = (region or "").strip().lower()
+    band = age_band(age)
+
+    # 年龄也进入种子：同一个人不同年龄档会得到不同的细节
+    p = _Pick(_stream(f"{seed}|{gender}|{region}|{band}|{age}"))
+
     skin = p(SKIN_BY_REGION.get(region, _ALL_SKIN) if region else _ALL_SKIN)
-    hair_color = p(HAIR_COLORS)
+    hair_pool = HAIR_BY_REGION.get(region, _ALL_HAIR)
+    gray_chance = {"young": 0, "adult": 8, "mature": 38}[band]
+    hair_color = p(GRAY_HAIR) if p.chance(gray_chance) else p(hair_pool)
     shirt = p(SHIRT_COLORS)
     bg = p(BACKGROUNDS)
-    hair_style = p(("short", "side_part", "bob", "long", "bun", "curly", "ponytail", "buzz"))
+
+    if region == "black":
+        style_pool = ("afro", "curly", "buzz", "short")
+    elif region == "east_asian":
+        style_pool = ("short", "side_part", "bob", "long", "bun")
+    elif region == "south_asian":
+        style_pool = ("short", "side_part", "long", "bun", "bob")
+    else:
+        style_pool = ("short", "side_part", "bob", "long", "bun", "curly", "ponytail", "buzz")
+
+    if gender == "female":
+        female_pool = tuple(s for s in style_pool if s not in ("buzz", "afro")) or style_pool
+        if band == "mature":
+            female_pool = tuple(s for s in female_pool if s in ("bob", "bun", "short", "side_part")) or female_pool
+        hair_style = p(female_pool)
+    elif gender == "male":
+        male_pool = tuple(s for s in style_pool if s not in ("long", "bob", "ponytail", "bun"))
+        hair_style = p(male_pool or style_pool)
+    else:
+        hair_style = p(style_pool)
+
     eyes = p(("open", "happy", "wink", "closed"))
     mouth = p(("smile", "bigSmile", "smirk", "neutral"))
-    has_glasses = p.chance(16)
-    has_beard = gender == "male" and p.chance(22)
-    has_earrings = gender == "female" and p.chance(30)
+    lip_color = "#b0564f" if gender == "female" else "#a4544b"
+
+    has_glasses = p.chance({"young": 10, "adult": 16, "mature": 32}[band])
+    has_beard = gender == "male" and p.chance({"young": 16, "adult": 24, "mature": 20}[band])
+    has_earrings = gender == "female" and p.chance({"young": 34, "adult": 26, "mature": 22}[band])
+    has_blush = band != "mature"
 
     glasses = (
         '<g stroke="#2f2f33" stroke-width="2" fill="none">'
@@ -188,6 +271,7 @@ def avatar_svg(
         if has_earrings
         else ""
     )
+    wrinkles = _wrinkles(band, skin)
 
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="{size}" height="{size}" '
@@ -196,27 +280,23 @@ def avatar_svg(
         f'<stop offset="0" stop-color="#{bg[0]}"/><stop offset="1" stop-color="#{bg[1]}"/>'
         f"</linearGradient></defs>"
         f'<rect width="128" height="128" fill="url(#bg)"/>'
-        # 肩膀/身体
         f'<path d="M18 128c0-19 20-29 46-29s46 10 46 29z" fill="#{shirt}"/>'
-        f'<path d="M56 99h16v12c0 4-16 4-16 0z" fill="#{_shade(skin, 0.92)}"/>'
-        # 脖子/头
         f'<rect x="56" y="92" width="16" height="12" rx="6" fill="{_shade(skin, 0.95)}"/>'
         f'<ellipse cx="64" cy="72" rx="27" ry="31" fill="#{skin}"/>'
         f'<ellipse cx="37" cy="74" rx="4.5" ry="6" fill="{_shade(skin, 0.96)}"/>'
         f'<ellipse cx="91" cy="74" rx="4.5" ry="6" fill="{_shade(skin, 0.96)}"/>'
-        # 头发（后层 → 前层）
         f"{_hair(hair_style, hair_color, gender)}"
-        # 眉毛
-        f'<path d="M46 63q7-4 14 1" stroke="{_shade(hair_color)}" stroke-width="2.4" fill="none" stroke-linecap="round"/>'
-        f'<path d="M68 64q7-5 14-1" stroke="{_shade(hair_color)}" stroke-width="2.4" fill="none" stroke-linecap="round"/>'
-        # 鼻子
+        f'<path d="M46 63q7-4 14 1" stroke="{_shade(hair_color)}" stroke-width="{2.4 if band == "young" else 2.8}" fill="none" stroke-linecap="round"/>'
+        f'<path d="M68 64q7-5 14-1" stroke="{_shade(hair_color)}" stroke-width="{2.4 if band == "young" else 2.8}" fill="none" stroke-linecap="round"/>'
         f'<path d="M64 79v5" stroke="{_shade(skin, 0.85)}" stroke-width="2" stroke-linecap="round"/>'
-        # 眼睛/嘴/配饰
-        f"{_eyes(eyes)}{_mouth(mouth)}{glasses}{beard}{earrings}"
-        # 腮红
-        f'<ellipse cx="46" cy="84" rx="5" ry="3" fill="#e08a7d" opacity="0.22"/>'
-        f'<ellipse cx="82" cy="84" rx="5" ry="3" fill="#e08a7d" opacity="0.22"/>'
-        f"</svg>"
+        f"{_eyes(eyes)}{_mouth(mouth, lip_color)}{wrinkles}{glasses}{beard}{earrings}"
+        + (
+            f'<ellipse cx="46" cy="84" rx="5" ry="3" fill="#e08a7d" opacity="0.22"/>'
+            f'<ellipse cx="82" cy="84" rx="5" ry="3" fill="#e08a7d" opacity="0.22"/>'
+            if has_blush
+            else ""
+        )
+        + f"</svg>"
     )
 
 
@@ -259,7 +339,7 @@ def persona_avatar_seed(persona: dict) -> str:
 
 
 def persona_avatar_url(persona: dict) -> str:
-    """Persona 头像 URL（种子化 SVG，带性别/地域以保持人种/性别一致）。"""
+    """Persona 头像 URL（种子化 SVG，带性别/地域/年龄以保持人物属性一致）。"""
     seed = persona_avatar_seed(persona)
     gender = str(persona.get("gender") or "").strip().lower()
     region = avatar_region(str(persona.get("country") or ""))
@@ -268,8 +348,14 @@ def persona_avatar_url(persona: dict) -> str:
         query.append(f"g={gender}")
     if region:
         query.append(f"r={region}")
+    try:
+        age = int(persona.get("age") or 0)
+    except (TypeError, ValueError):
+        age = 0
+    if age:
+        query.append(f"a={age}")
     suffix = ("?" + "&".join(query)) if query else ""
     return f"/api/v3/avatar/{seed}.svg{suffix}"
 
 
-__all__ = ["avatar_region", "avatar_svg", "persona_avatar_seed", "persona_avatar_url"]
+__all__ = ["age_band", "avatar_region", "avatar_svg", "persona_avatar_seed", "persona_avatar_url"]

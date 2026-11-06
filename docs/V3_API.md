@@ -69,9 +69,10 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | /api/v3/avatar/{seed}.svg?g=male&r=east_asian | 按种子生成插画头像 SVG：同一 seed 永远同一张脸；g/
+| GET | /api/v3/avatar/{seed}.svg?g=male&r=east_asian&a=28 | 按种子生成插画头像 SVG：同一 seed 永远同一张脸；g/
  只影响肤色/发型/胡子等；Cache-Control: immutable |
 
+- 三个可区分维度：**人种/地域**（肤色 + 发色发质）、**性别**（发型/胡须/耳环/唇色）、**年龄**（灰白发/皱纹/眼镜/发型偏好，三档 <25 / 25-32 / ≥33）；`g` / `r` / `a` 分别对应这三个维度。
 - Persona 头像不再使用 public/mock/avatars/*.jpg，改为 personas.avatar_seed（persona-<id>）驱动；
   数据库只存种子，图片由接口确定性生成，零图片资源、零网络依赖。
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。

@@ -351,14 +351,36 @@ def test_seed_data_has_no_mock_images():
         assert not str(persona.get("avatar", "")).startswith("/mock/")
 
 
+def test_avatar_distinguishes_region_gender_age(world_db):
+    """人种/性别/年龄三个维度都会改变生成结果。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        base = "/api/v3/avatar/p_demo.svg"
+        asian_young = client.get(f"{base}?g=female&r=east_asian&a=22").text
+        asian_mature = client.get(f"{base}?g=female&r=east_asian&a=41").text
+        male_same = client.get(f"{base}?g=male&r=east_asian&a=22").text
+        black_same = client.get(f"{base}?g=female&r=black&a=22").text
+
+        # 年龄：同人同性别同地域，年龄档不同 → 结果不同（灰发/皱纹/眼镜概率）
+        assert asian_young != asian_mature
+        # 性别不同 → 发型/胡须/唇色不同
+        assert asian_young != male_same
+        # 人种（地域）不同 → 肤色/发色不同
+        assert asian_young != black_same
+        # 同参数可复现
+        again = client.get(f"{base}?g=female&r=east_asian&a=22").text
+        assert again == asian_young
+
+
 def test_persona_avatar_url_encodes_seed_and_identity():
     from app.v3.avatar import persona_avatar_url
 
     url = persona_avatar_url(
-        {"id": "p_jiwoo", "gender": "female", "country": "Korea"}
+        {"id": "p_jiwoo", "gender": "female", "country": "Korea", "age": 23}
     )
     assert url.startswith("/api/v3/avatar/p_jiwoo.svg")
-    assert "g=female" in url and "r=east_asian" in url
+    assert "g=female" in url and "r=east_asian" in url and "a=23" in url
 
 
 def test_health_reports_world(world_db):

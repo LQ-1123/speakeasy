@@ -12,6 +12,7 @@ export type Route =
   | { name: "chats" }
   | { name: "chat"; friendId: string }
   | { name: "discover" }
+  | { name: "discoverFeed" }
   | { name: "discoverMoments" }
   | { name: "discoverPeople" }
   | { name: "persona"; personaId: string }

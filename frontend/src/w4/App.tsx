@@ -54,6 +54,7 @@ export function sectionOf(route: Route): Section {
     case "requests":
       return "contacts";
     case "discover":
+    case "discoverFeed":
     case "discoverMoments":
     case "discoverPeople":
     case "persona":
@@ -83,7 +84,8 @@ function parseRoute(): Route {
       return parts[1] ? { name: "contact", friendId: parts[1] } : { name: "contacts" };
     case "discover":
       if (parts[1] === "people") return { name: "discoverPeople" };
-      /* 老链接 #/discover/moments 直接落到 Persona 信息流 */
+      if (parts[1] === "feed") return { name: "discoverFeed" };
+      /* 老链接 #/discover/moments 直接落到 Persona 动态 */
       return { name: "discover" };
     case "persona":
       return parts[1] ? { name: "persona", personaId: parts[1] } : { name: "discover" };
@@ -117,6 +119,8 @@ function routeToHash(route: Route): string {
       return "#/contacts";
     case "discover":
       return "#/discover";
+    case "discoverFeed":
+      return "#/discover/feed";
     case "discoverPeople":
       return "#/discover/people";
     case "persona":
@@ -197,10 +201,21 @@ function Shell() {
       case "requests":
         return <RequestsPane navigate={navigate} />;
       case "discover":
+        /* 手机：发现 = 二级菜单（动态 / 偶遇 / 通知）；桌面：左列菜单 + 右侧动态 */
+        return mobile ? (
+          <DiscoverIndex active="feed" navigate={navigate} />
+        ) : (
+          <FeedView navigate={navigate} />
+        );
+      case "discoverFeed":
       case "discoverMoments":
       case "moments":
-        /* V3：发现首页 = 以 AI Persona 为中心的信息流 */
-        return <FeedView navigate={navigate} />;
+        return (
+          <FeedView
+            navigate={navigate}
+            onBack={mobile ? () => navigate({ name: "discover" }) : undefined}
+          />
+        );
       case "discoverPeople":
         return <PeopleView navigate={navigate} />;
       case "events":

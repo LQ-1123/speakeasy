@@ -286,8 +286,7 @@ export function PersonaProfileView({
                     onOpenPersona={() => undefined}
                     onLike={() => void toggleLike(item)}
                     onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
-                    onQuickAdd={() => void doAddFriend()}
-                    onDelete={() => undefined}
+                          onDelete={() => undefined}
                     onZoom={() => undefined}
                     onNotify={showToast}
                     commentOpen={commentFor === item.id}

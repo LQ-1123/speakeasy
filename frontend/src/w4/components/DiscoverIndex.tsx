@@ -18,11 +18,11 @@ export function DiscoverIndex({
   const items = [
     {
       key: "feed" as const,
-      label: "信息流",
+      label: "动态",
       desc: "AI 人物们此刻在做什么",
       icon: <Sparkles size={17} strokeWidth={1.8} />,
       tint: "var(--w-green-ink)",
-      route: { name: "discover" } as Route,
+      route: { name: "discoverFeed" } as Route,
     },
     {
       key: "people" as const,

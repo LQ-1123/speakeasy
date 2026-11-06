@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
+  ChevronLeft,
   Compass,
   Heart,
   ImagePlus,
@@ -21,7 +22,6 @@ import {
   RefreshCw,
   Send,
   Trash2,
-  UserPlus,
   Volume2,
 } from "lucide-react";
 
@@ -32,7 +32,6 @@ import type { Route } from "../model";
 import { useApp } from "../store";
 import { Avatar, Dialog, Icon, Lightbox } from "../ui";
 import {
-  addFriend,
   createPost,
   deletePost,
   fetchEvents,
@@ -81,7 +80,13 @@ function flagOf(country: string): string {
   return map.find(([k]) => (country || "").includes(k))?.[1] ?? "🌍";
 }
 
-export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
+export function FeedView({
+  navigate,
+  onBack,
+}: {
+  navigate: (r: Route) => void;
+  onBack?: () => void;
+}) {
   const { reloadAll, showToast, profile } = useApp();
   const [items, setItems] = useState<FeedItem[]>([]);
   const [cursor, setCursor] = useState("");
@@ -186,6 +191,42 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
   }, [localMode, showToast]);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [pull, setPull] = useState(0);
+  const pullRef = useRef(0);
+  const pullStart = useRef<{ y: number; bottom: boolean } | null>(null);
+  const updatePull = (v: number) => {
+    pullRef.current = v;
+    setPull(v);
+  };
+
+  /** 手机手势：顶部下拉刷新；滚到底后继续上拉也刷新 */
+  const isMobileNow = () => window.matchMedia("(max-width: 900px)").matches;
+  const onTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!isMobileNow()) return;
+    const el = e.currentTarget;
+    pullStart.current = {
+      y: e.touches[0].clientY,
+      bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 8,
+    };
+  };
+  const onTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = pullStart.current;
+    if (!start) return;
+    const dy = e.touches[0].clientY - start.y;
+    if (start.bottom && dy < 0) {
+      updatePull(Math.min(90, -dy * 0.6));
+      return;
+    }
+    if (!start.bottom && dy > 0) {
+      updatePull(Math.min(90, dy * 0.6));
+    }
+  };
+  const onTouchEnd = () => {
+    const fired = pullRef.current >= 45;
+    pullStart.current = null;
+    updatePull(0);
+    if (fired) void refresh();
+  };
 
   /** 手动刷新：重新拉第一页，并明确告诉用户「有新内容」还是「已是最新」 */
   const refresh = async () => {
@@ -259,21 +300,6 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
     setCommentFor(null);
   };
 
-  const quickAdd = async (item: FeedItem) => {
-    try {
-      await addFriend(item.author.id);
-      setItems((prev) =>
-        prev.map((x) =>
-          x.author.id === item.author.id ? { ...x, friendship_status: "accepted" } : x,
-        ),
-      );
-      await reloadAll();
-      showToast(`已添加 ${item.author.nickname}，可以聊天了`, "success");
-    } catch (exc) {
-      showToast(exc instanceof Error ? exc.message : "添加失败");
-    }
-  };
-
   const removePost = async (item: FeedItem) => {
     try {
       await deletePost(item.id);
@@ -289,8 +315,13 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
   return (
     <div className="w4-main">
       <div className="w4-head">
+        {onBack ? (
+          <button className="w4-icon-btn" onClick={onBack} aria-label="返回">
+            <ChevronLeft size={18} strokeWidth={2} />
+          </button>
+        ) : null}
         <div className="w4-head-main">
-          <div className="w4-head-title">发现</div>
+          <div className="w4-head-title">动态</div>
           <div className="w4-head-sub">
             {summary ? `${summary.persona_posts} 条人物动态 · ${summary.friends} 位好友` : "TA 们的生活动态"}
           </div>
@@ -306,7 +337,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
             {unread > 0 ? <span className="v3-badge">{unread > 99 ? "99+" : unread}</span> : null}
           </button>
           <button
-            className="w4-icon-btn v3-secondary"
+            className="w4-icon-btn v3-secondary v3-refresh-btn"
             onClick={() => void refresh()}
             disabled={refreshing}
             title="刷新"
@@ -338,11 +369,22 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
         </div>
       </div>
 
-      <div className="w4-scroll" onScroll={onScroll} ref={scrollRef}>
+      {pull > 0 ? (
+        <div className="v3-pull-pill">{pull >= 45 ? "松手刷新" : "下拉刷新"}</div>
+      ) : null}
+      <div
+        className="w4-scroll"
+        onScroll={onScroll}
+        ref={scrollRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+
         <div className="w4-feed">
           {localMode ? (
             <div className="v3-notice">
-              当前处于离线模式，信息流暂不可用；可在设置 → 本地与密钥 切回在线模式。
+              当前处于离线模式，动态暂不可用；可在设置 → 本地与密钥 切回在线模式。
             </div>
           ) : null}
 
@@ -352,7 +394,7 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
 
           {!localMode && error && items.length === 0 ? (
             <div className="v3-error">
-              <div className="v3-error-title">信息流加载失败</div>
+              <div className="v3-error-title">动态加载失败</div>
               <div className="v3-error-text">{error}</div>
               <button className="w4-btn is-primary" onClick={() => void load(true)}>
                 重试
@@ -381,7 +423,6 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
               }
               onLike={() => void toggleLike(item)}
               onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
-              onQuickAdd={() => void quickAdd(item)}
               onDelete={() => void removePost(item)}
               onZoom={setZoom}
               onNotify={showToast}
@@ -436,7 +477,6 @@ export function FeedCard({
   onOpenPersona,
   onLike,
   onComment,
-  onQuickAdd,
   onDelete,
   onZoom,
   onNotify,
@@ -451,7 +491,6 @@ export function FeedCard({
   onOpenPersona: () => void;
   onLike: () => void;
   onComment: () => void;
-  onQuickAdd: () => void;
   onDelete: () => void;
   onZoom: (src: string) => void;
   onNotify?: (msg: string) => void;
@@ -570,6 +609,26 @@ export function FeedCard({
         {item.content ? <div className="w4-moment-text">{item.content}</div> : null}
         {zhOpen && zh ? <div className="v3-post-zh">{zh}</div> : null}
 
+        <div className="w4-moment-inline-acts">
+          <button
+            className="w4-moment-act"
+            onClick={() => void toggleZh()}
+            disabled={zhLoading}
+          >
+            <Languages size={13} strokeWidth={1.8} />
+            {zhLoading ? "翻译中…" : zhOpen ? "收起" : "翻译"}
+          </button>
+          {isPersona ? (
+            <button
+              className={`w4-moment-act ${playing ? "is-on" : ""}`}
+              onClick={() => void togglePlay()}
+            >
+              {playing ? <Pause size={13} strokeWidth={1.8} /> : <Volume2 size={13} strokeWidth={1.8} />}
+              {playing ? "播放中" : "朗读"}
+            </button>
+          ) : null}
+        </div>
+
         {item.media.length ? (
           <div className={`w4-moment-imgs n${Math.min(4, item.media.length)}`}>
             {item.media.map((src) => (
@@ -599,25 +658,8 @@ export function FeedCard({
         ) : null}
 
         <div className="w4-moment-foot">
-          <span>{relTimeOf(item.created_at)}</span>
+          <span className="w4-moment-time">{relTimeOf(item.created_at)}</span>
           <span style={{ flex: 1 }} />
-          <button
-            className="w4-moment-act"
-            onClick={() => void toggleZh()}
-            disabled={zhLoading}
-          >
-            <Languages size={13} strokeWidth={1.8} />
-            {zhLoading ? "翻译中…" : zhOpen ? "收起" : "翻译"}
-          </button>
-          {isPersona ? (
-            <button
-              className={`w4-moment-act ${playing ? "is-on" : ""}`}
-              onClick={() => void togglePlay()}
-            >
-              {playing ? <Pause size={13} strokeWidth={1.8} /> : <Volume2 size={13} strokeWidth={1.8} />}
-              {playing ? "播放中" : "朗读"}
-            </button>
-          ) : null}
           {isPersona ? (
             <>
               <button className={`w4-moment-act ${item.liked_by_me ? "is-on" : ""}`} onClick={onLike}>
@@ -639,12 +681,6 @@ export function FeedCard({
             <button className="w4-moment-act is-danger" onClick={onDelete}>
               <Trash2 size={13} strokeWidth={1.8} />
               删除
-            </button>
-          ) : null}
-          {isPersona && item.friendship_status === "none" ? (
-            <button className="w4-moment-act v3-add" onClick={onQuickAdd}>
-              <UserPlus size={13} strokeWidth={1.8} />
-              加好友
             </button>
           ) : null}
         </div>

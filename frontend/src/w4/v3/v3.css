@@ -30,7 +30,8 @@
 
 /* 手机：顶栏空间有限，隐藏「刷新 / 偶遇」两个次级按钮（偶遇仍可从左列/底部进入） */
 @media (max-width: 900px) {
-  /* 手机上保留「刷新」，只隐藏「偶遇」（左列/底部仍可进入） */
+  /* 手机：刷新改成下拉手势；偶遇走发现二级菜单 */
+  .v3-refresh-btn,
   .v3-secondary[aria-label="偶遇一个人"] {
     display: none !important;
   }
@@ -639,4 +640,79 @@
 .w4-detail-post .w4-moment-imgs {
   margin-top: 7px;
   max-width: 100%;
+}
+
+
+/* ---------------------------------------------------------------- 手机手势 / 排版 */
+.v3-pull-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--w-text-3);
+  transition: height 0.06s linear;
+}
+
+.w4-moment-inline-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 8px;
+}
+.w4-moment-inline-acts .w4-moment-act {
+  padding: 0;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.w4-moment-foot {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.w4-moment-foot .w4-moment-time {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.w4-moment-act {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 900px) {
+  .w4-moment-foot {
+    gap: 6px 12px;
+  }
+  .w4-moment-name {
+    flex-wrap: wrap;
+  }
+  .w4-moment-text {
+    font-size: 13.5px;
+    line-height: 1.68;
+  }
+}
+
+
+@media (max-width: 900px) {
+  /* 发现二级菜单在手机上铺满 */
+  .w4-root .w4-disc-col {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
+.v3-pull-pill {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(20, 28, 24, 0.78);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
 }

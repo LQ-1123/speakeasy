@@ -75,6 +75,8 @@ function parseRoute(): Route {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   const head = parts[0] ?? "";
   switch (head) {
+    case "chats":
+      return { name: "chats" };
     case "chat":
       return parts[1] ? { name: "chat", friendId: parts[1] } : { name: "chats" };
     case "contacts":

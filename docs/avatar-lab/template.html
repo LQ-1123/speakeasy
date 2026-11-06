@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Avatar Lab · 头像生成技术对比（离线 / 种子驱动）</title>
+<style>
+  :root {
+    --ink: #14201b;
+    --ink-2: #46554d;
+    --ink-3: #7b8a81;
+    --line: #e4eae5;
+    --bg: #f6f8f5;
+    --card: #ffffff;
+    --green: #1f7a5c;
+    --green-soft: #e7f2ec;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 34px 22px 80px; }
+  header.hero { padding: 8px 0 6px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--green); font-weight: 600;
+  }
+  .kicker::before {
+    content: ""; width: 22px; height: 2px; background: var(--green); border-radius: 2px;
+  }
+  h1 { font-size: 34px; line-height: 1.2; margin: 12px 0 10px; letter-spacing: -.02em; }
+  .lede { color: var(--ink-2); max-width: 760px; margin: 0 0 22px; }
+  .lede b { color: var(--ink); }
+
+  .toolbar {
+    position: sticky; top: 12px; z-index: 20;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; box-shadow: 0 8px 24px -18px rgba(20,32,27,.5);
+  }
+  .toolbar label { font-size: 12px; color: var(--ink-3); font-weight: 600; }
+  .toolbar input {
+    flex: 1 1 240px; min-width: 180px;
+    font: inherit; color: var(--ink);
+    padding: 9px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: #fff; outline: none;
+  }
+  .toolbar input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer;
+    border-radius: 10px; padding: 9px 14px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    transition: .15s ease;
+  }
+  button:hover { border-color: var(--green); color: var(--green); }
+  button.primary { background: var(--green); border-color: var(--green); color: #fff; }
+  button.primary:hover { filter: brightness(1.06); color: #fff; }
+  .hint { font-size: 12px; color: var(--ink-3); }
+
+  section { margin-top: 44px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  h2 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  .sec-sub { color: var(--ink-3); font-size: 12.5px; }
+  .grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    margin-top: 14px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 12px 10px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    transition: .18s ease;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 14px 28px -22px rgba(20,32,27,.55); border-color: #cfe0d5; }
+  .faces { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .faces figure { margin: 0; width: 56px; height: 56px; border-radius: 12px; overflow: hidden; background: #f2f5f2; }
+  .faces figure img { display: block; width: 100%; height: 100%; }
+  .card .name { font-size: 12.5px; font-weight: 650; letter-spacing: .01em; }
+  .card .meta { font-size: 10.5px; color: var(--ink-3); text-align: center; line-height: 1.45; }
+  .tag {
+    display: inline-block; font-size: 10px; font-weight: 650;
+    padding: 1px 6px; border-radius: 999px; background: var(--green-soft); color: var(--green);
+  }
+  .tag.warn { background: #f4efe2; color: #8a6a2f; }
+  .tag.gray { background: #eef1ee; color: var(--ink-3); }
+
+  .compare { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .compare .chip {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 84px;
+  }
+  .compare .chip img { width: 52px; height: 52px; border-radius: 10px; display: block; }
+  .compare .chip span { font-size: 10.5px; color: var(--ink-3); text-align: center; line-height: 1.3; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; background: #fff; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; vertical-align: top; }
+  th { background: #f1f6f2; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+  tr:last-child td { border-bottom: 0; }
+  td b { font-weight: 650; }
+
+  .note {
+    background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--green);
+    border-radius: 12px; padding: 14px 16px; margin-top: 14px; color: var(--ink-2); font-size: 13px;
+  }
+  .note code { background: var(--green-soft); color: var(--green); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  pre {
+    background: #14201b; color: #d7e6dc; border-radius: 12px; padding: 14px 16px;
+    overflow: auto; font-size: 12px; line-height: 1.65; margin-top: 12px;
+  }
+  footer { margin-top: 52px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <span class="kicker">Avatar Lab · 种子驱动 · 完全离线</span>
+    <h1>头像生成技术对比</h1>
+    <p class="lede">
+      同一个种子，不同技术画出来的「人」。本页包含 <b>31 种 DiceBear 画风</b>（含 Avataaars）与
+      <b>6 种非 DiceBear 的算法头像</b>（Identicon / Blockies / Jazzicon / Minidenticon /
+      Boring Avatars / 本项目 SeedFace）。全部在浏览器本地生成，不请求任何外部服务；页面单文件，可直接双击打开。
+    </p>
+    <div class="toolbar">
+      <label for="seed">种子</label>
+      <input id="seed" class="mono" value="persona-jiwoo" spellcheck="false" />
+      <button class="primary" id="apply">应用</button>
+      <button id="random">随机种子</button>
+      <span class="hint">同一 seed → 同一张脸；改一个字符就换一个人</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <h2>一、DiceBear 全部画风</h2>
+      <span class="sec-sub">每张卡片左边是当前种子，右边三个是相邻种子（同 seed 永远同脸）</span>
+    </div>
+    <div class="grid" id="diceGrid"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>二、同一 seed × 不同技术</h2>
+      <span class="sec-sub">同一个「人」在不同风格下的样子</span>
+    </div>
+    <div class="compare" id="sameSeed"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>三、非 DiceBear 的算法头像</h2>
+      <span class="sec-sub">纯手写 SVG / Canvas 算法：钱包、GitHub、匿名社区的经典做法</span>
+    </div>
+    <div class="grid" id="customGrid"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>四、横向对比</h2>
+      <span class="sec-sub">按「精致度 / 离线 / 授权 / 适用场景」选型</span>
+    </div>
+    <table>
+      <thead>
+        <tr><th>技术</th><th>类型</th><th>种子可复现</th><th>依赖 / 成本</th><th>授权</th><th>精致度</th><th>适用</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Avataaars</b>（DiceBear 画风）</td><td>卡通人像</td><td>是</td><td>纯 SVG，离线</td><td>MIT</td><td>★★★★</td><td>最接近「真人朋友」的免费方案</td></tr>
+        <tr><td><b>Humaaans / Open Peeps</b>（DiceBear 的 open-peeps）</td><td>手绘人像</td><td>是</td><td>纯 SVG，离线</td><td>CC0 / CC BY 4.0</td><td>★★★★</td><td>有设计感的插画风</td></tr>
+        <tr><td><b>DiceBear personas / adventurer / bottts</b></td><td>扁平插画</td><td>是</td><td>纯 SVG，离线</td><td>CC BY 4.0</td><td>★★★</td><td>快速铺量、风格统一</td></tr>
+        <tr><td><b>Multiavatar</b></td><td>分层插画</td><td>是</td><td>纯 SVG，离线</td><td>免费（禁 NFT）</td><td>★★★</td><td>比 personas 细节更多</td></tr>
+        <tr><td><b>Identicon / Blockies / Minidenticon</b></td><td>像素几何</td><td>是</td><td>几十行代码</td><td>CC0</td><td>★★</td><td>匿名用户、地址占位</td></tr>
+        <tr><td><b>Jazzicon / Boring Avatars</b></td><td>几何渐变</td><td>是</td><td>纯 SVG，离线</td><td>MIT / CC0</td><td>★★</td><td>Web3 钱包、无脸账号</td></tr>
+        <tr><td><b>SeedFace</b>（本项目自研）</td><td>扁平人像</td><td>是</td><td>服务端 SVG，离线</td><td>自有</td><td>★★★</td><td>信息流人物头像，可调参数</td></tr>
+        <tr><td><b>AI 生成人像</b>（FLUX / SDXL / Kolors）</td><td>写实/半写实</td><td>部分（带 seed）</td><td>需 API/GPU，按张计费</td><td>看模型</td><td>★★★★★</td><td>本轮不引入（成本原因）</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>五、本项目现状与接入方式</h2>
+      <span class="sec-sub">SpeakEasy V3 已把 Persona 头像改为服务端种子生成</span>
+    </div>
+    <div class="note">
+      服务端只存 <code>personas.avatar_seed</code>（如 <code>persona-jiwoo</code>），头像由
+      <code>GET /api/v3/avatar/{seed}.svg?g=female&amp;r=east_asian</code> 确定性生成；
+      信息流、主页、偶遇、聊天共用同一 URL。要换成上表中的任意方案，只需要替换这个 URL 的生成函数，
+      数据库不用改（种子不变 → 换技术后仍是「同一个人」，只是画风变了）。
+    </div>
+<pre class="mono">// 前端本地生成（DiceBear，和本页一样）
+import { createAvatar } from "@dicebear/core";
+import * as avataaars from "@dicebear/avataaars";
+const svg = createAvatar(avataaars, { seed: "persona-jiwoo", size: 96 }).toString();
+
+// 服务端种子接口（当前实现）
+GET /api/v3/avatar/{seed}.svg?g=female&r=east_asian
+→ image/svg+xml, Cache-Control: immutable</pre>
+  </section>
+
+  <footer>
+    本页由 <span class="mono">scripts/build_avatar_lab.py</span> 生成：用 esbuild 把 DiceBear 31 种画风打包进单文件 HTML，
+    所有头像在浏览器本地渲染，无网络请求、无追踪。DiceBear 画风的作者与授权见
+    <span class="mono">dicebear.com/styles</span>。AI 生成人像本轮未接入。
+  </footer>
+</div>
+
+<script>/*__AVATAR_LAB_BUNDLE__*/</script>
+<script>
+(function () {
+  var state = { seed: "persona-jiwoo" };
+
+  var DICE_META = {
+    avataaars: ["Avataaars", "MIT · 卡通人像"],
+    "avataaars-neutral": ["Avataaars Neutral", "MIT · 中性配色"],
+    personas: ["Personas", "CC BY 4.0 · 扁平人像"],
+    adventurer: ["Adventurer", "CC BY 4.0 · 冒险者"],
+    "adventurer-neutral": ["Adventurer Neutral", "CC BY 4.0 · 中性"],
+    openPeeps: ["Open Peeps", "CC0 · 手绘线稿"],
+    lorelei: ["Lorelei", "CC0 · 插画"],
+    "lorelei-neutral": ["Lorelei Neutral", "CC0 · 中性"],
+    micah: ["Micah", "CC0 · 扁平"],
+    miniavs: ["Miniavs", "CC BY 4.0 · 小头像"],
+    notionists: ["Notionists", "CC0 · 手绘"],
+    "notionists-neutral": ["Notionists Neutral", "CC0 · 中性"],
+    croodles: ["Croodles", "CC BY 4.0 · 涂鸦"],
+    "croodles-neutral": ["Croodles Neutral", "CC BY 4.0 · 中性"],
+    "big-ears": ["Big Ears", "CC BY 4.0 · 大耳朵"],
+    "big-ears-neutral": ["Big Ears Neutral", "CC BY 4.0 · 中性"],
+    "big-smile": ["Big Smile", "CC BY 4.0 · 笑脸"],
+    bottts: ["Bottts", "CC BY 4.0 · 机器人"],
+    "bottts-neutral": ["Bottts Neutral", "CC BY 4.0 · 机器人"],
+    "fun-emoji": ["Fun Emoji", "CC BY 4.0 · 表情"],
+    thumbs: ["Thumbs", "CC BY 4.0 · 手势"],
+    dylan: ["Dylan", "CC0 · 卡通"],
+    pixelArt: ["Pixel Art", "CC0 · 像素"],
+    "pixel-art-neutral": ["Pixel Art Neutral", "CC0 · 像素"],
+    identicon: ["Identicon", "CC0 · 几何"],
+    initials: ["Initials", "CC0 · 首字母"],
+    rings: ["Rings", "CC0 · 几何"],
+    shapes: ["Shapes", "CC0 · 几何"],
+    glass: ["Glass", "CC0 · 玻璃"],
+    icons: ["Icons", "CC0 · 图标"],
+    toonHead: ["Toon Head", "CC0 · 卡通头像"]
+  };
+
+  function el(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html !== undefined) n.innerHTML = html;
+    return n;
+  }
+
+  function svgImg(svg, label) {
+    var img = document.createElement("img");
+    img.alt = label || "";
+    img.loading = "lazy";
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg || '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    return img;
+  }
+
+  function face(svg, label) {
+    var fig = document.createElement("figure");
+    fig.appendChild(svgImg(svg, label));
+    fig.title = label || "";
+    return fig;
+  }
+
+  function safe(fn, fallback) {
+    try { return fn(); } catch (e) { return fallback || ""; }
+  }
+
+  function renderDice() {
+    var grid = document.getElementById("diceGrid");
+    grid.innerHTML = "";
+    window.AvatarLab.styles.forEach(function (name) {
+      var meta = DICE_META[name] || [name, "见 DiceBear 文档"];
+      var card = el("div", "card");
+      var faces = el("div", "faces");
+      faces.appendChild(face(safe(function () { return window.AvatarLab.dicebearSvg(name, state.seed); }), name));
+      ["-2", "-3", "-4"].forEach(function (suffix) {
+        faces.appendChild(face(safe(function () {
+          return window.AvatarLab.dicebearSvg(name, state.seed + suffix);
+        }), name + suffix));
+      });
+      card.appendChild(faces);
+      card.appendChild(el("div", "name", meta[0]));
+      card.appendChild(el("div", "meta", meta[1]));
+      grid.appendChild(card);
+    });
+  }
+
+  var SAME_SEED_STYLES = ["avataaars", "personas", "adventurer", "openPeeps", "micah", "miniavs", "notionists", "bottts"];
+
+  function renderSameSeed() {
+    var box = document.getElementById("sameSeed");
+    box.innerHTML = "";
+    SAME_SEED_STYLES.forEach(function (name) {
+      var chip = el("div", "chip");
+      chip.appendChild(svgImg(safe(function () { return window.AvatarLab.dicebearSvg(name, state.seed); }), name));
+      chip.appendChild(el("span", "", (DICE_META[name] || [name])[0]));
+      box.appendChild(chip);
+    });
+    window.AvatarLab.custom.forEach(function (key) {
+      var chip = el("div", "chip");
+      chip.appendChild(svgImg(safe(function () { return window.AvatarLab.customSvg(key, state.seed); }), key));
+      chip.appendChild(el("span", "", CUSTOM_META[key][0]));
+      box.appendChild(chip);
+    });
+  }
+
+  var CUSTOM_META = {
+    identicon: ["Identicon", "GitHub 风 5×5 镜像像素"],
+    blockies: ["Blockies", "以太坊钱包 8×8 像素"],
+    jazzicon: ["Jazzicon", "MetaMask 径向渐变"],
+    minidenticon: ["Minidenticon", "单色像素脸"],
+    "boring-marble": ["Boring Marble", "几何渐变圆"],
+    "seed-face": ["SeedFace（本项目）", "扁平插画人像"]
+  };
+
+  function renderCustom() {
+    var grid = document.getElementById("customGrid");
+    grid.innerHTML = "";
+    window.AvatarLab.custom.forEach(function (key) {
+      var meta = CUSTOM_META[key] || [key, ""];
+      var card = el("div", "card");
+      var faces = el("div", "faces");
+      [state.seed, state.seed + "-2", state.seed + "-3", state.seed + "-4"].forEach(function (s) {
+        faces.appendChild(face(safe(function () { return window.AvatarLab.customSvg(key, s); }), s));
+      });
+      card.appendChild(faces);
+      card.appendChild(el("div", "name", meta[0]));
+      card.appendChild(el("div", "meta", meta[1]));
+      grid.appendChild(card);
+    });
+  }
+
+  function renderAll() {
+    renderDice();
+    renderSameSeed();
+    renderCustom();
+  }
+
+  document.getElementById("apply").addEventListener("click", function () {
+    state.seed = document.getElementById("seed").value.trim() || "anonymous";
+    renderAll();
+  });
+  document.getElementById("seed").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { document.getElementById("apply").click(); }
+  });
+  document.getElementById("random").addEventListener("click", function () {
+    var pool = ["persona-jiwoo", "persona-adrian", "persona-giulia", "persona-lin", "persona-haruto", "persona-morteno", "speakeasy", "hello-world"];
+    var pick = pool[Math.floor(Math.random() * pool.length)] + "-" + Math.random().toString(36).slice(2, 6);
+    document.getElementById("seed").value = pick;
+    state.seed = pick;
+    renderAll();
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

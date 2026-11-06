@@ -70,3 +70,5 @@ sounds/turn_body.json
 # Android 签名（不提交私钥）
 mobile/android/keystore.properties
 mobile/android/*.jks
+
+docs/avatar-lab/bundle.js

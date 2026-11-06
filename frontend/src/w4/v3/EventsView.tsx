@@ -1,0 +1,228 @@
+"use client";
+
+/**
+ * V3 · 通知中心（社交事件）。
+ *
+ * 事件全部由后端生成：点赞 / 评论 / 好友申请，允许「什么都没有」。
+ * 只有接受好友申请才会真正建立好友关系（由后端保证）。
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import { Bell, Check, Heart, MessageSquare, Sparkles, UserPlus, X } from "lucide-react";
+
+import type { Route } from "../model";
+import { useApp } from "../store";
+import { Avatar, Icon } from "../ui";
+import {
+  acceptEvent,
+  declineEvent,
+  fetchEvents,
+  markAllEventsRead,
+  markEventRead,
+  relTimeOf,
+  type SocialEvent,
+} from "./api";
+import "./v3.css";
+
+const TYPE_TEXT: Record<string, string> = {
+  like: "赞了你的动态",
+  comment: "评论了你的动态",
+  friend_request: "想加你为好友",
+};
+
+export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
+  const { reloadAll, showToast } = useApp();
+  const [events, setEvents] = useState<SocialEvent[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetchEvents(false);
+      setEvents(res.items);
+      setUnread(res.unread);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /* 事件是延迟产生的：每 15 秒静默刷新一次，用户停在通知页也能看到新互动 */
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const res = await fetchEvents(false);
+        if (!alive) return;
+        setEvents(res.items);
+        setUnread(res.unread);
+      } catch {
+        /* 轮询失败静默 */
+      }
+    };
+    const timer = window.setInterval(tick, 15000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const readAll = async () => {
+    try {
+      await markAllEventsRead();
+      setEvents((prev) => prev.map((e) => ({ ...e, is_read: true })));
+      setUnread(0);
+    } catch {
+      showToast("操作失败");
+    }
+  };
+
+  const respond = async (ev: SocialEvent, accept: boolean) => {
+    setBusyId(ev.id);
+    try {
+      if (accept) await acceptEvent(ev.id);
+      else await declineEvent(ev.id);
+      await reloadAll();
+      await load();
+      showToast(accept ? `已和 ${ev.persona.nickname} 成为好友` : "已拒绝", "success");
+    } catch (exc) {
+      showToast(exc instanceof Error ? exc.message : "操作失败");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const open = async (ev: SocialEvent) => {
+    if (!ev.is_read) {
+      void markEventRead(ev.id).catch(() => undefined);
+      setEvents((prev) => prev.map((x) => (x.id === ev.id ? { ...x, is_read: true } : x)));
+      setUnread((n) => Math.max(0, n - 1));
+    }
+    navigate({ name: "persona", personaId: ev.persona.id });
+  };
+
+  return (
+    <div className="w4-main">
+      <div className="w4-head">
+        <button className="w4-icon-btn" onClick={() => navigate({ name: "discover" })} aria-label="返回">
+          <Icon strokeWidth={2}>
+            <path d="M15 5l-7 7 7 7" />
+          </Icon>
+        </button>
+        <div className="w4-head-main">
+          <div className="w4-head-title">通知</div>
+          <div className="w4-head-sub">{unread > 0 ? `${unread} 条未读` : "AI 人物的互动"}</div>
+        </div>
+        <div className="w4-head-actions">
+          <button className="w4-btn" style={{ height: 28, fontSize: 12 }} onClick={() => void readAll()}>
+            全部已读
+          </button>
+          <button className="w4-icon-btn" onClick={() => void load()} aria-label="刷新">
+            <Icon size={16} strokeWidth={1.8}>
+              <path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6" />
+            </Icon>
+          </button>
+        </div>
+      </div>
+
+      <div className="w4-scroll">
+        {loading ? <div className="v3-profile-loading">加载中…</div> : null}
+        {error ? (
+          <div className="v3-error">
+            <div className="v3-error-title">通知加载失败</div>
+            <div className="v3-error-text">{error}</div>
+            <button className="w4-btn is-primary" onClick={() => void load()}>
+              重试
+            </button>
+          </div>
+        ) : null}
+        {!loading && !error && events.length === 0 ? (
+          <div className="v3-empty">
+            <div className="v3-empty-icon">
+              <Bell size={22} strokeWidth={1.6} />
+            </div>
+            <div className="v3-empty-title">暂时没有互动</div>
+            <div className="v3-empty-text">
+              发一条公开动态试试 —— AI 人物可能会点赞、评论或申请加你，也可能什么都不发生。
+            </div>
+            <button className="w4-btn is-primary" onClick={() => navigate({ name: "discover" })}>
+              去发现
+            </button>
+          </div>
+        ) : null}
+
+        <div className="v3-events">
+          {events.map((ev) => (
+            <div key={ev.id} className={`v3-event ${ev.is_read ? "" : "is-unread"}`}>
+              <button className="v3-event-avatar" onClick={() => void open(ev)} aria-label={ev.persona.nickname}>
+                <Avatar src={ev.persona.avatar} name={ev.persona.nickname} size={40} />
+                <span className={`v3-event-icon ${ev.type}`}>
+                  {ev.type === "like" ? (
+                    <Heart size={10} strokeWidth={0} fill="currentColor" />
+                  ) : ev.type === "comment" ? (
+                    <MessageSquare size={10} strokeWidth={2} />
+                  ) : (
+                    <UserPlus size={10} strokeWidth={2} />
+                  )}
+                </span>
+              </button>
+              <div className="v3-event-body">
+                <div className="v3-event-line">
+                  <button className="v3-name-btn" onClick={() => void open(ev)}>
+                    {ev.persona.nickname}
+                  </button>
+                  <span className="v3-ai-tag sm">AI</span>
+                  <span className="v3-event-text">{TYPE_TEXT[ev.type] ?? ev.type}</span>
+                  <span className="v3-event-time">{relTimeOf(ev.scheduled_at || ev.created_at)}</span>
+                </div>
+                {ev.payload.comment ? <div className="v3-event-comment">“{ev.payload.comment}”</div> : null}
+                {ev.type === "friend_request" && ev.payload.message ? (
+                  <div className="v3-event-comment">“{ev.payload.message}”</div>
+                ) : null}
+                {ev.payload.post_excerpt ? (
+                  <div className="v3-event-post">你的动态：{ev.payload.post_excerpt}</div>
+                ) : null}
+                {ev.type === "friend_request" && ev.status === "pending" ? (
+                  <div className="v3-event-actions">
+                    <button
+                      className="w4-btn is-primary"
+                      style={{ height: 28, fontSize: 12 }}
+                      disabled={busyId === ev.id}
+                      onClick={() => void respond(ev, true)}
+                    >
+                      <Check size={13} /> 接受
+                    </button>
+                    <button
+                      className="w4-btn"
+                      style={{ height: 28, fontSize: 12 }}
+                      disabled={busyId === ev.id}
+                      onClick={() => void respond(ev, false)}
+                    >
+                      <X size={13} /> 拒绝
+                    </button>
+                  </div>
+                ) : null}
+                {ev.type === "friend_request" && ev.status === "accepted" ? (
+                  <div className="v3-event-status">已接受</div>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="v3-events-note">
+          <Sparkles size={12} /> 这些互动来自 AI 人物，频率、延迟和是否会回应都由后端控制。
+        </div>
+        <div style={{ height: 24 }} />
+      </div>
+    </div>
+  );
+}

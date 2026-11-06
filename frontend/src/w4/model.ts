@@ -14,6 +14,8 @@ export type Route =
   | { name: "discover" }
   | { name: "discoverMoments" }
   | { name: "discoverPeople" }
+  | { name: "persona"; personaId: string }
+  | { name: "events" }
   | { name: "moments" }
   | { name: "contacts" }
   | { name: "contact"; friendId: string }

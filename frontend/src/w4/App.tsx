@@ -21,6 +21,7 @@ import "./w4-part2.css";
 import type { Route, Section } from "./model";
 import { AppProvider, useApp } from "./store";
 import { isLocalMode } from "./local/keys";
+import { installApiIdentity } from "./v3/api";
 import { Icon } from "./ui";
 import { Rail } from "./components/Rail";
 import { ChatList } from "./components/ChatList";
@@ -28,13 +29,19 @@ import { ContactsList } from "./components/ContactsList";
 import { ChatPane } from "./components/ChatPane";
 import { ContactsIntro } from "./components/ContactsIntro";
 import { ContactDetailPane } from "./components/ContactDetailPane";
-import { DiscoverPane } from "./components/DiscoverPane";
+import { PeopleView } from "./components/DiscoverPane";
 import { DiscoverIndex } from "./components/DiscoverIndex";
 import { NotesPane } from "./components/NotesPane";
 import { MePane } from "./components/MePane";
 import { SettingsPane } from "./components/SettingsPane";
 import { RequestsPane } from "./components/RequestsPane";
 import { EmptyState } from "./components/EmptyState";
+import { FeedView } from "./v3/FeedView";
+import { EventsView } from "./v3/EventsView";
+import { PersonaProfileView } from "./v3/PersonaProfileView";
+
+/* 设备身份：给所有 /api 请求补 X-User-Id / X-User-Token（浏览器环境幂等） */
+installApiIdentity();
 
 export function sectionOf(route: Route): Section {
   switch (route.name) {
@@ -48,6 +55,8 @@ export function sectionOf(route: Route): Section {
     case "discover":
     case "discoverMoments":
     case "discoverPeople":
+    case "persona":
+    case "events":
     case "moments":
       return "discover";
     case "expressions":
@@ -70,9 +79,13 @@ function parseRoute(): Route {
     case "contacts":
       return parts[1] ? { name: "contact", friendId: parts[1] } : { name: "contacts" };
     case "discover":
-      if (parts[1] === "moments") return { name: "discoverMoments" };
       if (parts[1] === "people") return { name: "discoverPeople" };
+      /* 老链接 #/discover/moments 直接落到 Persona 信息流 */
       return { name: "discover" };
+    case "persona":
+      return parts[1] ? { name: "persona", personaId: parts[1] } : { name: "discover" };
+    case "events":
+      return { name: "events" };
     case "moments":
       return { name: "moments" };
     case "expressions":
@@ -84,7 +97,8 @@ function parseRoute(): Route {
     case "requests":
       return { name: "requests" };
     default:
-      return { name: "chats" };
+      /* 新用户首屏直接进 Discover 信息流（不再依赖先生成好友） */
+      return { name: "discover" };
   }
 }
 
@@ -100,10 +114,14 @@ function routeToHash(route: Route): string {
       return "#/contacts";
     case "discover":
       return "#/discover";
-    case "discoverMoments":
-      return "#/discover/moments";
     case "discoverPeople":
       return "#/discover/people";
+    case "persona":
+      return `#/persona/${route.personaId}`;
+    case "events":
+      return "#/events";
+    case "discoverMoments":
+      return "#/discover";
     case "settings":
       return route.section ? `#/settings/${route.section}` : "#/settings";
     default:
@@ -135,7 +153,7 @@ function Shell() {
   useEffect(() => {
     const onHash = () => setRoute(parseRoute());
     window.addEventListener("hashchange", onHash);
-    if (!window.location.hash) window.history.replaceState(null, "", "#/chats");
+    if (!window.location.hash) window.history.replaceState(null, "", "#/discover");
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
@@ -161,7 +179,9 @@ function Shell() {
   const section = sectionOf(route);
 
   const showList =
-    section === "chats" || section === "contacts" || (section === "discover" && !mobile);
+    section === "chats" ||
+    section === "contacts" ||
+    (section === "discover" && !mobile && route.name !== "persona");
   /** 这两个是无列表列、直接显示内容的分区，手机上不需要「推入」动画 */
   const listIndex = route.name === "chats" || route.name === "contacts";
 
@@ -176,16 +196,14 @@ function Shell() {
       case "discover":
       case "discoverMoments":
       case "moments":
-        /* 桌面：左边是二级菜单，右边直接出「动态」（跟微信 Mac 一致）
-           手机：仍然显示两个入口的索引页 */
-        return (
-          <DiscoverPane
-            navigate={navigate}
-            pane={mobile ? (route.name === "discover" ? undefined : "moments") : "moments"}
-          />
-        );
+        /* V3：发现首页 = 以 AI Persona 为中心的信息流 */
+        return <FeedView navigate={navigate} />;
       case "discoverPeople":
-        return <DiscoverPane navigate={navigate} pane={mobile ? undefined : "people"} />;
+        return <PeopleView navigate={navigate} />;
+      case "events":
+        return <EventsView navigate={navigate} />;
+      case "persona":
+        return <PersonaProfileView personaId={route.personaId} navigate={navigate} />;
       case "expressions":
         return <NotesPane />;
       case "me":
@@ -272,7 +290,13 @@ function Shell() {
                   <ContactsList route={route} navigate={navigate} requestsCount={requests.length} />
                 ) : section === "discover" ? (
                   <DiscoverIndex
-                    active={route.name === "discoverPeople" ? "people" : "moments"}
+                    active={
+                      route.name === "discoverPeople"
+                        ? "people"
+                        : route.name === "events"
+                          ? "events"
+                          : "feed"
+                    }
                     navigate={navigate}
                   />
                 ) : (

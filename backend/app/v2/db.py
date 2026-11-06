@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.logging_utils import get_logger
+from app.v3.identity import LOCAL_USER_ID, current_user_id
 
 log = get_logger(__name__)
 
@@ -55,7 +56,9 @@ _DEFAULT_PROFILE: dict[str, Any] = {
 }
 
 _FRIEND_DEFAULTS: dict[str, Any] = {
+    "owner_user_id": LOCAL_USER_ID,
     "avatar_seed": "",
+    "avatar_url": "",
     "voice_rate": "+0%",
     "voice_pitch": "+0Hz",
     "fish_voice_id": "",
@@ -144,6 +147,7 @@ class DB:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     avatar_seed TEXT NOT NULL DEFAULT '',
+                    avatar_url TEXT DEFAULT '',
                     archetype_id TEXT NOT NULL DEFAULT '',
                     voice_id TEXT NOT NULL DEFAULT '',
                     voice_rate TEXT DEFAULT '+0%',
@@ -245,6 +249,19 @@ class DB:
                 log.info("migrated friends table: added gender column")
                 log.info("migrated friends table: added fish_voice_id column")
 
+            # V3 多用户：好友归属。老数据统一归 local（单用户行为不变）
+            if "avatar_url" not in columns:
+                conn.execute("ALTER TABLE friends ADD COLUMN avatar_url TEXT DEFAULT ''")
+                log.info("migrated friends table: added avatar_url column")
+            if "owner_user_id" not in columns:
+                conn.execute(
+                    "ALTER TABLE friends ADD COLUMN owner_user_id TEXT DEFAULT 'local'"
+                )
+                log.info("migrated friends table: added owner_user_id column")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_user_id)"
+            )
+
             profile_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(user_profile)").fetchall()
             }
@@ -256,6 +273,24 @@ class DB:
             if msg_columns and "image_path" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
                 log.info("migrated messages table: added image_path column")
+
+            # V3 多用户：用户动态 / 表达本归属
+            um_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(user_moments)").fetchall()
+            }
+            if um_columns and "user_id" not in um_columns:
+                conn.execute(
+                    "ALTER TABLE user_moments ADD COLUMN user_id TEXT DEFAULT 'local'"
+                )
+                log.info("migrated user_moments: added user_id column")
+            ex_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(saved_expressions)").fetchall()
+            }
+            if ex_columns and "user_id" not in ex_columns:
+                conn.execute(
+                    "ALTER TABLE saved_expressions ADD COLUMN user_id TEXT DEFAULT 'local'"
+                )
+                log.info("migrated saved_expressions: added user_id column")
 
             row = conn.execute("SELECT id FROM user_profile WHERE id=1").fetchone()
             if row is None:
@@ -333,23 +368,36 @@ class DB:
     # ------------------------------------------------------------------ #
     # 好友
     # ------------------------------------------------------------------ #
-    def list_friends(self, status: str | None = None) -> list[dict]:
-        sql = "SELECT * FROM friends"
-        params: tuple[Any, ...] = ()
+    def list_friends(self, status: str | None = None, *, owner_user_id: str | None = None) -> list[dict]:
+        """当前用户的好友列表（V3 起按 owner_user_id 隔离）。"""
+        owner = owner_user_id or current_user_id()
+        sql = "SELECT * FROM friends WHERE owner_user_id=?"
+        params: tuple[Any, ...] = (owner,)
         if status:
-            sql += " WHERE status=?"
-            params = (status,)
+            sql += " AND status=?"
+            params = (owner, status)
         sql += " ORDER BY (last_interaction_at IS NULL), last_interaction_at DESC, created_at DESC"
         return self._fetch_all("friends", sql, params)
 
-    def get_friend(self, fid: str) -> dict | None:
+    def get_friend(self, fid: str, *, any_owner: bool = False, owner_user_id: str | None = None) -> dict | None:
+        """按 id 取好友。
+
+        默认只返回**当前用户**的好友；``any_owner=True`` 供服务端内部
+        （后台任务/迁移）读取，不要用在前端请求路径上。
+        """
         if not fid:
             return None
-        return self._fetch_one("friends", "id=?", (fid,))
+        if any_owner:
+            return self._fetch_one("friends", "id=?", (fid,))
+        owner = owner_user_id or current_user_id()
+        return self._fetch_one("friends", "id=? AND owner_user_id=?", (fid, owner))
 
     def create_friend(self, data: dict) -> dict:
         payload = dict(_FRIEND_DEFAULTS)
         payload.update({k: v for k, v in data.items() if v is not None})
+        payload["owner_user_id"] = (
+            str(data.get("owner_user_id") or "").strip() or current_user_id()
+        )
         payload["id"] = data.get("id") or _uuid()
         payload.setdefault("created_at", _now_iso())
         if not payload.get("avatar_seed"):
@@ -364,13 +412,15 @@ class DB:
                 f"INSERT INTO friends ({', '.join(cols)}) VALUES ({placeholders})",
                 tuple(payload[c] for c in cols),
             )
-        created = self.get_friend(payload["id"])
+        # 显式按 owner 读回：调用方可能不在请求上下文（后台任务/CLI/测试），
+        # 此时 current_user_id() 不等于 owner_user_id，用严格模式会读不到刚插入的行。
+        created = self.get_friend(payload["id"], any_owner=True)
         assert created is not None
         return created
 
     def update_friend(self, fid: str, **fields: Any) -> dict:
         allowed = {
-            "name", "avatar_seed", "archetype_id", "voice_id", "voice_rate", "voice_pitch",
+            "name", "avatar_seed", "avatar_url", "archetype_id", "voice_id", "voice_rate", "voice_pitch",
             "nationality", "city", "timezone", "native_lang", "language_mix_mode", "age",
             "occupation", "personality_prompt", "speech_quirks", "bio", "status",
             "reply_language", "language_mix_mode",
@@ -560,10 +610,13 @@ class DB:
         return moment
 
     def list_moments(self, limit: int = 30) -> list[dict]:
+        """好友动态只返回当前用户好友发的（V3 起按 owner 隔离）。"""
+        owner = current_user_id()
         return self._fetch_all(
             "moments",
-            "SELECT * FROM moments ORDER BY created_at DESC, rowid DESC LIMIT ?",
-            (max(1, min(int(limit), 100)),),
+            "SELECT m.* FROM moments m JOIN friends f ON f.id=m.friend_id"
+            " WHERE f.owner_user_id=? ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+            (owner, max(1, min(int(limit), 100))),
         )
 
     def get_moment(self, mid: str) -> dict | None:
@@ -577,15 +630,16 @@ class DB:
     # 用户动态（用户自己发） + AI 好友评论
     # ---------------------------------------------------------------- #
     def add_user_moment(
-        self, content: str, mood_tag: str = "", image_path: str = ""
+        self, content: str, mood_tag: str = "", image_path: str = "", *, user_id: str | None = None
     ) -> dict:
         mid = _uuid()
         now = _now_iso()
+        owner = user_id or current_user_id()
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT INTO user_moments (id, content, mood_tag, image_path, created_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (mid, content, mood_tag or "", image_path or "", now),
+                "INSERT INTO user_moments (id, user_id, content, mood_tag, image_path, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (mid, owner, content, mood_tag or "", image_path or "", now),
             )
             row = self.conn.execute(
                 "SELECT * FROM user_moments WHERE id=?", (mid,)
@@ -594,19 +648,27 @@ class DB:
 
     def delete_user_moment(self, mid: str) -> bool:
         """删除用户自己发的动态（评论表 ON DELETE CASCADE 一起清）。"""
+        owner = current_user_id()
         with self._lock, self.conn:
-            cur = self.conn.execute("DELETE FROM user_moments WHERE id=?", (mid,))
+            cur = self.conn.execute(
+                "DELETE FROM user_moments WHERE id=? AND user_id=?", (mid, owner)
+            )
             return cur.rowcount > 0
 
     def list_user_moments(self, limit: int = 30) -> list[dict]:
+        owner = current_user_id()
         return self._fetch_all(
             "user_moments",
-            "SELECT * FROM user_moments ORDER BY created_at DESC, rowid DESC LIMIT ?",
-            (max(1, min(int(limit), 100)),),
+            "SELECT * FROM user_moments WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (owner, max(1, min(int(limit), 100))),
         )
 
-    def get_user_moment(self, mid: str) -> dict | None:
-        return self._fetch_one("user_moments", "id=?", (mid,))
+    def get_user_moment(self, mid: str, *, any_owner: bool = False) -> dict | None:
+        if any_owner:
+            return self._fetch_one("user_moments", "id=?", (mid,))
+        return self._fetch_one(
+            "user_moments", "id=? AND user_id=?", (mid, current_user_id())
+        )
 
     def add_moment_comment(self, moment_id: str, friend_id: str, content: str) -> dict:
         cid = _uuid()
@@ -645,9 +707,12 @@ class DB:
         return grouped
 
     def moments_exist_for_date(self, feed_date: str) -> bool:
+        owner = current_user_id()
         with self._lock:
             row = self.conn.execute(
-                "SELECT COUNT(*) FROM moments WHERE feed_date=?", (feed_date,)
+                "SELECT COUNT(*) FROM moments m JOIN friends f ON f.id=m.friend_id"
+                " WHERE m.feed_date=? AND f.owner_user_id=?",
+                (feed_date, owner),
             ).fetchone()
         return bool(row and row[0])
 
@@ -665,25 +730,32 @@ class DB:
         with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO saved_expressions"
-                " (id, original_text, better_expression, explanation, source_friend_id, mastery_count, status, created_at)"
-                " VALUES (?, ?, ?, ?, ?, 0, 'learning', ?)",
-                (eid, original_text or "", better_expression, explanation, source_friend_id, _now_iso()),
+                " (id, user_id, original_text, better_expression, explanation, source_friend_id,"
+                "  mastery_count, status, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, 0, 'learning', ?)",
+                (eid, current_user_id(), original_text or "", better_expression, explanation,
+                 source_friend_id, _now_iso()),
             )
-        expr = self.get_expression(eid)
+        expr = self.get_expression(eid, any_owner=True)
         assert expr is not None
         return expr
 
     def list_expressions(self, status: str | None = None) -> list[dict]:
-        sql = "SELECT * FROM saved_expressions"
-        params: tuple[Any, ...] = ()
+        owner = current_user_id()
+        sql = "SELECT * FROM saved_expressions WHERE user_id=?"
+        params: tuple[Any, ...] = (owner,)
         if status:
-            sql += " WHERE status=?"
-            params = (status,)
+            sql += " AND status=?"
+            params = (owner, status)
         sql += " ORDER BY created_at DESC"
         return self._fetch_all("saved_expressions", sql, params)
 
-    def get_expression(self, eid: str) -> dict | None:
-        return self._fetch_one("saved_expressions", "id=?", (eid,))
+    def get_expression(self, eid: str, *, any_owner: bool = False) -> dict | None:
+        if any_owner:
+            return self._fetch_one("saved_expressions", "id=?", (eid,))
+        return self._fetch_one(
+            "saved_expressions", "id=? AND user_id=?", (eid, current_user_id())
+        )
 
     def update_expression(self, eid: str, **fields: Any) -> dict:
         allowed = {"original_text", "better_expression", "explanation", "mastery_count", "status"}
@@ -691,7 +763,10 @@ class DB:
         if payload:
             sets = ", ".join(f"{k}=?" for k in payload)
             with self._lock, self.conn:
-                self.conn.execute(f"UPDATE saved_expressions SET {sets} WHERE id=?", (*payload.values(), eid))
+                self.conn.execute(
+                    f"UPDATE saved_expressions SET {sets} WHERE id=? AND user_id=?",
+                    (*payload.values(), eid, current_user_id()),
+                )
         expr = self.get_expression(eid)
         if expr is None:
             raise KeyError(f"expression not found: {eid}")
@@ -699,13 +774,16 @@ class DB:
 
     def delete_expression(self, eid: str) -> None:
         with self._lock, self.conn:
-            self.conn.execute("DELETE FROM saved_expressions WHERE id=?", (eid,))
+            self.conn.execute(
+                "DELETE FROM saved_expressions WHERE id=? AND user_id=?",
+                (eid, current_user_id()),
+            )
 
     def pick_review_expressions(self, n: int = 2) -> list[dict]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT * FROM saved_expressions WHERE status='learning'"
+                "SELECT * FROM saved_expressions WHERE status='learning' AND user_id=?"
                 " ORDER BY mastery_count ASC, created_at ASC LIMIT ?",
-                (max(0, int(n)),),
+                (current_user_id(), max(0, int(n))),
             ).fetchall()
         return [d for d in (self._row_to_dict(r, "saved_expressions") for r in rows) if d is not None]

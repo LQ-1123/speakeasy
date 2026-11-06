@@ -30,6 +30,9 @@ from app.routers import voice_api
 from app.routers import market_api
 from app.routers import conversations_api
 from app.routers import translate_api
+from app.v3.router import router as v3_router
+from app.v3.schema import ensure_schema
+from app.v3.service import V3Service
 
 VERSION = "0.1.0"
 
@@ -62,6 +65,15 @@ async def lifespan(app: FastAPI):
     from app.v2.services import build_services  # noqa: PLC0415
 
     app.state.v2 = build_services(engines, settings.data_path)
+
+    # SpeakEasy 3.0：Persona / Post / Friendship / SocialEvent（同库，自动迁移）
+    try:
+        ensure_schema(app.state.v2.db)
+        app.state.v3 = V3Service(app.state.v2.db, engines, str(settings.data_path))
+        log.info("v3 服务就绪：social=%s", app.state.v3.config.public())
+    except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
+        log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
+        app.state.v3 = None
 
     # 会话存储（WS 连接共享）
     from app.session import SessionStore
@@ -158,6 +170,7 @@ def create_app() -> FastAPI:
     app.include_router(translate_api.router)
     app.include_router(conversations_api.router)
     app.include_router(v2_router)
+    app.include_router(v3_router)
 
     # 对话持久化存储
     from app.conversations import ConversationStore  # noqa: PLC0415

@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * 发现（桌面）：左列二级菜单，跟微信 Mac 一致。
- * 选中项整行微信绿、图标与文字反白；右侧由 App 渲染对应内容。
+ * 发现（桌面左列）：信息流 / 偶遇 / 通知。
  */
 
-import { ChevronRight, Compass, ImagePlus } from "lucide-react";
+import { Bell, ChevronRight, Compass, Sparkles } from "lucide-react";
 
 import type { Route } from "../model";
 
@@ -13,25 +12,33 @@ export function DiscoverIndex({
   active,
   navigate,
 }: {
-  active: "moments" | "people";
+  active: "feed" | "people" | "events";
   navigate: (r: Route) => void;
 }) {
   const items = [
     {
-      key: "moments" as const,
-      label: "动态",
-      desc: "看看好友们此刻在做什么",
-      icon: <ImagePlus size={17} strokeWidth={1.8} />,
-      tint: "#3d6b8f",
-      route: { name: "discoverMoments" } as Route,
+      key: "feed" as const,
+      label: "信息流",
+      desc: "AI 人物们此刻在做什么",
+      icon: <Sparkles size={17} strokeWidth={1.8} />,
+      tint: "var(--w-green-ink)",
+      route: { name: "discover" } as Route,
     },
     {
       key: "people" as const,
       label: "偶遇一个人",
       desc: "每次一位，先听听 TA 的声音",
       icon: <Compass size={17} strokeWidth={1.8} />,
-      tint: "var(--w-green-ink)",
+      tint: "#3d6b8f",
       route: { name: "discoverPeople" } as Route,
+    },
+    {
+      key: "events" as const,
+      label: "通知",
+      desc: "点赞、评论和好友申请",
+      icon: <Bell size={17} strokeWidth={1.8} />,
+      tint: "#b7791f",
+      route: { name: "events" } as Route,
     },
   ];
 

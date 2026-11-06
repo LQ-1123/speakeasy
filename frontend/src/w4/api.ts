@@ -32,6 +32,8 @@ export const NAME_GENDER: Record<string, "male" | "female"> = {
  */
 export function assignAvatars(list: Friend[]): void {
   for (const f of list) {
+    /* V3：来自 Persona 的好友自带真实插画头像（/mock/avatars/*.jpg），不要覆盖 */
+    if (f.avatar && (f.avatar.startsWith("/") || /^https?:/i.test(f.avatar))) continue;
     const slug = (f.name || "").toLowerCase().replace(/[^a-z]/g, "");
     const gender =
       (f.gender === "male" || f.gender === "female")
@@ -129,17 +131,21 @@ function mapFriend(raw: RawFriend): Friend {
   const turns = Number(raw.total_turns ?? 0);
   const lastAt = (raw.last_interaction_at as string) ?? null;
   const localTime = String(raw.local_time ?? "");
+  const rawAvatar = String(raw.avatar_url ?? "").trim();
   return {
     id,
     name,
     gender: String(raw.gender ?? ""),
-    avatar: diceAvatar(
-      id || name,
-      raw.gender === "male" || raw.gender === "female"
-        ? (String(raw.gender) as "male" | "female")
-        : NAME_GENDER[(name || "").toLowerCase().replace(/[^a-z]/g, "")] ?? "",
-      avatarRegionOf(String(raw.nationality || raw.country || "")),
-    ),
+    avatar:
+      rawAvatar
+        ? mediaUrl(rawAvatar) ?? rawAvatar
+        : diceAvatar(
+            id || name,
+            raw.gender === "male" || raw.gender === "female"
+              ? (String(raw.gender) as "male" | "female")
+              : NAME_GENDER[(name || "").toLowerCase().replace(/[^a-z]/g, "")] ?? "",
+            avatarRegionOf(String(raw.nationality || raw.country || "")),
+          ),
     city: String(raw.city ?? ""),
     country,
     flag: flagOf(country),

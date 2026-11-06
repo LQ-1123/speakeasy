@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -36,6 +37,8 @@ from app.v2 import translate as translate_mod
 from app.v2 import user_moments as user_moments_mod
 from app.v2.timeutil import local_date_str, local_state
 from app.v2.voices import load_archetypes
+from app.v3.identity import LOCAL_USER_ID, current_user_id
+from app.v3.security import bind_current_user
 from app.voice.stt_config import (
     STT_PRESETS,
     STTRuntimeConfig,
@@ -45,7 +48,12 @@ from app.voice.stt_config import (
 
 log = get_logger(__name__)
 
-router = APIRouter(prefix="/api/v2", tags=["v2"])
+router = APIRouter(
+    prefix="/api/v2",
+    tags=["v2"],
+    # V3 多用户：每个请求先绑定当前用户（不带身份头 = local，兼容老客户端）
+    dependencies=[Depends(bind_current_user)],
+)
 
 V2_VERSION = "2.0.0"
 
@@ -147,6 +155,33 @@ def _services(request: Request) -> Any:
 
 def _thread(fn, *args, **kwargs):
     return asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _friendship_set_status(services: Any, friend_id: str, status: str) -> None:
+    """V2 好友申请接受/拒绝时，同步 V3 的 ``friendships`` 状态（表可能不存在，忽略即可）。"""
+    db = services.db
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        with db._lock, db.conn:  # noqa: SLF001 - 与 DB 共用连接与锁
+            db.conn.execute(
+                "UPDATE friendships SET status=?, updated_at=? WHERE friend_id=? AND user_id=?",
+                (status, now, friend_id, current_user_id()),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("同步 friendship 状态失败: %s", exc)
+
+
+def _friendship_drop(services: Any, friend_id: str) -> None:
+    """删除好友时清掉对应的 V3 好友关系。"""
+    db = services.db
+    try:
+        with db._lock, db.conn:  # noqa: SLF001
+            db.conn.execute(
+                "DELETE FROM friendships WHERE friend_id=? AND user_id=?",
+                (friend_id, current_user_id()),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("清理 friendship 失败: %s", exc)
 
 
 def _message_public(msg: dict | None) -> dict | None:
@@ -575,6 +610,14 @@ async def _run_onboarding(services: Any) -> None:
 
 
 def _ensure_onboarding(services: Any, all_friends: list[dict]) -> bool:
+    """空好友时自动来 1~3 个好友申请。
+
+    V3 起：**带设备身份的新用户不再自动捏人**——他们直接进入 Persona 信息流，
+    通过浏览内容自己加好友（避免为每个新用户预生成一批完整 AI 好友）。
+    本地 `local` 用户保留原有引导行为。
+    """
+    if current_user_id() != LOCAL_USER_ID:
+        return False
     if all_friends or services.onboarding_pending:
         return services.onboarding_pending
     services.onboarding_task = services.spawn_bg(_run_onboarding(services))
@@ -953,6 +996,7 @@ async def accept_friend(request: Request, friend_id: str) -> dict:
         raise HTTPException(status_code=404, detail="好友不存在")
     if friend.get("status") != "active":
         friend = await _thread(services.db.update_friend, friend_id, status="active")
+    _friendship_set_status(services, friend_id, "accepted")
     existing = await _thread(services.db.recent_messages, friend_id, 1)
     if existing:
         # 偶遇时已经说过第一句了：接受时不再补一条，避免出现两条招呼
@@ -970,6 +1014,7 @@ async def decline_friend(request: Request, friend_id: str) -> dict:
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
+    _friendship_set_status(services, friend_id, "declined")
     await _thread(services.db.delete_friend, friend_id)
     return {"ok": True}
 
@@ -982,6 +1027,7 @@ async def delete_friend(request: Request, friend_id: str) -> dict:
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
     audio_names = await _thread(services.db.friend_audio_paths, friend_id)
+    _friendship_drop(services, friend_id)
     await _thread(services.db.delete_friend, friend_id)
     services.followup_inflight.discard(friend_id)
     removed = 0
@@ -1042,6 +1088,9 @@ async def friend_messages(
 @router.post("/friends/{friend_id}/read")
 async def read_messages(request: Request, friend_id: str) -> dict:
     services = _services(request)
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
     await _thread(services.db.mark_read, friend_id)
     return {"ok": True}
 

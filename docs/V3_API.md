@@ -86,6 +86,12 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 - 同一个人物在信息流、Persona 主页、偶遇卡片、聊天列表里都引用**同一个 URL/种子**，跨端一致。
 - 老库启动时 ackfill_avatar_seeds() 自动回填种子（幂等）。
 
+### 3.10 朗读互斥（同一时刻只播一个）
+
+朗读/试听音频在前端由 `audioBus` 统一管理：拦截 `HTMLMediaElement.play`，播放前暂停上一段；
+`local/tts` 的 WebAudio 播放路径同样在开始新音频前 `stopWebAudio()`。
+因此连续点两条动态的「朗读」时，上一句会立刻停止，不会重叠。
+
 ### 3.9 个人资料、性别与头像
 
 - `PUT /api/v3/profile` 支持 `nickname / target_languages / birthday / city / job / **gender** / interests`；

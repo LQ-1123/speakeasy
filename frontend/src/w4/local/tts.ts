@@ -9,6 +9,9 @@ import { loadKeys } from "./keys";
 import { fishSynth } from "./fish";
 
 let _ctx: AudioContext | null = null;
+let _currentSrc: AudioBufferSourceNode | null = null;
+let _starts = 0;
+let _stops = 0;
 
 export function audioContext(): AudioContext | null {
   try {
@@ -21,6 +24,28 @@ export function audioContext(): AudioContext | null {
 }
 
 /** 播放任意音频 URL：先取字节，再用 WebAudio 解码（荣耀/华为 WebView 兼容） */
+/** 停止当前正在播放的 WebAudio 音源（切换下一句时调用） */
+export function stopWebAudio(): void {
+  if (!_currentSrc) return;
+  _stops += 1;
+  try {
+    _currentSrc.stop();
+  } catch {
+    /* 已经结束 */
+  }
+  _currentSrc = null;
+}
+
+/** 当前是否有 WebAudio 正在播放 */
+export function isWebAudioPlaying(): boolean {
+  return _currentSrc !== null;
+}
+
+/** 调试用：WebAudio 启动/停止次数（验证切换时不叠加） */
+export function webAudioStats(): { starts: number; stops: number; playing: boolean } {
+  return { starts: _starts, stops: _stops, playing: _currentSrc !== null };
+}
+
 export async function playUrlWebAudio(url: string): Promise<boolean> {
   try {
     const ctx = audioContext();
@@ -30,9 +55,16 @@ export async function playUrlWebAudio(url: string): Promise<boolean> {
     const buf = await res.arrayBuffer();
     if (!buf.byteLength) return false;
     const audio = await ctx.decodeAudioData(buf);
+    // 同一时刻只播一个：切换下一句时先停掉上一句
+    stopWebAudio();
     const src = ctx.createBufferSource();
     src.buffer = audio;
+    src.onended = () => {
+      if (_currentSrc === src) _currentSrc = null;
+    };
     src.connect(ctx.destination);
+    _currentSrc = src;
+    _starts += 1;
     src.start();
     return true;
   } catch {

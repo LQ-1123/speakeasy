@@ -21,6 +21,7 @@ import "./w4-part2.css";
 import type { Route, Section } from "./model";
 import { AppProvider, useApp } from "./store";
 import { isLocalMode } from "./local/keys";
+import { installAudioBus } from "./audioBus";
 import { installApiIdentity } from "./v3/api";
 import { Icon } from "./ui";
 import { Rail } from "./components/Rail";
@@ -367,6 +368,9 @@ function Shell() {
     </div>
   );
 }
+
+// 全局音频总线：同一时刻只允许一个声音播放（朗读切换下一句即停止上一句）
+installAudioBus();
 
 export function App() {
   return (

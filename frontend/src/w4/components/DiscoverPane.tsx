@@ -108,6 +108,17 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* 偶遇卡片出现时就把「听 TA 的声音」预取到浏览器缓存 */
+  useEffect(() => {
+    if (!candidate?.greetingAudio) return;
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.src = candidate.greetingAudio;
+    return () => {
+      audio.src = "";
+    };
+  }, [candidate?.greetingAudio]);
+
   const togglePlay = () => {
     if (!candidate?.greetingAudio) return;
     if (playing) {

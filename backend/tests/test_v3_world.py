@@ -289,6 +289,33 @@ def test_speech_voice_follows_post_language(world_db):
         assert voice.calls[-1][1].startswith("ko-")
 
 
+def test_audio_cache_serves_from_disk_without_resynth(world_db):
+    """预生成的朗读音频：第二次请求不再合成（毫秒级读取），且文件名内容寻址。"""
+    db, tmp_path = world_db
+    app, service, voice = _make_app(db, tmp_path)
+    from app.v3.audio_cache import PersonaAudioCache
+
+    cache = PersonaAudioCache(db, voice, str(tmp_path / "v3_audio"))
+    app.state.v3_audio = cache
+    with TestClient(app) as client:
+        post = service.get_persona_post_row("pp_lin_27")
+        persona = service.persona_by_id(str(post["persona_id"]))
+        path, lang, voice_id = cache.path_for(post, persona)
+        assert "pp_lin_27" in path and lang == "zh" and voice_id.startswith("zh-")
+
+        first = client.get("/api/v3/persona-posts/pp_lin_27/speech")
+        assert first.status_code == 200
+        assert first.headers["x-audio-cached"] == "1"
+        assert first.headers["x-voice"] == voice_id
+        calls = len(voice.calls)
+
+        second = client.get("/api/v3/persona-posts/pp_lin_27/speech")
+        assert second.status_code == 200
+        assert len(voice.calls) == calls, "命中磁盘缓存时不应再次合成"
+        cached_files = list(Path(cache.cache_dir).glob("pp_lin_27-*"))
+        assert cached_files and cached_files[0].stat().st_size > 0
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

@@ -75,6 +75,18 @@ async def lifespan(app: FastAPI):
         world = await ensure_world(app.state.v2.db, engines.llm)
         app.state.v3 = V3Service(app.state.v2.db, engines, str(settings.data_path))
         log.info("v3 服务就绪：world=%s social=%s", world, app.state.v3.config.public())
+
+        # 朗读毫秒级：后台把信息流第一条音频预先合成并落盘，点击直接读文件
+        from app.v3.audio_cache import PersonaAudioCache  # noqa: PLC0415
+
+        app.state.v3_audio = PersonaAudioCache(
+            app.state.v2.db,
+            app.state.v2.voice,
+            os.path.join(str(settings.data_path), "v3_audio"),
+        )
+        app.state.v3_audio.start()
+        queued = app.state.v3_audio.warm(app.state.v3)
+        log.info("v3 朗读预热已排队 %d 条（后台合成，不阻塞启动）", queued)
     except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
         log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
         app.state.v3 = None
@@ -137,6 +149,9 @@ async def lifespan(app: FastAPI):
                 await v2.aclose()
             except Exception as exc:  # noqa: BLE001
                 log.debug("v2 关闭失败: %s", exc)
+        audio_cache = getattr(app.state, "v3_audio", None)
+        if audio_cache is not None:
+            audio_cache.stop()
         await engines.aclose()
         log.info("已关闭")
 

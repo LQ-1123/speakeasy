@@ -192,6 +192,15 @@ class V3Service:
             ).fetchone()
         return dict(row) if row else None
 
+    def recent_persona_posts(self, limit: int = 8) -> list[dict]:
+        """最近的 Persona 动态原始行（用于朗读音频预热）。"""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT * FROM persona_posts ORDER BY created_at DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def _persona_map(self) -> dict[str, dict]:
         return {p["id"]: p for p in self._personas()}
 

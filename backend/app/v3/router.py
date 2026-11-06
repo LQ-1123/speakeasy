@@ -76,6 +76,26 @@ async def _run(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+def _warm_audio(request: Request, service: V3Service, items: list[dict]) -> int:
+    """把这一页 Persona 动态放进朗读预热队列（不阻塞响应）。"""
+    cache = getattr(request.app.state, "v3_audio", None)
+    if cache is None or not items:
+        return 0
+    queued = 0
+    for item in items:
+        if item.get("kind") != "persona_post":
+            continue
+        try:
+            post = service.get_persona_post_row(str(item.get("id") or ""))
+            persona = service.persona_by_id(str(post["persona_id"])) if post else None
+            if post and persona:
+                cache.enqueue(post, persona)
+                queued += 1
+        except Exception:  # noqa: BLE001 - 预热失败不影响返回
+            continue
+    return queued
+
+
 # --------------------------------------------------------------------------- #
 # 健康 & 身份
 # --------------------------------------------------------------------------- #
@@ -92,11 +112,14 @@ async def health(request: Request) -> dict:
             world = await asyncio.to_thread(world_status, db)
         except Exception:  # noqa: BLE001
             world = {}
+    audio_cache = getattr(request.app.state, "v3_audio", None)
+    audio_stats = audio_cache.stats() if audio_cache is not None else {}
     return {
         "status": "ok",
         "version": V3_VERSION,
         "social": service.config.public(),
         "world": world,
+        "audio": audio_stats,
         "personas": world.get("personas") or len(service._personas()),  # noqa: SLF001 - 只读计数
     }
 
@@ -127,7 +150,13 @@ async def get_feed(
     user_id: str = Depends(bind_current_user),
 ) -> dict:
     service = _v3(request)
-    return await _run(service.feed, user_id, cursor=cursor, limit=limit)
+    data = await _run(service.feed, user_id, cursor=cursor, limit=limit)
+    # 毫秒级朗读：本页动态立刻进后台合成队列，用户点「朗读」时文件通常已就绪
+    try:
+        await asyncio.to_thread(_warm_audio, request, service, data.get("items") or [])
+    except Exception:  # noqa: BLE001
+        pass
+    return data
 
 
 @router.get("/feed/summary")
@@ -192,17 +221,30 @@ async def discover_next(
     data = await _run(service.discover_next, user_id, language=language)
     if data is None:
         raise HTTPException(status_code=404, detail="世界还没有生成人物")
+    # 偶遇卡片上的「听 TA 的声音」也提前合成
+    cache = getattr(request.app.state, "v3_audio", None)
+    if cache is not None and data.get("post_id"):
+        try:
+            post = service.get_persona_post_row(str(data["post_id"]))
+            persona = service.persona_by_id(str(data["persona"]["id"]))
+            if post and persona:
+                cache.enqueue(post, persona)
+        except Exception:  # noqa: BLE001
+            pass
     return data
 
 
 @router.get("/persona-posts/{post_id}/speech")
 async def persona_post_speech(request: Request, post_id: str, v: str | None = None):
-    """用**帖子本身的语言**朗读一条动态（公共内容，可被 <audio> 直接播放）。
+    """朗读一条动态（公共内容，可被 <audio> 直接播放）。
+
+    **毫秒级**：朗读音频在后台按「信息流 / 偶遇」的浏览顺序提前合成好并落盘，
+    点击时只做文件读取（~几毫秒）；没预热到才同步合成兜底。
 
     规则：发帖语言决定朗读声线。
     - 帖子语言 == 人物母语 → 用人物自己的声线（保持角色一致）
-    - 否则 → 按帖子语言挑一条该语言的声线（例如人物用中文发帖就读中文声线）
-    - ``?v=<content_hash>`` 只用于缓存版本：内容变了 URL 就变，避免浏览器播旧音频
+    - 否则 → 按帖子语言挑一条该语言的声线
+    - ``?v=<content_hash>`` 只用于缓存版本：内容变了 URL 就变
     """
     service = _v3(request)
     post = await _run(service.get_persona_post_row, post_id)
@@ -211,6 +253,25 @@ async def persona_post_speech(request: Request, post_id: str, v: str | None = No
     persona = await _run(service.persona_by_id, str(post["persona_id"]))
     if persona is None:
         raise HTTPException(status_code=404, detail="人物不存在")
+
+    cache = getattr(request.app.state, "v3_audio", None)
+    if cache is not None:
+        try:
+            path, lang, voice = await cache.get_or_synth(post, persona)
+            media_type = "audio/mpeg" if str(path).endswith(".mp3") else "audio/wav"
+            return FileResponse(
+                path,
+                media_type=media_type,
+                filename=os.path.basename(path),
+                headers={
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                    "X-Voice": voice,
+                    "X-Language": lang,
+                    "X-Audio-Cached": "1",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - 落到下面的同步兜底
+            log.warning("朗读缓存失败，改同步合成 %s: %s", post_id, exc)
 
     services = getattr(request.app.state, "v2", None)
     voice_engine = getattr(services, "voice", None) if services is not None else None

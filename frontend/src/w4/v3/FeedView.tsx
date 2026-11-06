@@ -122,6 +122,24 @@ export function FeedView({ navigate }: { navigate: (r: Route) => void }) {
     void load(true);
   }, [load, localMode]);
 
+  /* 毫秒级朗读：首屏几条人物动态的音频先在后台取到浏览器缓存，
+     用户点「朗读」时几乎无网络等待（后端也已提前合成 + 内容寻址 URL）。 */
+  useEffect(() => {
+    if (!items.length) return;
+    const prefetch = items
+      .filter((it) => it.kind === "persona_post")
+      .slice(0, 4)
+      .map((it) => {
+        const audio = new Audio();
+        audio.preload = "auto";
+        audio.src = personaSpeechUrl(it.id, it.content_hash);
+        return audio;
+      });
+    return () => {
+      for (const audio of prefetch) audio.src = "";
+    };
+  }, [items]);
+
   /* 社交事件轮询：更新未读数，并在有新事件时提示 */
   const lastEventCount = useRef(-1);
   useEffect(() => {

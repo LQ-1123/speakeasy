@@ -710,10 +710,15 @@ class V3Service:
         }
 
     def _friend_row_for_persona(self, persona: dict, *, status: str) -> dict:
-        """把 Persona 映射成 ``friends`` 表的一行（复用 V2 聊天/记忆/语音）。"""
+        """把 Persona 映射成 ``friends`` 表的一行（复用 V2 聊天/记忆/语音）。
+
+        语言一致性：好友的回复语言 = 人物母语，声线 = 人物声线，
+        所以聊天文字和语音条永远是同一种语言。
+        """
         name = str(persona.get("nickname") or "Friend")
         personality = str(persona.get("personality") or "")
         bio = str(persona.get("bio") or "")
+        lang = str(persona.get("language") or "en").strip().lower()
         return {
             "name": name,
             "avatar_seed": f"{persona['id']}-{name[:2].lower()}",
@@ -723,9 +728,9 @@ class V3Service:
             "nationality": str(persona.get("country") or ""),
             "city": str(persona.get("city") or ""),
             "timezone": str(persona.get("timezone") or "UTC"),
-            "native_lang": "en",
-            "language_mix_mode": "en_only",
-            "reply_language": "en",
+            "native_lang": lang,
+            "language_mix_mode": "native",
+            "reply_language": lang,
             "age": int(persona.get("age") or 25),
             "occupation": str(persona.get("occupation") or ""),
             "personality_prompt": (personality + ("\n" + bio if bio else ""))[:1500],
@@ -1072,13 +1077,16 @@ class V3Service:
             return fallback
         try:
             from app.v2.llm_json import complete_json_safe  # noqa: PLC0415
+            from app.v3.seed_data import LANGUAGE_NAMES  # noqa: PLC0415
 
             name = persona.get("nickname") or "someone"
+            lang_code = str(persona.get("language") or "en").strip().lower()
+            lang_name = LANGUAGE_NAMES.get(lang_code, "English")
             personality = _clean(persona.get("personality"), 500)
             system = (
                 f"You are {name}, an AI persona on a language-learning social app. "
                 "You just read a stranger's public post. Write ONE short, natural comment "
-                "in English (max 20 words), like a real social app comment. "
+                f"**in {lang_name}** (max 20 words), like a real social app comment. "
                 "Stay in character. Do not explain, do not mention being an AI. "
                 'Output JSON only: {"comment": "..."}'
             )
@@ -1107,13 +1115,16 @@ class V3Service:
             return fallback
         try:
             from app.v2.llm_json import complete_json_safe  # noqa: PLC0415
+            from app.v3.seed_data import LANGUAGE_NAMES  # noqa: PLC0415
 
             name = persona.get("nickname") or "someone"
+            lang_code = str(persona.get("language") or "en").strip().lower()
+            lang_name = LANGUAGE_NAMES.get(lang_code, "English")
             personality = _clean(persona.get("personality"), 400)
             system = (
                 f"You are {name}, an AI persona on a language-learning social app. "
                 "You saw a stranger's public post that matched your interests and want to add them. "
-                "Write ONE short friend request message in English (max 25 words). "
+                f"Write ONE short friend request message **in {lang_name}** (max 25 words). "
                 "Stay in character. Output JSON only: "
                 '{"message": "..."}'
             )

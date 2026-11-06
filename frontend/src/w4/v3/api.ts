@@ -399,3 +399,21 @@ export const VISIBILITY_LABEL: Record<string, string> = {
   friends: "好友可见",
   private: "仅自己可见",
 };
+
+/** 人物母语 → 中文标签（与声线、动态文字保持一致） */
+export const LANGUAGE_LABEL: Record<string, string> = {
+  en: "英语",
+  ja: "日语",
+  ko: "韩语",
+  fr: "法语",
+  de: "德语",
+  es: "西班牙语",
+  it: "意大利语",
+  pt: "葡萄牙语",
+  zh: "中文",
+};
+
+export function languageLabel(code?: string): string {
+  const key = (code || "en").toLowerCase();
+  return LANGUAGE_LABEL[key] ?? key.toUpperCase();
+}

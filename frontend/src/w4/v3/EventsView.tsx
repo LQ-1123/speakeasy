@@ -20,6 +20,7 @@ import {
   markAllEventsRead,
   markEventRead,
   relTimeOf,
+  translateText,
   type SocialEvent,
 } from "./api";
 import "./v3.css";
@@ -37,6 +38,32 @@ export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /* 人物用母语评论/申请，中文用户可一键翻译 */
+  const [zh, setZh] = useState<Record<string, string>>({});
+  const [zhOpen, setZhOpen] = useState<Record<string, boolean>>({});
+  const [zhBusy, setZhBusy] = useState<string>("");
+
+  const translateEvent = async (ev: SocialEvent) => {
+    const text = ev.payload.comment || ev.payload.message || "";
+    if (!text) return;
+    if (zhOpen[ev.id]) {
+      setZhOpen((m) => ({ ...m, [ev.id]: false }));
+      return;
+    }
+    if (zh[ev.id]) {
+      setZhOpen((m) => ({ ...m, [ev.id]: true }));
+      return;
+    }
+    setZhBusy(ev.id);
+    const out = await translateText(text, "zh").catch(() => "");
+    setZhBusy("");
+    if (out) {
+      setZh((m) => ({ ...m, [ev.id]: out }));
+      setZhOpen((m) => ({ ...m, [ev.id]: true }));
+    } else {
+      showToast("翻译失败，请稍后重试");
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,6 +214,16 @@ export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
                 {ev.payload.comment ? <div className="v3-event-comment">“{ev.payload.comment}”</div> : null}
                 {ev.type === "friend_request" && ev.payload.message ? (
                   <div className="v3-event-comment">“{ev.payload.message}”</div>
+                ) : null}
+                {ev.payload.comment || ev.payload.message ? (
+                  <div className="v3-event-trans">
+                    <button className="v3-link-btn" onClick={() => void translateEvent(ev)}>
+                      {zhBusy === ev.id ? "翻译中…" : zhOpen[ev.id] ? "收起翻译" : "翻译"}
+                    </button>
+                    {zhOpen[ev.id] && zh[ev.id] ? (
+                      <div className="v3-event-zh">{zh[ev.id]}</div>
+                    ) : null}
+                  </div>
                 ) : null}
                 {ev.payload.post_excerpt ? (
                   <div className="v3-event-post">你的动态：{ev.payload.post_excerpt}</div>

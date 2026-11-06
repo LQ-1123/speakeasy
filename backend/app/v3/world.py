@@ -24,7 +24,7 @@ import uuid
 from typing import Any
 
 from app.logging_utils import get_logger
-from app.v3.schema import SEED_KEY, SEED_VERSION, seed_if_needed
+from app.v3.schema import SEED_KEY, SEED_VERSION, seed_if_needed, sync_persona_friends
 from app.v3.seed_data import PERSONAS, POSTS
 
 log = get_logger(__name__)
@@ -89,21 +89,31 @@ Create ONE fictional AI persona and 2 short social posts written in their voice.
 
 Rules:
 - The persona is clearly an AI character living a plausible daily life abroad.
-- English content only, natural and specific (no generic motivational quotes).
+- **All fields and posts must be written in the persona's native language** (`language`).
+  Examples: Korean persona -> Korean text; Italian persona -> Italian text.
 - Posts must sound like that exact person: hobbies, job, humour, city.
 - Each post <= 240 characters, first person, no hashtags.
-- interests: 3-4 lowercase english tags (e.g. coffee, running, books).
+- interests: 3-4 lowercase english tags (e.g. coffee, running, books) for matching only.
 
 Output JSON only:
-{"nickname","avatar","bio","personality","interests":[...],"language":"en",
+{"nickname","avatar","bio","personality","interests":[...],"language":"en|ja|ko|de|es|it|pt|zh",
  "country","city","timezone","occupation","age","gender":"male|female",
- "voice_id","posts":[{"content","tags":[...]}]}
+ "posts":[{"content","tags":[...]}]}
 """
 
-_VOICE_BY_GENDER = {
-    "male": ["en-GB-RyanNeural", "en-US-AndrewMultilingualNeural", "en-AU-WilliamMultilingualNeural"],
-    "female": ["en-GB-SoniaNeural", "en-US-AvaMultilingualNeural", "en-AU-NatashaNeural"],
+#: 语言 → 可用声线（保证文字与朗读同语言）
+_VOICE_BY_LANG: dict[str, list[str]] = {
+    "en": ["en-GB-RyanNeural", "en-US-AvaMultilingualNeural", "en-AU-WilliamMultilingualNeural"],
+    "ja": ["ja-JP-KeitaNeural", "ja-JP-NanamiNeural"],
+    "ko": ["ko-KR-InJoonNeural", "ko-KR-SunHiNeural"],
+    "de": ["de-DE-FlorianMultilingualNeural", "de-DE-SeraphinaMultilingualNeural"],
+    "es": ["es-ES-AlvaroNeural", "es-ES-XimenaNeural"],
+    "it": ["it-IT-GiuseppeMultilingualNeural", "it-IT-IsabellaNeural"],
+    "pt": ["pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"],
+    "zh": ["zh-CN-YunxiNeural", "zh-CN-XiaoyiNeural"],
+    "fr": ["fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural"],
 }
+
 _AVATARS = [
     "/mock/avatars/adrian.jpg", "/mock/avatars/annika.jpg", "/mock/avatars/callum.jpg",
     "/mock/avatars/camila.jpg", "/mock/avatars/finn.jpg", "/mock/avatars/giulia.jpg",
@@ -119,6 +129,9 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
 
     pid = f"p_{uuid.uuid4().hex[:10]}"
     now = datetime.now(timezone.utc)
+    lang = str(persona.get("language") or "en").strip().lower()
+    if lang not in _VOICE_BY_LANG:
+        lang = "en"
     with db._lock, db.conn:  # noqa: SLF001
         db.conn.execute(
             "INSERT INTO personas (id, nickname, avatar, bio, personality, interests, language,"
@@ -131,14 +144,14 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
                 str(persona.get("bio") or "")[:400],
                 str(persona.get("personality") or "")[:600],
                 json.dumps(persona.get("interests") or [], ensure_ascii=False),
-                "en",
+                lang,
                 str(persona.get("country") or "")[:60],
                 str(persona.get("city") or "")[:60],
                 str(persona.get("timezone") or "UTC")[:64],
                 str(persona.get("occupation") or "")[:80],
                 int(persona.get("age") or 27),
                 str(persona.get("gender") or "female"),
-                str(persona.get("voice_id") or "en-GB-SoniaNeural"),
+                str(persona.get("voice_id") or _VOICE_BY_LANG[lang][0]),
                 "",
                 json.dumps({"generated": "llm"}, ensure_ascii=False),
                 "active",
@@ -196,7 +209,12 @@ async def generate_world_llm(db: Any, llm: Any, *, count: int | None = None) -> 
             if not isinstance(data, dict) or not data.get("nickname"):
                 continue
             gender = "male" if str(data.get("gender", "")).lower() == "male" else "female"
-            data.setdefault("voice_id", _VOICE_BY_GENDER[gender][index % 3])
+            lang = str(data.get("language") or "en").strip().lower()
+            if lang not in _VOICE_BY_LANG:
+                lang, gender = "en", "female"
+            data["language"] = lang
+            voices = _VOICE_BY_LANG[lang]
+            data.setdefault("voice_id", voices[index % len(voices)])
             data.setdefault("avatar", _AVATARS[index % len(_AVATARS)])
             posts = data.get("posts") or []
             if not isinstance(posts, list):
@@ -216,12 +234,21 @@ async def generate_world_llm(db: Any, llm: Any, *, count: int | None = None) -> 
 
 
 async def ensure_world(db: Any, llm: Any) -> dict:
-    """启动时确保世界存在：LLM 模式先生成，失败/未开启则用预置语料。"""
+    """启动时确保世界存在：LLM 模式先生成，失败/未开启则用预置语料。
+
+    已有世界时：
+    - 来源是预置语料 → 调用 ``seed_if_needed`` 做**版本内 upsert**
+      （语料升级，例如把英文世界升级为多语言世界，不会重复插入）
+    - 来源是 LLM → 保持原样，不覆盖
+    """
     status = world_status(db)
     if status["personas"] > 0:
-        # 老库（V3 早期种子）没有来源标记：补记一次，方便 /health 展示
+        if status["source"] == "seed":
+            seed_if_needed(db)  # 版本一致时内部直接返回 0
         if not status["generated_at"]:
             _mark(db, status["source"] or "seed")
+        # 每次启动都同步一次：已加好友的 Persona 语言/声线跟着人物走
+        sync_persona_friends(db)
         return world_status(db)
 
     if world_path() == "llm":
@@ -229,6 +256,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
     written = seed_if_needed(db)
     if written:
         _mark(db, "seed")
+    sync_persona_friends(db)
     return world_status(db)
 
 

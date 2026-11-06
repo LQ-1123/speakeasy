@@ -141,6 +141,55 @@ def test_discover_next_uses_existing_world(service):
     assert data["post_id"] == posts[0]["id"]
 
 
+def test_persona_language_matches_voice_and_posts(service):
+    """国旗 / 文字 / 声线必须一致：语言代码 = 声线前缀 = 动态所用语言。"""
+    voice_prefix = {
+        "en": ("en-",),
+        "ja": ("ja-",),
+        "ko": ("ko-",),
+        "de": ("de-",),
+        "es": ("es-",),
+        "it": ("it-",),
+        "pt": ("pt-",),
+        "zh": ("zh-",),
+        "fr": ("fr-",),
+    }
+    personas = service._personas()  # noqa: SLF001 - 测试内部读取
+    assert len(personas) == 12
+    for persona in personas:
+        lang = persona["language"]
+        assert lang in voice_prefix, f"{persona['id']} 语言非法: {lang}"
+        assert persona["voice_id"].startswith(voice_prefix[lang]), (
+            f"{persona['id']} 语言={lang} 但声线={persona['voice_id']}"
+        )
+        posts = service.persona_posts(persona["id"], user_id="u_lang", limit=5)["items"]
+        assert posts, f"{persona['id']} 没有动态"
+        for post in posts:
+            # 简单的语言一致性检查：不同语言的字符集/常见词
+            content = post["content"]
+            if lang == "ko":
+                assert any("\uac00" <= ch <= "\ud7a3" for ch in content), content
+            elif lang == "ja":
+                assert any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" for ch in content), content
+            elif lang == "zh":
+                assert any("\u4e00" <= ch <= "\u9fff" for ch in content), content
+            elif lang in ("de", "es", "it", "pt"):
+                assert any(ch in content.lower() for ch in "aeiou"), content
+                assert content != content.upper(), content
+
+
+def test_friend_from_persona_speaks_own_language(service):
+    """加好友后，好友的回复语言/声线 = 人物母语/声线（聊天与信息流一致）。"""
+    j = service.persona_by_id("p_jiwoo")
+    assert j is not None and j["language"] == "ko"
+    result = service.add_friend("u_lang", "p_jiwoo")
+    friend = service.db.get_friend(result["friend_id"], any_owner=True)
+    assert friend is not None
+    assert friend["reply_language"] == "ko"
+    assert friend["native_lang"] == "ko"
+    assert friend["voice_id"] == "ko-KR-SunHiNeural"
+
+
 def test_discover_next_rotates_and_resets(service):
     seen = []
     for _ in range(12):

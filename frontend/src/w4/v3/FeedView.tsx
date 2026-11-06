@@ -43,6 +43,7 @@ import {
   relTimeOf,
   translateText,
   VISIBILITY_LABEL,
+  type FeedComment,
   type FeedItem,
   type FeedSummary,
 } from "./api";
@@ -399,6 +400,28 @@ export function FeedCard({
   const [zhOpen, setZhOpen] = useState(false);
   const [zhLoading, setZhLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
+  /* 人物用母语评论：逐条翻译 */
+  const [cZh, setCZh] = useState<Record<string, string>>({});
+  const [cZhOpen, setCZhOpen] = useState<Record<string, boolean>>({});
+  const [cZhBusy, setCZhBusy] = useState("");
+
+  const trComment = async (c: FeedComment) => {
+    if (cZhOpen[c.id]) {
+      setCZhOpen((m) => ({ ...m, [c.id]: false }));
+      return;
+    }
+    if (cZh[c.id]) {
+      setCZhOpen((m) => ({ ...m, [c.id]: true }));
+      return;
+    }
+    setCZhBusy(c.id);
+    const out = await translateText(c.content, "zh").catch(() => "");
+    setCZhBusy("");
+    if (out) {
+      setCZh((m) => ({ ...m, [c.id]: out }));
+      setCZhOpen((m) => ({ ...m, [c.id]: true }));
+    }
+  };
 
   const toggleZh = async () => {
     if (zhOpen) {
@@ -543,6 +566,18 @@ export function FeedCard({
                     {isPersona ? "" : "："}
                     {c.content}
                     {c.author.is_ai ? <span className="v3-ai-tag sm">AI</span> : null}
+                    {c.author.is_ai ? (
+                      <button
+                        className="v3-link-btn"
+                        onClick={() => void trComment(c)}
+                        style={{ marginLeft: 6 }}
+                      >
+                        {cZhBusy === c.id ? "翻译中…" : cZhOpen[c.id] ? "收起翻译" : "翻译"}
+                      </button>
+                    ) : null}
+                    {cZhOpen[c.id] && cZh[c.id] ? (
+                      <div className="v3-comment-zh">{cZh[c.id]}</div>
+                    ) : null}
                   </div>
                 ))}
                 {item.comment_count > item.comments.length ? (

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -177,7 +178,8 @@ CREATE TABLE IF NOT EXISTS v3_discover_views (
 
 #: ``v3_meta`` 里标记「语料已入库」的键
 SEED_KEY = "persona_seed_version"
-SEED_VERSION = "2026-11-06.1"
+#: 语料版本：v2 = 多语言世界（人物用母语发动态，声线与语言一致）
+SEED_VERSION = "2026-11-06.2"
 
 
 def _now_utc() -> datetime:
@@ -200,9 +202,13 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
 
 
 def seed_if_needed(db: Any, *, force: bool = False) -> int:
-    """把 ``seed_data`` 里的人物与动态写入库（只在为空/版本变化时执行）。
+    """把 ``seed_data`` 里的人物与动态写入库（幂等，可重复执行）。
 
-    返回写入的 post 条数（0 表示跳过）。
+    - 空库 / 语料版本变化 / ``force`` 时会写入
+    - 已有内容按主键 upsert：**不会重复插入**，但会把人物语言和动态文案更新到最新版本
+      （这样老的英文世界可以平滑升级成「母语世界」，时间线保持不变）
+
+    返回**新增**的 post 条数（0 表示没有新行）。
     """
     with db._lock, db.conn:  # noqa: SLF001
         row = db.conn.execute(
@@ -210,9 +216,8 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         ).fetchone()
         already = str(row["value"]) if row is not None else ""
         count = db.conn.execute("SELECT COUNT(*) AS n FROM personas").fetchone()["n"]
-        # 已经有世界（预置语料或 LLM 生成）就不要重复插入；
-        # 只有空库（首次启动）或显式 force 才写语料。
-        if not force and count:
+        # 已经有世界且版本一致 → 什么都不做
+        if not force and count and already == SEED_VERSION:
             return 0
 
         now = _now_utc()
@@ -246,9 +251,15 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
         # 时间错开：越靠前的越新（第一条约 1 小时前），制造自然的信息流节奏
         for index, (pid, content, tags, media) in enumerate(POSTS):
             post_id = f"pp_{pid[2:]}_{index:02d}"
-            if post_id in existing:
-                continue
             created = now - timedelta(hours=(index * 5) % 120 + 1, minutes=(index * 17) % 60)
+            if post_id in existing:
+                # 已存在：只刷新文案/标签/媒体（保留原时间线），用于语料升级
+                db.conn.execute(
+                    "UPDATE persona_posts SET persona_id=?, content=?, media=?, tags=?"
+                    " WHERE id=?",
+                    (pid, content, _json(media), _json(tags), post_id),
+                )
+                continue
             db.conn.execute(
                 "INSERT INTO persona_posts (id, persona_id, content, media, tags, visibility,"
                 " like_count, comment_count, created_at)"
@@ -262,6 +273,46 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
             " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (SEED_KEY, SEED_VERSION),
         )
+    if written:
+        log.info("v3 语料入库：%d 个人物 / %d 条动态", len(PERSONAS), written)
+    return written
+
+
+def sync_persona_friends(db: Any) -> int:
+    """把已加好友的 Persona 的语言/声线同步成人物当前值（幂等，每次启动都跑）。
+
+    保证「信息流文字 = 聊天语言 = 语音条语言」三者一致。
+    返回受影响的好友行数（老库没有 friendships 表时返回 0）。
+    """
+    with db._lock, db.conn:  # noqa: SLF001
+        try:
+            cur = db.conn.execute(
+                """
+                UPDATE friends SET
+                    reply_language = (
+                        SELECT p.language FROM friendships f
+                        JOIN personas p ON p.id = f.persona_id
+                        WHERE f.friend_id = friends.id LIMIT 1
+                    ),
+                    native_lang = (
+                        SELECT p.language FROM friendships f
+                        JOIN personas p ON p.id = f.persona_id
+                        WHERE f.friend_id = friends.id LIMIT 1
+                    ),
+                    voice_id = (
+                        SELECT p.voice_id FROM friendships f
+                        JOIN personas p ON p.id = f.persona_id
+                        WHERE f.friend_id = friends.id LIMIT 1
+                    )
+                WHERE EXISTS (
+                    SELECT 1 FROM friendships f WHERE f.friend_id = friends.id
+                )
+                """
+            )
+            return int(cur.rowcount or 0)
+        except sqlite3.Error as exc:  # pragma: no cover - 老库可能没有 friendships 表
+            log.debug("同步 Persona 好友语言失败（忽略）: %s", exc)
+            return 0
     if written:
         log.info("v3 语料入库：%d 个人物 / %d 条动态", len(PERSONAS), written)
     return written

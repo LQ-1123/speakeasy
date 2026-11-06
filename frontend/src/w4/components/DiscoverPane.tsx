@@ -18,6 +18,7 @@ import { Icon } from "../ui";
 import {
   addFriend as apiAddFriend,
   fetchDiscoverNext,
+  languageLabel,
   personaSpeechUrl,
   translateText,
   type DiscoverNext,
@@ -46,7 +47,7 @@ function toCandidate(res: DiscoverNext, zh: string): DiscoverCandidate {
     country: p.country,
     flag: flagOf(p.country),
     language: p.language,
-    languageLabel: p.language === "en" ? "英语" : p.language.toUpperCase(),
+    languageLabel: languageLabel(p.language),
     occupation: p.occupation ?? "",
     bio: p.bio || "",
     greeting: res.greeting || "…",

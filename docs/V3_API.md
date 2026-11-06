@@ -42,6 +42,26 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 | GET | `/api/v3/personas/{id}` | 主页：资料 + 性格 + 兴趣 + 动态 + 好友状态 |
 | GET | `/api/v3/personas/{id}/posts?cursor=&limit=` | 该人物动态分页 |
 
+### 3.2 语言一致性（重要）
+
+每个人物用自己的**母语**发动态、评论、聊天，声线也必须是该语言的声线：
+
+| 人物 | 语言 | 声线 |
+|---|---|---|
+| Adrian / Annika / Callum / Finn / Mei | en | en-GB / en-US / en-AU / en-IE |
+| Camila | pt | pt-BR-ThalitaMultilingualNeural |
+| Giulia | it | it-IT-IsabellaNeural |
+| Haruto | ja | ja-JP-KeitaNeural |
+| Ines | es | es-ES-XimenaNeural |
+| Jiwoo | ko | ko-KR-SunHiNeural |
+| Lin | zh | zh-CN-XiaoyiNeural |
+| Morten | de | de-DE-FlorianMultilingualNeural |
+
+- 加好友后 riends.reply_language = persona.language，聊天文字/语音条同语言；
+  每次启动 sync_persona_friends() 会把已加好友的 Persona 语言/声线同步成最新值。
+- 中文用户看信息流/通知时用「翻译」看中文；评论与好友申请也可单独翻译。
+- LLM 世界生成（SE_WORLD_GEN=llm）同样要求按人物母语生成并匹配声线。
+
 ### 3.1 动态翻译与朗读
 
 | 方法 | 路径 | 说明 |

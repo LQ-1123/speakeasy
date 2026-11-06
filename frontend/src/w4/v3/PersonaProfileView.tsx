@@ -20,6 +20,7 @@ import {
   declineEvent,
   fetchEvents,
   fetchPersona,
+  languageLabel,
   likePersonaPost,
   relTimeOf,
   type FeedItem,
@@ -203,6 +204,7 @@ export function PersonaProfileView({
                   {profile.occupation}
                   {profile.city ? ` · ${profile.city}` : ""}
                   {profile.country ? `，${profile.country}` : ""}
+                  {` · 母语：${languageLabel(profile.language)}`}
                 </div>
               </div>
             </div>

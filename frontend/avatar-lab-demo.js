@@ -267,7 +267,7 @@ function seedFaceSvg(seed, opts) {
   const hairList = HAIR_MAP[region] || HAIR_MAP.white;
   const skin = r.pick(skinList);
   const grayChance = { young: 0, adult: 8, mature: 38 }[band];
-  const hair = r.chance(grayChance) ? r.pick(GRAY_HAIR) : r.pick(hairList);
+  const hair = r.chance(grayChance / 100) ? r.pick(GRAY_HAIR) : r.pick(hairList);
   const shirt = r.pick(SHIRT_PALETTE);
   const bg = r.pick(BG_PALETTE);
 
@@ -293,9 +293,9 @@ function seedFaceSvg(seed, opts) {
     hairStyle = r.pick(stylePool);
   }
 
-  const glasses = r.chance({ young: 10, adult: 16, mature: 32 }[band]);
-  const beard = gender === "male" && r.chance({ young: 16, adult: 24, mature: 20 }[band]);
-  const earrings = gender === "female" && r.chance({ young: 34, adult: 26, mature: 22 }[band]);
+  const glasses = r.chance({ young: 10, adult: 16, mature: 32 }[band] / 100);
+  const beard = gender === "male" && r.chance({ young: 16, adult: 24, mature: 20 }[band] / 100);
+  const earrings = gender === "female" && r.chance({ young: 34, adult: 26, mature: 22 }[band] / 100);
   const blush = band !== "mature";
   const lip = gender === "female" ? "#b0564f" : "#a4544b";
   const eyes = r.pick(["open", "happy", "wink", "closed"]);

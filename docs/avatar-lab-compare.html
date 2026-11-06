@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Notionists vs SeedFace · 12 位人物试穿</title>
+<style>
+  body { margin: 0; padding: 24px; background: #f6f8f5; color: #14201b;
+    font: 13px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lede { color: #46554d; margin: 0 0 18px; max-width: 900px; }
+  table { border-collapse: collapse; background: #fff; border-radius: 14px; overflow: hidden; }
+  th, td { padding: 10px 14px; border-bottom: 1px solid #e4eae5; text-align: center; }
+  th { background: #f1f6f2; font-size: 12px; color: #46554d; }
+  td.name { text-align: left; font-weight: 650; font-size: 12.5px; white-space: nowrap; }
+  td.meta { text-align: left; font-size: 11px; color: #7b8a81; white-space: nowrap; }
+  img { width: 64px; height: 64px; border-radius: 12px; display: block; background: #f2f5f2; }
+  .cell { display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+  <h1>Notionists vs SeedFace · 12 位 Persona 试穿</h1>
+  <p class="lede">
+    Notionists 是 CC0 的纯线稿画风：没有任何颜色参数，因此<b>无法体现人种/肤色</b>，也没有年龄维度，
+    性别只能靠发型与胡子概率暗示。下面是同一批人物（同 seed）在两种画风下的样子。
+  </p>
+  <table id="tbl">
+    <thead><tr><th>人物</th><th>性别 · 年龄 · 国家</th><th>Notionists</th><th>SeedFace（本项目）</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <script src="./avatar-lab/bundle.js"></script>
+  <script>
+    const PEOPLE = [
+      ["persona-adrian", "Adrian", "male", 28, "英国", "white"],
+      ["persona-annika", "Annika", "female", 26, "美国", "white"],
+      ["persona-callum", "Callum", "male", 30, "澳大利亚", "white"],
+      ["persona-camila", "Camila", "female", 24, "巴西", "latino"],
+      ["persona-finn", "Finn", "male", 27, "爱尔兰", "white"],
+      ["persona-giulia", "Giulia", "female", 29, "意大利", "white"],
+      ["persona-haruto", "Haruto", "male", 25, "日本", "east_asian"],
+      ["persona-ines", "Ines", "female", 31, "西班牙", "white"],
+      ["persona-jiwoo", "Jiwoo", "female", 23, "韩国", "east_asian"],
+      ["persona-lin", "Lin", "female", 27, "新加坡", "east_asian"],
+      ["persona-mei", "Mei", "female", 26, "美国", "east_asian"],
+      ["persona-morteno", "Morten", "male", 33, "德国", "white"],
+    ];
+    const tbody = document.querySelector("#tbl tbody");
+    for (const [seed, name, gender, age, country, region] of PEOPLE) {
+      const tr = document.createElement("tr");
+      const notionists = AvatarLab.dicebearSvg("notionists", seed);
+      const seedface = AvatarLab.customSvg("seed-face", seed, { gender, region, age });
+      tr.innerHTML =
+        '<td class="name">' + name + '</td>' +
+        '<td class="meta">' + gender + ' · ' + age + ' · ' + country + '</td>' +
+        '<td><div class="cell"><img src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(notionists) + '"></div></td>' +
+        '<td><div class="cell"><img src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(seedface) + '"></div></td>';
+      tbody.appendChild(tr);
+    }
+  </script>
+</body>
+</html>

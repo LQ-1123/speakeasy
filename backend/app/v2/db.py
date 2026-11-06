@@ -103,6 +103,20 @@ def _json_loads(raw: Any, default: Any) -> Any:
         return default
 
 
+def legacy_shared_enabled() -> bool:
+    """老库单用户兼容开关：owner='local' 的历史数据对当前身份只读可见。
+
+    默认关闭（多用户隔离优先）；部署旧库的单用户服务器时设置
+    ``SE_LEGACY_SHARED_OWNER=1`` 打开。
+    """
+    return str(os.getenv("SE_LEGACY_SHARED_OWNER", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class DB:
     """SQLite 持久层（同步方法）。"""
 
@@ -371,12 +385,16 @@ class DB:
     def list_friends(self, status: str | None = None, *, owner_user_id: str | None = None) -> list[dict]:
         """当前用户的好友列表（V3 起按 owner_user_id 隔离）。"""
         owner = owner_user_id or current_user_id()
-        # 兼容单用户老库：owner='local' 的历史好友对所有身份可见（只读兼容，不改写数据）
-        sql = "SELECT * FROM friends WHERE (owner_user_id=? OR owner_user_id=?)"
-        params: tuple[Any, ...] = (owner, LOCAL_USER_ID)
+        if legacy_shared_enabled():
+            # 单用户老库：owner='local' 的历史好友对当前身份只读可见
+            sql = "SELECT * FROM friends WHERE (owner_user_id=? OR owner_user_id=?)"
+            params: tuple[Any, ...] = (owner, LOCAL_USER_ID)
+        else:
+            sql = "SELECT * FROM friends WHERE owner_user_id=?"
+            params = (owner,)
         if status:
             sql += " AND status=?"
-            params = (owner, LOCAL_USER_ID, status)
+            params = (*params, status)
         sql += " ORDER BY (last_interaction_at IS NULL), last_interaction_at DESC, created_at DESC"
         return self._fetch_all("friends", sql, params)
 
@@ -391,11 +409,13 @@ class DB:
         if any_owner:
             return self._fetch_one("friends", "id=?", (fid,))
         owner = owner_user_id or current_user_id()
-        return self._fetch_one(
-            "friends",
-            "id=? AND (owner_user_id=? OR owner_user_id=?)",
-            (fid, owner, LOCAL_USER_ID),
-        )
+        if legacy_shared_enabled():
+            return self._fetch_one(
+                "friends",
+                "id=? AND (owner_user_id=? OR owner_user_id=?)",
+                (fid, owner, LOCAL_USER_ID),
+            )
+        return self._fetch_one("friends", "id=? AND owner_user_id=?", (fid, owner))
 
     def create_friend(self, data: dict) -> dict:
         payload = dict(_FRIEND_DEFAULTS)
@@ -617,12 +637,20 @@ class DB:
     def list_moments(self, limit: int = 30) -> list[dict]:
         """好友动态只返回当前用户好友发的（V3 起按 owner 隔离）。"""
         owner = current_user_id()
+        limit = max(1, min(int(limit), 100))
+        if legacy_shared_enabled():
+            return self._fetch_all(
+                "moments",
+                "SELECT m.* FROM moments m JOIN friends f ON f.id=m.friend_id"
+                " WHERE (f.owner_user_id=? OR f.owner_user_id=?)"
+                " ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+                (owner, LOCAL_USER_ID, limit),
+            )
         return self._fetch_all(
             "moments",
             "SELECT m.* FROM moments m JOIN friends f ON f.id=m.friend_id"
-            " WHERE (f.owner_user_id=? OR f.owner_user_id=?)"
-            " ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
-            (owner, LOCAL_USER_ID, max(1, min(int(limit), 100))),
+            " WHERE f.owner_user_id=? ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+            (owner, limit),
         )
 
     def get_moment(self, mid: str) -> dict | None:
@@ -714,12 +742,20 @@ class DB:
 
     def moments_exist_for_date(self, feed_date: str) -> bool:
         owner = current_user_id()
+        shared = legacy_shared_enabled()
         with self._lock:
-            row = self.conn.execute(
-                "SELECT COUNT(*) FROM moments m JOIN friends f ON f.id=m.friend_id"
-                " WHERE m.feed_date=? AND (f.owner_user_id=? OR f.owner_user_id=?)",
-                (feed_date, owner, LOCAL_USER_ID),
-            ).fetchone()
+            if shared:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) FROM moments m JOIN friends f ON f.id=m.friend_id"
+                    " WHERE m.feed_date=? AND (f.owner_user_id=? OR f.owner_user_id=?)",
+                    (feed_date, owner, LOCAL_USER_ID),
+                ).fetchone()
+            else:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) FROM moments m JOIN friends f ON f.id=m.friend_id"
+                    " WHERE m.feed_date=? AND f.owner_user_id=?",
+                    (feed_date, owner),
+                ).fetchone()
         return bool(row and row[0])
 
     # ------------------------------------------------------------------ #

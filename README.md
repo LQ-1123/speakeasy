@@ -1,114 +1,518 @@
-# SpeakEasy · 英语口语对练
+﻿# SpeakEasy · 和世界聊聊天
 
-> ## 🆕 SpeakEasy 3.0：AI 人物社交世界（Discover 信息流）
-> 「发现」从「好友动态 + 偶遇」重构为 **以 AI Persona 为中心的信息流**：
-> 平台里有一群稳定的 AI 人物（12 位，含头像/性格/兴趣/口音），他们持续发布动态；
-> 用户无需先加好友就能浏览、点赞、评论，点进主页再主动加好友，加完即复用原有聊天/记忆/语音链路。
->
-> - 新增实体：**Persona / Post / Friendship / SocialEvent**（后端 `backend/app/v3/`）
-> - 新用户首屏直接进 Discover；公开动态可触发 AI 人物的**点赞 / 评论 / 好友申请**（概率 + 冷却 + 频率限制 + 延迟，允许什么都不发生）
-> - 用户可发动态并显式选择 **公开 / 好友可见 / 仅自己可见**；只有公开动态进入发现范围并触发公共社交事件
-> - 设备身份（`X-User-Id` + `X-User-Token`）带来**多用户数据隔离**；老客户端不带身份头仍按本地 `local` 用户工作
-> - 信息流内容为预生成语料（零模型调用），只有「用户发公开动态 → 可能的社交事件」才调用 LLM
-> - 文档：**[docs/V3_API.md](docs/V3_API.md)**（接口/数据模型/事件引擎配置）· 实施清单：**[docs/V3_PLAN.md](docs/V3_PLAN.md)**
->
-> ## 🆕 SpeakEasy 2.0：移动端拟真跨国语伴（PWA）
-> 1.0 的实时语音能力之上，新增 **SQLite 持久层 + 随机捏人 + 双层长期记忆 + 熟稔度社交 + 朋友圈 + 移动端三 Tab IM**。
-> 按微信式**异步语音条**练口语：捏一个外国朋友、听他当地时间的语音、顺手把表达改地道。
->
-> - 运行/验收：**[docs/V2_GUIDE.md](docs/V2_GUIDE.md)** · 接口：**[docs/V2_API.md](docs/V2_API.md)**
-> - 启动：`HF_HOME="$PWD/.cache/hf" .venv/bin/python -m uvicorn app.main:app --app-dir backend --port 8000` → <http://127.0.0.1:8000>
-> - 前端：`cd frontend && npm install && npm run build:backend`；PWA 可"添加到主屏幕"
-> - 用户发动态 + AI 好友评论；图片多模态讨论；AI 回复 emoji；免提语音通话（VAD 自动断句 + 流式回复/占位语音）
-> - 聊天内翻译：好友外语消息一键译中文、自己的消息译成对方语言，支持批量对照；朋友圈动态也可「译 / 全部翻译」
-> - 多语言语伴：偶遇可按国家/语种严格筛选（日/韩/葡/西/德/法/意/中…），好友用**对应语言**回复与发声
-> - 不填 Key 也能完整演示（规则引擎 + edge-tts + 本地 STT）；右上角 **⚙ 个人设置**可填 LLM Key，
->   并可把语音识别切成 **硅基流动 SenseVoiceSmall**（保存即热生效，失败自动回退本地 Whisper）
->
-> 下面 1.0 的实时语音 / 本地克隆 / GPU 说明仍然有效（`/classic` 页面与 `/ws` 通道保留）。
+> 一个「AI 人物真的在生活」的社交式口语练习 App：
+> 每天生成一个有人物、有动态、有声音的小世界，先像刷朋友圈一样读和听，
+> 再和其中的人加好友、聊天、打语音电话，把英语（或其他语言）用起来。
+
+- 形态：**Web / PWA / Android APK**
+- 线上体验：<http://47.104.24.236:8000>
+- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出
+- 文档：[V3 接口与数据模型](docs/V3_API.md) · [V3 验收清单](docs/V3_ACCEPTANCE.md) · [移动端](docs/V3_MOBILE.md) · [本地模式](docs/local-mode.md)
 
 ---
 
-## 本地运行（在另一台电脑上跑前后端）
+## 目录
 
-克隆仓库后，可以完全在本机运行前端 + 后端，不依赖任何远程服务器。首次启动是全新数据（新手引导 → 设置里填 Key → 开始使用）。
+1. [这个项目是什么](#1-这个项目是什么)
+2. [它解决什么问题](#2-它解决什么问题)
+3. [目标人群](#3-目标人群)
+4. [用户故事](#4-用户故事)
+5. [功能与亮点](#5-功能与亮点)
+6. [产品主流程](#6-产品主流程)
+7. [用户架构](#7-用户架构)
+8. [系统架构](#8-系统架构)
+9. [数据流](#9-数据流)
+10. [需求分析](#10-需求分析)
+11. [技术栈与目录](#11-技术栈与目录)
+12. [本地运行](#12-本地运行)
+13. [部署与打包](#13-部署与打包)
+14. [测试与验收](#14-测试与验收)
+15. [项目现状与路线图](#15-项目现状与路线图)
+
+---
+
+## 1. 这个项目是什么
+
+SpeakEasy 不是「AI 聊天框 + 语音朗读」。
+
+它先造一个**每天会更新、有自己生活节奏的 AI 人物世界**：人物有稳定的头像、性格、职业、城市、口音和声线，每天发几条生活动态（照片来自开放图库，带 CC 署名）。
+
+用户第一屏不是「找个人聊天」，而是**刷动态**：读外语原文、一键翻译、听人物用他自己的声音朗读、点赞评论。感兴趣再点进主页、加好友，进入和这个人物的私聊、语音条、电话。
+
+一句话概括：
+
+> **先用内容和声音建立「这个人真的存在」的感觉，再把对话交给你。**
+
+---
+
+## 2. 它解决什么问题
+
+传统 AI 口语产品的三个断点：
+
+| 痛点 | 常见做法 | SpeakEasy 的做法 |
+|---|---|---|
+| **没有「人」的感觉** | 每次打开都是同一个助手，没有生活、没有连续性 | 一个人物 = 一套固定资料 + 固定头像 + 固定 Fish 音色 + 持续动态；加好友后记忆延续 |
+| **没有「可输入的内容」** | 只能靠用户自己找话题，冷启动尴尬 | 每天生成可刷的动态世界：生活照、吐槽、旅行、咖啡、骑行……先输入再输出 |
+| **「练口语」压力太大** | 上来就对话、评分、纠错 | 从「读 + 译 + 听」这种零压力行为开始，再过渡到聊天和语音 |
+
+说到底，哑巴英语缺的不是词汇量，是**低压力、可持续、有对象感的语言输入和输出环境**。SpeakEasy 把「练」藏在「刷」和「聊」里。
+
+---
+
+## 3. 目标人群
+
+- **大学生 / 职场新人**：有英语基础，缺少真实使用场景，想保持语感；
+- **社恐 / 找不到语伴的人**：不想面对真人外教的压力，先和 AI 人物建立熟悉感；
+- **多语种兴趣者**：同时练英语、德语、西语等，希望内容和语音按目标语言过滤；
+- **碎片时间用户**：通勤、睡前刷几分钟，读两条动态、听两句朗读、回一条消息。
+
+**非目标**：应试刷题、1 对 1 真人外教替代、严肃语法评分工具。
+
+---
+
+## 4. 用户故事
+
+**故事一：通勤时刷两条动态**
+> 作为一个想保持英语输入的用户，我希望打开 App 就能看到几条有生活气息的外语动态，
+> 看不懂可以一键翻译，想听可以点朗读，以便在碎片时间完成一次轻量输入。
+
+**故事二：从「刷」到「聊」**
+> 作为一个社恐用户，我希望先在动态里认识一个人物，觉得有意思再加好友，
+> 而不是一上来就被要求开口说话。
+
+**故事三：声音是「这个人」的**
+> 作为一个对声音敏感的用户，我希望同一个 AI 人物在动态朗读、好友试听、聊天、电话里
+> 始终是同一个声音，以便我真的觉得在和一个固定的人来往。
+
+**故事四：发一条自己的动态**
+> 作为一个想练习表达的用户，我希望发一条带图动态，选择公开 / 好友可见 / 仅自己可见，
+> 并收到 AI 人物的点赞、评论或好友申请，以便获得真实社交反馈。
+
+**故事五：多语言切换**
+> 作为一个同时练英语和德语的用户，我希望设置母语、目标语言和每种语言的水平，
+> 动态只出现我目标语言的内容，语言角标和内容真实语言一致。
+
+---
+
+## 5. 功能与亮点
+
+### 5.1 每日世界（Daily World）
+
+- 每天自动生成 **5 位新人物 × 每人 3 条动态**（可通过 `SE_DAILY_PERSONAS` / `SE_DAILY_POSTS_PER_PERSONA` 配置）；
+- 动态默认 **24 小时可见**；被互动过（赞 / 评论 / 加好友 / 浏览主页 / 朗读）的保留 **7 天**；
+- 首次启动内置一套**种子世界**（12 位人物 / 36 条动态），保证空库也能直接体验；
+- 生成内容会做**语言校验**：语言不符先重试，仍不符则用该语言的兜底模板，保证角标和正文一致。
+
+### 5.2 稳定的人物设定
+
+- 头像：DiceBear **Avataaars**，按人物种子 + 风格 + 部件确定性生成，信息流 / 主页 / 好友资料同一张脸；
+- 声线：**一人一个 Fish Audio 音色**，在人物创建时分配并写入 `personas.fish_voice_id`，同步到好友关系；
+- 资料：昵称、年龄、城市、国家、职业、性格、兴趣、语言、水平都持久化，聊天和动态共用同一套人设。
+
+### 5.3 动态消费：翻译 + 朗读
+
+- **翻译**：动态正文一键译中文，评论也可逐条翻译；
+- **朗读**：用该人物自己的 Fish 音色合成，音频落盘缓存；
+- 朗读 URL 带**内容哈希 + 音色版本**（`?v=...&a=...`），换音色自动失效，不会播到旧声音；
+- 播放互斥：全局音频总线保证同一时刻只有一个声音。
+
+### 5.4 好友与社交反馈
+
+- 「偶遇」从已生成世界里挑一位还没加好友的人物，先听 TA 的声音，再加好友；
+- 好友资料页可看 **TA 的动态**（AI 好友显示其信息流图文，老好友回落朋友圈）；
+- 公开动态会触发 AI 人物的**点赞 / 评论 / 好友申请**：概率 + 匹配分 + 冷却 + 每日上限 + 5–60 秒随机延迟，也允许什么都不发生；
+- 接受好友申请后复用 V2 的聊天 / 记忆 / 语音链路。
+
+### 5.5 聊天、语音与电话
+
+- 异步语音条：录音 → STT → LLM 回复 → 逐句 TTS，按微信式语音条播放；
+- 长期记忆：好友会记住你主动说过的信息，下一次对话继续用；
+- 免提语音通话：VAD 自动断句 + 流式识别 + 流式回复/语音；
+- 表达本：聊天中把地道说法收进「表达本」，按学习状态管理。
+
+### 5.6 多语言与个性化
+
+- 母语 / 多个目标语言 / **每种语言独立水平**（刚开始 ~ 比较流利）；
+- 信息流按目标语言过滤，语言角标由内容检测 + 生成校验共同保证；
+- 用户兴趣标签（≤8 个）参与「偶遇」匹配打分；
+- 用户可发图文动态，支持多图布局、可见性三档、上传自己的图片。
+
+### 5.7 多端与工程化
+
+- 桌面 Web：左栏导航 + 分栏列表 / 内容；
+- 手机 Web / PWA / Android APK：底部 Tab + 二级页面 + 手势刷新；
+- 内容成本控制：信息流主体是**预生成语料，零模型调用**，只有「用户发公开动态」才可能触发 LLM；
+- 降级链：LLM / Fish / STT 都有 fallback（规则引擎、系统朗读、mock 识别），没 Key 也能跑通链路；
+- 部署：FastAPI 同源托管前端静态文件，systemd + 可选 nginx，单机 2C2G 可跑。
+
+---
+
+## 6. 产品主流程
+
+```mermaid
+flowchart LR
+  A[首次打开 / 设备身份] --> B[填写资料<br/>昵称·母语·目标语言·水平]
+  B --> C[发现 · 动态]
+  C --> D{对哪条动态感兴趣}
+  D -->|读不懂| E[翻译]
+  D -->|想听| F[朗读 · 人物音色]
+  D -->|想认识| G[点作者进主页 / 偶遇]
+  G --> H[加好友]
+  H --> I[聊天 · 语音条 · 电话]
+  I --> J[长期记忆 / 表达本]
+  C --> K[发自己的动态<br/>公开 / 好友 / 仅自己]
+  K --> L[AI 人物点赞·评论·好友申请]
+  L --> C
+```
+
+---
+
+## 7. 用户架构
+
+### 7.1 角色与身份
+
+| 角色 | 说明 |
+|---|---|
+| **用户 user** | 一个设备身份，对应 `v3_users` 一行；请求带 `X-User-Id` + `X-User-Token` |
+| **AI 人物 persona** | 平台生成的人物，有资料、头像、音色、动态；不代表真人 |
+| **好友关系 friendship** | 用户 ↔ 人物，`pending` / `accepted`；接受后生成 `friends` 行复用聊天 |
+| **内容 content** | 人物动态、用户动态、评论、点赞 |
+| **社交事件 social_event** | AI 对用户公开动态的赞 / 评论 / 好友申请，有未读和处理状态 |
+
+> 兼容：老客户端不带身份头时，后端按本地 `local` 用户处理；单用户老库里的历史好友/聊天按只读兼容方式继续可见。
+
+### 7.2 实体关系
+
+```mermaid
+erDiagram
+  v3_users ||--o{ friendships : "发起"
+  personas ||--o{ friendships : "被添加"
+  personas ||--o{ persona_posts : "发布"
+  v3_users ||--o{ user_posts : "发布"
+  persona_posts ||--o{ persona_post_likes : "被赞"
+  persona_posts ||--o{ persona_post_comments : "被评论"
+  v3_users ||--o{ social_events : "收到"
+  persona_posts ||--o{ social_events : "触发"
+  friendships ||--|| friends : "接受后生成聊天好友"
+  friends ||--o{ messages : "聊天"
+  v3_users ||--o{ saved_expressions : "收藏"
+```
+
+### 7.3 数据归属与可见性
+
+| 数据 | 归属键 | 可见范围 |
+|---|---|---|
+| `personas` / `persona_posts` | 全局 | 所有用户；受 TTL 与目标语言过滤 |
+| `user_posts` | `user_id` | `public` 所有人 / `friends` 好友 / `private` 仅自己 |
+| `friends` / `messages` / `moments` / `saved_expressions` | `owner_user_id` | 仅本人；历史 `local` 数据做只读兼容 |
+| `friendships` / `social_events` | `user_id` | 仅本人 |
+| AI 社交事件 | 只针对 `public` 用户动态 | 事件列表 + 未读数 |
+
+### 7.4 信息架构
+
+```
+桌面：左栏（消息 / 通讯录 / 发现 / 表达本 / 我）+ 列表栏 + 内容区
+手机：底部 Tab（消息 / 通讯录 / 发现 / 表达本 / 我）
+发现：二级菜单 = 动态 / 偶遇一个人 / 通知
+动态：信息流（翻译 / 朗读 / 赞 / 评论 / 发动态）+ 左上角返回
+偶遇：一次一个人物，先试听再加好友
+人物主页：资料 + TA 的动态 + 加好友 / 去聊天
+好友资料：资料 + TA 的动态 + 发消息 / 按住说话 / 删除
+```
+
+---
+
+## 8. 系统架构
+
+```mermaid
+flowchart TB
+  subgraph Client[客户端]
+    W[桌面 Web]
+    M[手机 Web / PWA]
+    A[Android APK<br/>Capacitor]
+  end
+
+  subgraph API[后端 · FastAPI]
+    R2[/v2：好友·聊天·语音·记忆/]
+    R3[/v3：人物·动态·好友关系·事件/]
+    S[服务层<br/>V2Service / V3Service]
+    E[引擎层<br/>LLM · STT · TTS · 媒体]
+    WK[后台任务<br/>每日世界 · 音频预热 · 事件]
+  end
+
+  subgraph Store[存储]
+    DB[(SQLite WAL)]
+    FS[data/<br/>音频·图片·上传·配置]
+  end
+
+  subgraph Ext[外部服务]
+    LLM[DeepSeek / OpenAI 兼容 LLM]
+    FISH[Fish Audio TTS]
+    STT[SiliconFlow / Deepgram STT]
+    MEDIA[Wikimedia / Openverse 图片]
+  end
+
+  W --> R2
+  M --> R2
+  A --> R2
+  W --> R3
+  M --> R3
+  A --> R3
+  R2 --> S
+  R3 --> S
+  S --> E
+  S --> DB
+  S --> FS
+  E --> LLM
+  E --> FISH
+  E --> STT
+  E --> MEDIA
+  WK --> S
+```
+
+### 8.1 分层职责
+
+- **路由层** `backend/app/v2/router.py`、`backend/app/v3/router.py`：鉴权、参数校验、错误映射；
+- **服务层** `v2/services.py`、`v3/service.py`：业务规则、可见性、事件引擎、资料与关系；
+- **引擎层** `backend/app/llm/`、`voice/`、`v3/daily_world.py`、`v3/life_posts.py`：模型调用、语音合成、内容生成与降级；
+- **存储层** `v2/db.py`（V2 表 + 迁移）、`v3/schema.py`（V3 表 + 幂等迁移）；
+- **静态资源** `backend/app/static/app/`：Next.js 静态导出，与 API 同源。
+
+### 8.2 语音链路
+
+```
+文本 → Fish TTS（按人物 reference_id）→ mp3/wav 落盘缓存
+     ↘ 失败降级：系统朗读 / 提示音
+URL: /api/v3/persona-posts/{id}/speech?v=<content_hash>&a=<voice_version>
+缓存: data/v3_audio/v3/{post}-{hash}-{voice}.mp3 + immutable + 版本化 URL
+```
+
+- 人物音色在启动时分配（`assign_fish_voices`），写库并同步到好友；
+- 信息流朗读、好友试听、聊天、电话共用同一套人物音色；
+- 识别链路：云端 STT（SiliconFlow / Deepgram）→ 本地 faster-whisper → mock 降级。
+
+### 8.3 部署拓扑
+
+```
+用户手机/浏览器 ──HTTP(S)──> 云服务器
+                             ├─ systemd: uvicorn 0.0.0.0:8000（同源托管前端）
+                             ├─ nginx（可选，80/443 反代）
+                             ├─ data/：SQLite + 音频 + 图片 + 配置
+                             └─ 出站代理 → Fish / DeepSeek / 图库
+Android APK ──HTTP──> 同一个后端（构建时注入 NEXT_PUBLIC_API_BASE）
+```
+
+---
+
+## 9. 数据流
+
+### 9.1 启动与身份
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant F as FastAPI
+  participant DB as SQLite
+  C->>F: 首次打开，生成 device_key
+  C->>F: POST /api/v3/auth/register
+  F->>DB: 写入 v3_users(id, device_key, token_hash)
+  F-->>C: user_id + token（本地保存）
+  C->>F: 之后所有请求带 X-User-Id / X-User-Token
+  F->>F: bind_current_user → 当前用户
+```
+
+### 9.2 每日世界生成
+
+```mermaid
+flowchart LR
+  T[每日定时 / 启动补生成] --> L[读取用户目标语言与水平]
+  L --> P[逐个人物调用 LLM<br/>生成资料 + 3 条动态]
+  P --> V{语言/水平校验}
+  V -->|通过| M[配开放图库图片<br/>写 CC 署名]
+  V -->|不通过| R[重试一次 / 语言兜底模板]
+  R --> M
+  M --> DB[(personas / persona_posts<br/>expires_at = now+24h)]
+  DB --> C[清理过期动态<br/>互动过的保留 7 天]
+```
+
+### 9.3 浏览动态：翻译与朗读
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant F as FastAPI
+  participant L as LLM
+  participant T as Fish TTS
+  participant D as 磁盘缓存
+  C->>F: GET /api/v3/feed?limit=10
+  F->>F: 目标语言过滤 + TTL + 关系状态
+  F-->>C: items（含 speech_version / media / tags）
+  C->>F: 点「翻译」→ 翻译接口
+  F->>L: 翻译成中文
+  L-->>C: 译文
+  C->>F: 点「朗读」→ /speech?v&a
+  F->>D: 命中缓存？
+  alt 未命中
+    F->>T: 用人物音色合成
+    T-->>F: 音频
+    F->>D: 落盘
+  end
+  F-->>C: 音频（immutable，URL 带版本）
+```
+
+### 9.4 互动、加好友、聊天
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant F as FastAPI
+  participant S as 事件引擎
+  participant DB as SQLite
+  C->>F: POST /api/v3/posts（公开动态）
+  F->>DB: 写入 user_posts
+  S->>S: 概率 × 匹配分 × 冷却 × 上限 + 5–60s 延迟
+  S->>DB: social_events（赞/评论/好友申请）
+  C->>F: 通知列表 / 接受好友申请
+  F->>DB: friendships(accepted) + friends 行 + 音色同步
+  C->>F: 聊天 / 语音条 / 电话
+  F->>F: 记忆检索 + 人设提示词 + LLM + TTS
+```
+
+### 9.5 存储与数据目录
+
+```
+data/
+  speakeasy_v2.db        # SQLite（WAL）
+  llm_config.json        # LLM Key（不回传明文）
+  tts_config.json        # Fish Key / 默认 reference
+  stt_config.json        # 云端 STT Key
+  deepgram_config.json   # 流式 STT Key
+  audio/                 # V2 语音文件
+  v3_audio/v3/           # V3 人物朗读缓存
+  uploads/               # 用户上传图片
+  media_library/         # 开放图库缓存
+```
+
+---
+
+## 10. 需求分析
+
+### 10.1 功能需求
+
+| 编号 | 需求 | 验收要点 |
+|---|---|---|
+| FR-1 | 设备身份与数据隔离 | 新用户看不到别人数据；老 `local` 数据可读兼容 |
+| FR-2 | 每日世界 | 每天 5 人 × 3 动态；24h TTL；互动保留 7 天；失败有种子兜底 |
+| FR-3 | 人物一致性 | 头像、资料、语言、音色在信息流 / 主页 / 好友 / 聊天中一致 |
+| FR-4 | 动态消费 | 翻译、朗读、赞、评论、多图、图注、语言角标正确 |
+| FR-5 | 好友关系 | 偶遇 / 主页加好友；资料页显示 TA 的动态；接受申请生成好友 |
+| FR-6 | 聊天与语音 | 文字 / 语音条 / 电话；记忆延续；表达本收藏 |
+| FR-7 | 用户动态 | 图文发布 + 三档可见性；公开动态触发 AI 社交事件 |
+| FR-8 | 多语言 | 母语 / 多目标语言 / 分语言水平；信息流按目标语言过滤 |
+| FR-9 | 多端适配 | 桌面分栏；手机底部 Tab + 二级页面；320–414px 无重叠换行 |
+| FR-10 | 成本与降级 | 信息流零模型调用；无 Key 可演示；TTS/STT 有 fallback |
+
+### 10.2 非功能需求
+
+- **成本**：日常浏览不产生 LLM 费用；只有生成每日世界和用户公开动态的社交事件才调用；
+- **延迟**：朗读音频提前预热 + 磁盘缓存；聊天逐句 TTS；
+- **一致性**：人物身份、头像、音色、语言角标四处一致；
+- **可靠性**：外部服务失败时降级而不是报错；每日世界生成失败回落种子；
+- **可维护性**：迁移幂等（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE`）；部署脚本带备份/回滚；
+- **移动端**：触控区域、手势刷新、安全区、无文字图标重叠。
+
+---
+
+## 11. 技术栈与目录
+
+| 层 | 技术 |
+|---|---|
+| 前端 | Next.js 15（静态导出）、React 19、Tailwind CSS 4、lucide-react、DiceBear Avataaars |
+| 移动端 | Capacitor（Android，`com.speakeasy.app`） |
+| 后端 | FastAPI、uvicorn、Pydantic v2、SQLite（WAL） |
+| LLM | DeepSeek / 任意 OpenAI 兼容接口 |
+| 语音合成 | Fish Audio（人物音色）、系统朗读 / 提示音降级 |
+| 语音识别 | SiliconFlow SenseVoice、Deepgram 流式、本地 faster-whisper、mock |
+| 图片 | Wikimedia Commons / Openverse（CC 署名）、用户上传 |
+| 部署 | systemd + uvicorn（同源静态）、可选 nginx；Windows 一键 APK 脚本 |
+
+```
+backend/app/
+  main.py            # 启动：世界/音色/预热/每日任务
+  v2/                # 好友、聊天、语音、记忆、表达本
+  v3/                # Persona、动态、好友关系、事件、每日世界
+  voice/             # TTS / STT / Fish / 参考音频
+  llm/               # LLM 客户端与提示词
+frontend/
+  src/w4/            # 主 UI：App 路由、页面、组件
+  src/w4/v3/         # 动态、人物主页、偶遇、通知
+mobile/              # Capacitor Android 工程与打包脚本
+deploy/              # systemd / nginx / 部署脚本
+docs/                # 接口、验收、架构、移动端文档
+```
+
+---
+
+## 12. 本地运行
 
 ### 环境要求
 
 | 项 | 要求 |
 |---|---|
-| Python | **3.11 / 3.12**（不要 3.14） |
+| Python | 3.11 / 3.12（不要 3.14） |
 | Node.js | 18+（推荐 20） |
-| ffmpeg | 可选，建议安装（解码 webm 语音更稳） |
-| 网络 | DeepSeek / SiliconFlow 可直连；**Fish Audio、Deepgram 在国内需要代理** |
+| 网络 | DeepSeek / SiliconFlow 可直连；Fish Audio / Deepgram 国内需要代理 |
 
-### 方式 A：一个进程同时跑前后端（推荐，最简单）
-
-前端先构建进后端静态目录，之后只启动后端：
+### 一个进程跑前后端（推荐）
 
 ```bash
 git clone https://github.com/LQ-1123/speakeasy.git
 cd speakeasy
 
-# 1) 后端依赖（cloud-only，不装 torch，约 200MB）
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r backend/requirements-cloud.txt
+pip install pillow            # 用户上传图片需要
 
-# 2) 前端构建（产物写入 backend/app/static/app）
 cd frontend
 npm install
-npm run build:backend
+npm run build:backend         # 产物写入 backend/app/static/app
 cd ..
 
-# 3) 启动（Windows / macOS / Linux 通用）
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000> 即可。前后端、数据库、音频、Key 全部在**本机**：
+打开 <http://127.0.0.1:8000>。首次使用建议在「我 → 设置」里填：
 
-```
-data/                       运行时数据（数据库 / 音频 / 配置 / 记忆）
-data/llm_config.json        LLM 配置
-data/tts_config.json        TTS（Fish）配置
-data/stt_config.json        云端识别（SiliconFlow）配置
-data/deepgram_config.json   流式识别（Deepgram）配置
-```
+| 位置 | 用途 |
+|---|---|
+| 设置 → 对话模型 | DeepSeek API Key |
+| 设置 → 声音 | Fish Audio Key（人物音色；不填走系统朗读） |
+| 设置 → 语音识别 | SiliconFlow / Deepgram Key（不填走本地/mock） |
 
-### 方式 B：开发模式（前后端分开，改代码即时生效）
+> 不填 Key 也能完整打开：LLM 走规则兜底、TTS 走系统朗读、STT 走 mock。只是聊天和语音体验会下降。
+
+### 开发模式
 
 ```bash
-# 终端 1：后端
+# 终端 1
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 
-# 终端 2：前端 dev server
+# 终端 2
 cd frontend
 # Windows: set NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
 # macOS/Linux: export NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
 npm run dev
 ```
 
-打开 <http://localhost:3000>。需要在 `.env` 里允许跨域：
+`.env` 里允许跨域：
 
 ```ini
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000
 ```
 
-### 首次使用要填的 Key（设置页）
-
-| 位置 | 用途 |
-|---|---|
-| 设置 → 对话模型 | DeepSeek API Key（`https://api.deepseek.com`） |
-| 设置 → 声音 | Fish Audio Key（自然音色） |
-| 设置 → 语音识别 → 云端密钥 | 硅基流动 SiliconFlow Key（SenseVoiceSmall，兜底识别） |
-| 设置 → 语音识别 → 流式识别 | Deepgram API Key（通话边说边识别，延迟更低） |
-
-> 不填 Fish / Deepgram 也能跑，会自动降级（系统提示音 / 整段识别），但通话体验会变差。
-
-### 需要代理时
-
-Fish Audio 与 Deepgram 在部分网络环境需要代理（DeepSeek / SiliconFlow 直连）：
+### 代理
 
 ```bash
 # Windows CMD
@@ -122,454 +526,98 @@ export HTTP_PROXY=http://127.0.0.1:7890
 export NO_PROXY=api.deepseek.com,api.siliconflow.cn,127.0.0.1,localhost
 ```
 
-然后再启动后端。
-
-### 常见问题
-
-1. **不要提交 `.env` 和 `data/`**：密钥与个人数据都在这两处（`.gitignore` 已排除）。
-2. **每台机器数据独立**：想迁移就复制整个 `data/` 目录。
-3. **改了前端要重新构建**：`cd frontend && npm run build:backend`，否则页面还是旧版本。
-4. **端口冲突**：换 `--port` 时，方式 B 的 `NEXT_PUBLIC_API_BASE` 要同步改。
-5. **Python 版本**：3.14 与部分依赖不兼容，请用 3.11/3.12。
-
-
-> 本地语音栈（Silero-VAD + faster-whisper + CosyVoice2 / F5-TTS）+ 云端 LLM 的实时多口音英语对话练习。
-
-不是又一个"AI 聊天框"。SpeakEasy 要解决的是**哑巴英语**的核心困境：
-你缺的不是词汇量，是**在真实压力下用另一种口音即时对话的条件反射**。
-
-所以它做了三件大多数产品没做的事：
-
-1. **口音是真的**——不是给标准音加滤镜。英国咖啡师的 RP、班加罗尔工程师的 syllable-timed 节奏、罗马设计师的音乐性语调，都是靠 **zero-shot 音色克隆**从 5–10 秒参考音频里还原的。你说英文，对面用**那个人的口音和语气**回你。
-2. **延迟是真的**——所有语音处理在本地 GPU 上跑，LLM 流出来的**第一句话立刻进 TTS**，音频边合成边推送。目标首音 **< 1 秒**，而不是等一整段回复生成完。
-3. **反馈不打断你**——对话进行中，侧栏异步给你**地道表达建议**（"I very like this coffee" → "I'm really into this coffee"，并告诉你为什么）。它不评分、不弹窗、不要求你停下来。
-
 ---
 
-## 目录
+## 13. 部署与打包
 
-- [30 秒跑起来](#30-秒跑起来)
-- [它长什么样](#它长什么样)
-- [架构](#架构)
-- [目录结构](#目录结构)
-- [五个角色](#五个角色)
-- [关键设计决策](#关键设计决策)
-- [配置](#配置)
-- [脚本](#脚本)
-- [故障排查](#故障排查)
-- [路线图](#路线图)
+### 云端部署
 
----
+```bash
+# 服务器上（仓库根目录）
+bash deploy/deploy_v3.sh
+```
 
-## 30 秒跑起来
+脚本流程：备份 `data/` + 数据库（含 WAL）→ 幂等迁移 → 检查前端产物 → 重启 systemd →
+健康检查（首次启动生成头像/每日世界，最多等 120s）→ 失败自动回滚。
+详见 [deploy/README.md](deploy/README.md)。
 
-**你机器上已经装好了**（RTX 5080 / Python 3.11 / venv 在 `D:\speakeasy-venv`）：
+### Android APK
 
 ```powershell
-cd D:\desktop\口语
-D:\speakeasy-venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --port 8000
-# 打开 http://127.0.0.1:8000
+# 正式包（默认指向云端）
+.\mobile\build-apk.ps1 -Mode release
+
+# 自定义 API 地址
+.\mobile\build-apk.ps1 -Mode release -ApiBase http://47.104.24.236:8000
+
+# 装到手机
+adb install -r .\deliverables\SpeakEasy-v3.0.0-release.apk
 ```
 
-**填 API Key（两种方式，二选一）**：
-
-1. **界面填**（推荐，即时生效无需重启）：打开页面 → 右上角 **⚙ 模型设置** → 选预设或填 Base URL / API Key / 模型名 → 点「保存并启用」。会立即发一次真实请求验证。
-2. **改 `.env`**：`LLM_BASE_URL=...`、`LLM_API_KEY=...`、`LLM_MODEL=...`，重启。
-
-> 界面保存的配置存在 `data/llm_config.json`，优先级高于 `.env`。
-> Key 只写在本机，接口永不回传明文（返回的是 `sk-a…2345` 这样的指纹）。
-
-**全新机器从零装**：
-
-```powershell
-python scripts/setup_env.py      # 建 venv、装 cu128 torch、装依赖、生成 .env
-```
-
-具体见 [docs/SETUP_GPU.md](docs/SETUP_GPU.md)（CUDA 12.8 / sm_120 / 显存分配 / 各种坑）。
+APK 包含 Web 前端 + Capacitor 壳，网络请求指向构建时注入的 `NEXT_PUBLIC_API_BASE`，不含任何 provider Key。
 
 ---
 
-## 四个入口，都在页面右上角
+## 14. 测试与验收
 
-| 按钮 | 作用 | 文档 |
-|---|---|---|
-| **🌐 口音市场** | 50 个声线 / 20 个地区，试听后给角色换口音 | [docs/ACCENT_MARKET.md](docs/ACCENT_MARKET.md) |
-| **➕ 造角色** | 填表设计你自己的角色和场景（提示词自动生成） | [docs/ACCENT_MARKET.md](docs/ACCENT_MARKET.md) |
-| **🔊 克隆音色** | 上传 30s–1min 录音，让角色用**你的声音**说英语 | [docs/VOICE_CLONE.md](docs/VOICE_CLONE.md) |
-| **⚙ 模型设置** | 填 Base URL / API Key / 模型名，即时生效 | 本页下方 |
+```bash
+# V3 核心链路（人物/动态/好友/事件/音色/头像/语言）
+pytest backend/tests/test_v3_*.py -q
 
-### 口音市场
+# 全量
+pytest backend/tests -q
+```
 
-**36 个官方英语变体**（14 个地区，真实口音 100% 自然）+ **14 个外语兜底**
-（意大利/法国/德国/西班牙/日本/中国，口音浓但个别词可能读不准）。
+- V3 测试：**78 passed**（离线运行，`SE_TTS_FISH=0`）；
+- 验收清单：[docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md)（场景 A–AF，含截图）；
+- 接口文档：[docs/V3_API.md](docs/V3_API.md)；
+- 已知历史遗留：少量 V1/V2 深链路用例依赖真实 Key/外网（如多语种 TTS），不在 V3 验收范围。
 
-英式、美式、印度、爱尔兰、澳洲、新西兰、加拿大、新加坡、南非、香港、
-肯尼亚、尼日利亚、菲律宾、坦桑尼亚 —— 全部可用。
+### 手机端验收要点
 
-点 ▶ 试听，点 ✓ 应用到角色，**立即生效**。
-
-### 造角色
-
-填名字/城市/职业/口音/性格/开场白 → 提示词自动生成，不用写 prompt。
-口音从市场里选，可以先用这些设定试听一句再保存。
-
-### 场景
-
-9 个内置模板（咖啡店/机场/面试/看医生/酒店/租房/客服/社交/自定义），
-可以加自己的细节（地点、目标、背景）。
-
-### 声音克隆
-
-点 **🔊 克隆音色** → 上传音频或直接录音 → 试听 → 应用到角色。
-基于 **XTTS-v2 + OpenVoice V2 级联**：口音来自角色的真人声线，
-音色来自你的录音。
-
-> 配置存 `data/llm_config.json`，优先级高于 `.env`。Key 接口永不回传明文。
-> 自定义角色/场景/口音覆盖存 `data/custom.json`，升级不丢。
-
-完整的 GPU 环境说明（CUDA 12.8 / sm_120 / 显存分配 / 各种坑）见 **[docs/SETUP_GPU.md](docs/SETUP_GPU.md)**。
+- 发现 → 二级菜单「动态 / 偶遇一个人 / 通知」；
+- 动态页标题居中、左上角返回、无刷新按钮（下拉 / 底部上拉刷新）；
+- 320 / 360 / 390 / 414px 宽度下按钮与文字不重叠、不换行；
+- 人物朗读、好友试听、聊天语音是**同一个声音**。
 
 ---
 
-## 它长什么样
+## 15. 项目现状与路线图
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ ● 就绪   SpeakEasy   首音 682ms   STT 178ms   TTFT 341ms   丢帧 0        │
-├──────────┬───────────────────────────────────────────┬───────────────────┤
-│ 对话伙伴  │ 对话 · STT:distil-large-v3 | TTS:f5tts     │ 地道润色建议       │
-│          │                                           │                   │
-│ 🇬🇧 Oliver│  Oliver                          14:32:01 │ ┌───────────────┐ │
-│ 伦敦咖啡师│  Morning! What can I get you?             │ │ I very like   │ │
-│ RP      ●│                                           │ │ this coffee   │ │
-│          │                    你            14:32:08 │ │ ───────────── │ │
-│ 🇮🇳 Raj   │                    i want a flat white   │ │ I'm really    │ │
-│ 班加罗尔  │                                           │ │ into this     │ │
-│ 印度英语 ●│  Oliver                          14:32:11 │ │ coffee        │ │
-│          │  Right you are — one flat white coming    │ │               │ │
-│ 🇮🇹 Marco │  up. That'll be three eighty.  ▎          │ │ very 不能直接 │ │
-│ 罗马设计  │  ▁▃▅▇▅▃▁▂▃▅▇▅▃▁  ← 正在播放                │ │ 修饰动词，用  │ │
-│ 意大利语 ●│                                           │ │ really / be   │ │
-│          │  ┌────────────────────────────────────┐   │ │ into 更地道   │ │
-│ 🇺🇸 Emily │  │ ▁▂▃▅▇▅▃▂▁  [🎤 按住说话] [停止][打断]│   │ │ casual        │ │
-│ 纽约招聘  │  └────────────────────────────────────┘   │ └───────────────┘ │
-│          │  ┌──────────────────────────┬─────────┐  │                   │
-│ 模式      │  │ 没麦克风？直接打字…       │  发送   │  │                   │
-│ ●自由闲聊 │  └──────────────────────────┴─────────┘  │                   │
-│ ○任务达成 │                                           │                   │
-│ ○表达特训 │                                           │                   │
-└──────────┴───────────────────────────────────────────┴───────────────────┘
-```
+**已完成**
 
-顶部四个数字是**实时真实指标**，不是装饰：
-`首音` = 从 STT 出字到第一帧音频推送的毫秒数；`丢帧` = 音频 seq 跳号的次数。
+- V3 每日世界 + 信息流 + 好友关系 + 社交事件引擎；
+- 一人一音色（Fish）、头像一致性、语言角标校验、分语言水平；
+- 动态翻译 / 朗读 / 缓存版本化、播放互斥；
+- 用户图文动态（含上传）、兴趣匹配、可见性；
+- Web / PWA / Android APK 三端；
+- 云端部署脚本（备份 / 回滚 / 健康检查）。
+
+**接下来可以做**
+
+- 冷门语种内容增强（目前 ja/ko/pt 等主要靠兜底模板）；
+- 用母语做翻译目标、按水平改写原文；
+- 更强的内容审核与安全策略；
+- 语音通话的端到端延迟和打断体验优化；
+- 数据导出 / 清除等隐私功能完善。
 
 ---
 
-## 架构
+## 文档索引
 
-```
-                    ┌──────────────────── 浏览器 ─────────────────────┐
-                    │  AudioWorklet (16kHz)  →  PCM16 20ms 帧          │
-                    │  AnalyserNode 波形     ←  AudioBufferSourceNode  │
-                    └───────────┬───────────────────────▲──────────────┘
-                       二进制帧 │                        │ JSON+base64 音频
-                                ▼                        │
- ┌──────────────────────────── FastAPI (WebSocket) ──────┴──────────────┐
- │                                                                      │
- │  ┌─────────────┐   utterance   ┌──────────────┐                      │
- │  │ StreamingVAD│──────────────▶│  STTEngine   │  faster-whisper      │
- │  │ Silero-VAD  │  preroll 缓冲  │  distil-large│  int8_float16        │
- │  │ +能量降级    │  静音550ms截断 │  -v3         │  ~180ms              │
- │  └─────────────┘               └──────┬───────┘                      │
- │                                       │ "i want a flat white"        │
- │                                       ▼                              │
- │                          ┌────────────────────────┐                  │
- │                          │ TurnOrchestrator       │                  │
- │                          │  · persona system prompt│                 │
- │                          │  · 历史裁剪 (8轮)       │                 │
- │                          └────────┬───────────────┘                  │
- │                                   ▼                                  │
- │                        ┌──────────────────────┐   SSE/stream         │
- │                        │ LLMClient (async)    │─────────▶ 云端 LLM   │
- │                        │ OpenAI 兼容 + mock    │◀───────── token 流  │
- │                        └──────────┬───────────┘                      │
- │                                   ▼ delta                            │
- │                     ┌──────────────────────────┐                     │
- │                     │ StreamingSentenceSplitter│  首句更激进：        │
- │                     │ 缩写/小数/引号 不误切     │  遇 , 就切           │
- │                     └──────────┬───────────────┘                     │
- │                         sentence 0, 1, 2 …                          │
- │                                ▼                                     │
- │              ┌────────────────────────────────────┐                  │
- │              │ 有序 TTS 队列（串行推理,保序发送）   │                  │
- │              │ TTSEngine: CosyVoice2 / F5-TTS     │                  │
- │              │ zero-shot 克隆参考音频 → 24kHz      │                  │
- │              └──────────────┬─────────────────────┘                  │
- │                             ▼ 200ms PCM chunks, seq 严格递增          │
- │              ┌──────────────────────────────┐                        │
- │              │ 建议服务（后台 fire-and-forget）│──▶ 异步, 绝不阻塞音频  │
- │              └──────────────────────────────┘                        │
- └──────────────────────────────────────────────────────────────────────┘
-```
-
-**首音延迟预算**（详见 [docs/SETUP_GPU.md §10](docs/SETUP_GPU.md)）：
-
-| 阶段 | 耗时 | 可调项 |
-|---|---:|---|
-| VAD 判定说完了 | 550 ms | `VAD_MIN_SILENCE_MS` |
-| STT (distil-large-v3, int8) | ~180 ms | 模型大小 / compute_type |
-| LLM 首 token | ~350 ms | 模型 / `max_tokens` |
-| 首句断句 | ~30 ms | `PIPELINE_FIRST_SENTENCE_MAX_CHARS` |
-| TTS 首句合成 | ~300 ms | `TTS_NFE_STEP` / 参考音频长度 |
-| **首音（STT→音频）** | **~680 ms** | ✅ 目标 < 1000 |
-
----
-
-## 目录结构
-
-```
-口语/
-├── README.md                     ← 你在这里
-├── .env.example                  环境变量模板（复制成 .env）
-├── pyproject.toml                包元数据 + pytest/ruff/mypy 配置
-│
-├── docs/
-│   ├── SETUP_GPU.md              ★ CUDA/torch/ffmpeg/显存/坑 全在这里
-│   ├── CONTRACTS.md              内部接口契约（并行开发的权威定义）
-│   └── PROTOCOL.md               ★ WebSocket / HTTP 协议（前后端契约）
-│
-├── scripts/
-│   ├── setup_env.py              一键安装 + 体检（真的跑 CUDA kernel 验证）
-│   ├── download_models.py        HF 镜像下载模型
-│   ├── record_reference.py       录制零样本克隆参考音频 + 校验
-│   └── e2e_test.py               端到端测试（无需麦克风/无需 key）
-│
-├── assets/ref_audio/             5–10s 参考音频 + manifest.json
-│
-├── backend/
-│   ├── requirements.txt          （不含 torch，见 SETUP_GPU §3）
-│   ├── requirements-tts.txt      TTS 克隆引擎（二选一）
-│   ├── app/
-│   │   ├── main.py               FastAPI 入口 + 静态挂载
-│   │   ├── __main__.py           python -m app
-│   │   ├── config.py             全部配置（pydantic-settings）
-│   │   ├── engines.py            引擎装配 + GPU 探测
-│   │   ├── schemas.py            HTTP 模型
-│   │   ├── logging_utils.py      日志 + Stopwatch 打点
-│   │   ├── session.py            会话与历史
-│   │   ├── personas/
-│   │   │   ├── __init__.py       PersonaLibrary：prompt 构造
-│   │   │   └── personas.json     ★ 角色模板库（prompt + 音色 + 口音要点）
-│   │   ├── voice/                ← 本地语音栈
-│   │   │   ├── audio_utils.py    PCM/重采样/读写 wav（纯 numpy）
-│   │   │   ├── vad.py            StreamingVAD（Silero + 能量降级 + preroll）
-│   │   │   ├── stt.py            STTEngine（faster-whisper + mock）
-│   │   │   ├── tts.py            TTSEngine（CosyVoice2 / F5-TTS / tone）
-│   │   │   ├── ref_audio.py      ReferenceLibrary
-│   │   │   └── tone_tts.py       无模型占位合成器（全局兜底）
-│   │   ├── llm/                  ← 文本大脑
-│   │   │   ├── client.py         LLMClient（OpenAI 兼容 + 流式 + mock）
-│   │   │   ├── sentence_splitter.py  ★ 流式断句（首包延迟关键）
-│   │   │   ├── suggestions.py    润色建议（容错 JSON）
-│   │   │   └── mock_llm.py       无 key 时的规则回复
-│   │   ├── pipeline/
-│   │   │   ├── orchestrator.py   ★ 回合编排（保序并发流水线）
-│   │   │   └── metrics.py        延迟指标
-│   │   ├── routers/
-│   │   │   ├── ws.py             ★ WebSocket 路由
-│   │   │   └── http_api.py       REST API
-│   │   └── static/
-│   │       ├── standalone.html   零依赖备用前端（单文件，无需构建）
-│   │       └── app/              Next.js 构建产物（挂到 /）
-│   └── tests/                    pytest
-│
-└── frontend/                     Next.js 15 + TS + Tailwind v4
-    └── src/…
-```
-
----
-
-## 五个角色
-
-每个角色都是**口音 + 人格 + 说话习惯**的完整包，不只是换个名字：
-
-| | Oliver 🇬🇧 | Raj 🇮🇳 | Marco 🇮🇹 | Emily 🇺🇸 | Priya 🇸🇬 |
-|---|---|---|---|---|---|
-| **设定** | Soho 咖啡师 | 班加罗尔工程师 | 罗马设计师 | 纽约招聘官 | 新加坡 PM |
-| **口音** | British RP | Indian English | Italian English | American | Singapore |
-| **场景** | 点单闲聊 | 技术评审 | 聊设计 | 模拟面试 | 产品决策 |
-| **难度** | 简单 | 中 | 难 | 中 | 难 |
-| **说话标记** | right then, spot on, cheers, a bit of | actually, itself, prepone, na | allora, dai, no?, ma dai | okay so, walk me through, got it | can/cannot, ah, lah, already |
-
-**Prompt 设计要点**（见 `personas/personas.json`）：
-
-- **强制短句**——1–2 句，最多 55 词。这是口语，不是作文。
-- **用词塑造口音，不靠拼写**——印度英语用 `prepone`/`itself`，意大利英语用 `allora`/`dai`，**绝不**写 `"it is-a too much"` 这种假口音拼写。音色由 TTS 克隆负责，文本负责词法与句法习惯。
-- **隐性纠错**——不直接说"你错了"，而是把对方的想法用正确形式重述一遍。这是二语习得里最有效的 recast 反馈。
-- **不许出戏**——不承认是 AI，不用 markdown/emoji/星号动作描写。
-- **每轮必须留钩子**——一个提问或一个邀你继续的动作。
-
-三种对话模式可叠加在任意角色上：
-`自由闲聊`（角色主动带话题）/ `任务达成`（角色设置障碍，逼你谈判）/ `表达特训`（角色反复示范一个句式，诱导你模仿）。
-
----
-
-## 关键设计决策
-
-### 为什么断句要这么激进？
-
-LLM 吐完整段再 TTS，首音要等 3–5 秒——这毁掉对话感。
-所以 `StreamingSentenceSplitter` 做了件反直觉的事：**第一句提前切**。
-
-```
-常规： 等到句号才切 → 首句可能 90 个字符 → TTS 合成 1.2s
-首句： 遇逗号且长度 ≥ 40 就切 → 首句 45 字符 → TTS 合成 0.6s
-```
-
-代价是第一句可能偏短（"Right then,"），但这在真实对话里**完全自然**——母语者也这么喘气。
-后续句子用正常规则（`.!?` + 缩写白名单 + 小数保护 + `...` 保护），保证语义完整。
-
-### 为什么 TTS 串行，音频却不卡？
-
-单卡上并行的 TTS 推理会互相抢显存/算力，反而抖动更大。
-所以设计是：**LLM 流式与断句并行跑，TTS 推理串行排队，但发送严格保序**。
-
-```
-LLM:  ──delta──delta──delta─────────delta──▶
-切分:      ↓sentence0   ↓sentence1      ↓s2
-TTS:   [====s0====][====s1====][====s2====]   串行（GPU 独占）
-发送:       ↓s0帧…     ↓s1帧…      ↓s2帧…      严格按 seq 递增
-```
-
-`s0` 在合成时，`s1` 已经在队列里等着，LLM 也还在继续。总时长不变，但**第一帧音频的延迟最小化**。
-
-### 为什么每个引擎都要有降级后端？
-
-这是一个会在别人机器上运行的项目。目标机器可能：
-没 GPU / 没装 torch / HF 下载失败 / 用户没填 API key。
-
-如果任意一处硬失败就整个跑不起来，用户连"看看界面长什么样"都做不到。
-所以每个关键组件都有一个**功能退化但协议完整**的替身：
-
-| 真组件 | 降级 | 效果 |
-|---|---|---|
-| faster-whisper | `mock` STT | 返回固定英文句子，延迟真实 |
-| CosyVoice2/F5-TTS | `tone` TTS | numpy 合成的"有节奏类语音"，不好听但能验证流与延迟 |
-| Silero-VAD | 能量 VAD | 自适应噪声底 + 迟滞，接口一致 |
-| 云端 LLM | 规则引擎 | 按角色/关键词选模板，逐字流式 |
-
-**协议不变、指标真实**——这样你可以在没有模型时先把前端、播放、波形、jitter buffer 全调好，
-再插上模型验证质量。降级状态在 `/api/health` 和 UI 里**显式可见**，不会偷偷糊弄。
-
-### 为什么用 WebSocket 而不是 WebRTC？
-
-WebRTC 的低延迟优势在**网络不可控**时才关键。本地回环上：
-WebSocket + 原始 PCM 的额外开销 ≈ 0，而复杂度差了整整一个量级
-（信令服务器、ICE、SDP、TURN、编解码协商）。
-
-WebRTC 的优势是可以做**真双工 + 原生 jitter buffer + 丢包补偿**。
-如果将来要部署到公网/移动端，`docs/PROTOCOL.md` 的消息语义可以原样搬到 DataChannel。
-当前选择是**用复杂度换确定性**：单文件协议、`ws` 一行连上、肉眼可调试。
-
----
-
-## 配置
-
-全部配置在 `.env`（从 `.env.example` 复制）。最常改的几项：
-
-```ini
-# 文本大脑
-LLM_API_KEY=sk-...                          # 不填则走规则引擎
-LLM_BASE_URL=https://api.deepseek.com/v1    # 任何 OpenAI 兼容端点
-LLM_MODEL=deepseek-chat
-
-# 语音
-STT_MODEL_SIZE=distil-large-v3              # large-v3 更准但慢一倍
-STT_COMPUTE_TYPE=int8_float16               # 16G 显存推荐
-TTS_BACKEND=auto                            # auto|cosyvoice2|f5tts|tone
-
-# 延迟 vs 稳定
-VAD_MIN_SILENCE_MS=550                      # 调小→更快，但容易截断
-PIPELINE_FIRST_SENTENCE_MAX_CHARS=60        # 调小→首音更快
-TTS_NFE_STEP=24                             # F5-TTS 采样步数，16 更快
-
-# 镜像（国内必配）
-HF_ENDPOINT=https://hf-mirror.com
-```
-
----
-
-## 脚本
-
-| 命令 | 作用 |
+| 文档 | 内容 |
 |---|---|
-| `python scripts/setup_env.py` | 建 venv、装 cu128 torch、装依赖、生成 .env |
-| `python scripts/setup_env.py --check` | 体检：真的跑一次 fp16 matmul 验证 sm_120 kernel |
-| `python scripts/download_models.py --list` | 列出可用模型与体积 |
-| `python scripts/download_models.py --stt distil-large-v3 --tts f5tts` | 下载权重 |
-| `python scripts/record_reference.py --list` | 列出角色与录制稿 |
-| `python scripts/record_reference.py --persona oliver` | 录参考音频 + 自动裁剪/归一化/更新 manifest |
-| `python scripts/record_reference.py --validate` | 体检参考音频（时长/采样率/音量/ref_text） |
-| `python scripts/e2e_test.py` | 端到端：连 WS、跑多轮、打印延迟分解表 + SLO 判定 |
-| `python -m pytest backend/tests -q` | 单元测试 |
-
----
-
-## 故障排查
-
-**"torch.cuda.is_available() 是 False"**
-装的是 CPU 版。`pip uninstall -y torch torchaudio` 后用 `--index-url https://download.pytorch.org/whl/cu128` 重装。
-RTX 5080 是 sm_120，**必须** cu128+。详见 [docs/SETUP_GPU.md §3](docs/SETUP_GPU.md)。
-
-**"no kernel image is available for execution on the device"**
-同上——你的 torch 编译时不含 sm_120 kernel。这不是代码问题。
-
-**"页面打不开 / 白屏"**
-后端没起。`python -m uvicorn app.main:app --app-dir backend --port 8000`。
-后端会自己回落 `standalone.html`，所以即使 Next 前端没构建也能用。
-
-**"能连上但没声音"**
-看 UI 的 `TTS:` 字段。如果是 `tone`，说明克隆引擎没装——它合成的音频"不好听但应该有声"。
-若连 tone 都没声，检查 `/api/health` 和浏览器控制台（自动播放策略要求先有用户手势，点一下"连接"即可）。
-
-**"首音 > 2 秒"**
-按 [docs/SETUP_GPU.md §10](docs/SETUP_GPU.md) 的清单逐项调。最常见原因：
-参考音频太长（>10s）、`VAD_MIN_SILENCE_MS` 太大、GPU 被别的程序占用。
-
-**"识别全是空白/乱码"**
-前端采样率不是 16k。后端会拒收其它采样率并回 `error{code:"unsupported_sample_rate"}`。
-检查浏览器是否支持 `new AudioContext({sampleRate:16000})`；不支持时 worklet 会重采样。
-
-**"ffmpeg not found"**
-`winget install --id Gyan.FFmpeg -e`，然后**重开终端**（PATH 才生效）。
-
-更多见 [docs/SETUP_GPU.md §9](docs/SETUP_GPU.md) 的完整故障表。
-
----
-
-## 路线图
-
-已经能用的：多口音 zero-shot 克隆、流式断句、barge-in 打断、异步润色建议、5 角色 × 3 模式、无依赖降级链路。
-
-还没做但值得做：
-
-- [ ] **发音评分**——用 wav2vec2 + 强制对齐给出音素级偏差（当前只做表达润色，不做发音）
-- [ ] **流式 STT**——现在是说完才转写，改 chunked 推理可再省 200ms
-- [ ] **WebRTC 传输**——为公网/移动端准备
-- [ ] **难度自适应**——根据用户错误率动态调整角色语速与词汇复杂度
-- [ ] **会话持久化**——SQLite 存历史，支持"上周和 Marco 聊到哪了"
-- [ ] **自定义角色**——上传一段音频 + 描述，自动生成 persona 与 prompt
-
----
+| [docs/V3_API.md](docs/V3_API.md) | V3 接口、数据模型、事件引擎、缓存与文案原则 |
+| [docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md) | V3 验收场景与截图 |
+| [docs/V3_MOBILE.md](docs/V3_MOBILE.md) | 移动端与 APK 说明 |
+| [docs/V3_PLAN.md](docs/V3_PLAN.md) | V3 实施计划 |
+| [docs/V2_GUIDE.md](docs/V2_GUIDE.md) | V2 运行 / 验收指南 |
+| [docs/local-mode.md](docs/local-mode.md) | 无服务器本地模式 |
+| [deploy/README.md](deploy/README.md) | 服务器部署细节 |
 
 ## 许可与合规
 
-代码 MIT。
+- 代码仅用于学习与个人项目；第三方内容（Fish 音色、Wikimedia / Openverse 图片）遵循各自许可，图片在 UI 内保留 CC 署名；
+- AI 生成内容在界面上以 `AI` 角标标识，不代表真人；
+- Key、聊天记录、上传图片都只存在部署者自己的服务器/设备上，仓库不包含任何密钥或个人数据。
 
-**参考音频重要提示**：用真人录音做声音克隆涉及**声音权/肖像权**。本项目默认让你**自己录制**
-（`scripts/record_reference.py`），这也是效果最稳定的做法。若使用公开素材，
-**仅限个人学习自用**，不要分发、不要商用、不要用于冒充他人。生产环境请使用已授权的音色库。
-
-用到的开源项目：Silero-VAD (MIT)、faster-whisper (MIT)、CTranslate2 (MIT)、
-CosyVoice (Apache-2.0)、F5-TTS (MIT)、FastAPI (MIT)、Next.js (MIT)。

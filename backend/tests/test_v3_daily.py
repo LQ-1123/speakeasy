@@ -138,7 +138,8 @@ def test_cleanup_keeps_interacted_and_recycles_guests(daily_db):
 
 
 def test_feed_hides_expired_posts_and_pages_by_10(daily_db, tmp_path):
-    asyncio.run(generate_daily(daily_db, None, day="2026-11-06"))
+    # 用「今天」生成，避免跨天后 daily_status 的 generated 断言受日期影响
+    asyncio.run(generate_daily(daily_db, None))
     app, _service = _make_app(daily_db, tmp_path)
     with TestClient(app) as client:
         headers = _register(client, "device_daily_feed")

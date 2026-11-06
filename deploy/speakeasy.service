@@ -8,6 +8,8 @@ Type=simple
 WorkingDirectory=/root/speakeasy
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/root/speakeasy/backend
+# 单用户老库兼容：owner=local 的历史好友/聊天对当前身份只读可见
+Environment=SE_LEGACY_SHARED_OWNER=1
 # 线上锁定 key 编辑（如需在 App 里改 key，改成 1）
 Environment=ALLOW_KEY_EDIT=0
 # 前端域名（前后端分离时填写，逗号分隔；同源部署可留空）

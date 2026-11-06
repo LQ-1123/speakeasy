@@ -385,4 +385,10 @@ const CUSTOM = {
   "seed-face": seedFaceSvg,
 };
 
-window.AvatarLab = { styles: Object.keys(STYLES), custom: Object.keys(CUSTOM), dicebearSvg, customSvg: (k, s, opts) => (CUSTOM[k] ? (k === "seed-face" ? seedFaceSvg(s, opts) : CUSTOM[k](s)) : ""), rngOf, cyrb128, ageBand, avatarRegions: ["east_asian", "south_asian", "latino", "black", "white"] };
+function dicebearSvgRaw(name, seed, opts) {
+  const style = STYLES[name];
+  if (!style) return "";
+  return createAvatar(style, Object.assign({ seed: String(seed) }, opts || {})).toString();
+}
+
+window.AvatarLab = { styles: Object.keys(STYLES), custom: Object.keys(CUSTOM), dicebearSvg, dicebearSvgRaw, customSvg: (k, s, opts) => (CUSTOM[k] ? (k === "seed-face" ? seedFaceSvg(s, opts) : CUSTOM[k](s)) : ""), rngOf, cyrb128, ageBand, avatarRegions: ["east_asian", "south_asian", "latino", "black", "white"] };

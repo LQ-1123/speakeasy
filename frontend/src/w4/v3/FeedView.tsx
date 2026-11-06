@@ -50,6 +50,7 @@ import {
 } from "./api";
 import "./v3.css";
 
+/* 演示版：用户动态只能选内置图片（不支持上传自己的照片） */
 const STOCK = [
   "/mock/photos/cafe.jpg",
   "/mock/photos/brunch.jpg",
@@ -57,9 +58,17 @@ const STOCK = [
   "/mock/photos/records.jpg",
   "/mock/photos/beach.jpg",
   "/mock/photos/night.jpg",
+  "/mock/photos/latte.jpg",
+  "/mock/photos/desk.jpg",
+  "/mock/photos/lisbon.jpg",
+  "/mock/photos/market.jpg",
+  "/mock/photos/tokyo.jpg",
+  "/mock/photos/seoul.jpg",
 ];
 
 const TAGS = ["日常", "工作", "运动", "美食", "音乐", "读书", "旅行", "摄影"];
+const TAG_MAX = 6;
+const TAG_MAX_LEN = 16;
 
 function flagOf(country: string): string {
   const map: Array<[string, string]> = [
@@ -672,7 +681,16 @@ function PublishDialog({
   const [visibility, setVisibility] = useState<"public" | "friends" | "private">("public");
   const [picked, setPicked] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const customTags = tags.filter((t) => !TAGS.includes(t));
+  const addTag = (raw: string) => {
+    const tag = raw.trim().replace(/^#+/, "").slice(0, TAG_MAX_LEN);
+    if (!tag) return;
+    setTags((list) => (list.includes(tag) || list.length >= TAG_MAX ? list : [...list, tag]));
+    setTagInput("");
+  };
 
   const visibleOptions = useMemo(
     () => [
@@ -717,6 +735,10 @@ function PublishDialog({
         onChange={(e) => setText(e.target.value)}
         autoFocus
       />
+
+      <div className="w4-field-hint" style={{ marginTop: 2 }}>
+        演示版仅可使用内置图片（暂不支持上传自己的照片）
+      </div>
 
       <div className="w4-publish-pics">
         {STOCK.map((p) => {
@@ -780,12 +802,48 @@ function PublishDialog({
               className={`w4-chip ${tags.includes(t) ? "is-green" : ""}`}
               style={{ cursor: "pointer" }}
               onClick={() =>
-                setTags((list) => (list.includes(t) ? list.filter((x) => x !== t) : [...list, t]))
+                setTags((list) =>
+                  list.includes(t)
+                    ? list.filter((x) => x !== t)
+                    : list.length >= TAG_MAX
+                      ? list
+                      : [...list, t],
+                )
               }
             >
               {t}
             </button>
           ))}
+          {customTags.map((t) => (
+            <button
+              key={`custom-${t}`}
+              className="w4-chip is-green"
+              style={{ cursor: "pointer" }}
+              title="点击删除自定义标签"
+              onClick={() => setTags((list) => list.filter((x) => x !== t))}
+            >
+              {t} ×
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            className="w4-input"
+            style={{ flex: 1 }}
+            placeholder={`自定义标签（最多 ${TAG_MAX} 个，回车添加）`}
+            value={tagInput}
+            maxLength={TAG_MAX_LEN}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTag(tagInput);
+              }
+            }}
+          />
+          <button className="w4-btn" type="button" onClick={() => addTag(tagInput)}>
+            添加
+          </button>
         </div>
       </div>
 

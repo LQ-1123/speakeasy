@@ -81,6 +81,44 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+#: 演示版用户动态只允许选内置图片（不允许上传自己的照片）
+USER_MEDIA_PREFIXES = ("/mock/photos/",)
+USER_MEDIA_MAX = 4
+USER_TAGS_MAX = 6
+USER_TAG_MAX_LEN = 16
+
+
+def _clean_user_media(media: Iterable[str] | None) -> list[str]:
+    """只接受内置 mock 图片；其它（上传/外链）一律拒绝。"""
+    out: list[str] = []
+    for raw in media or []:
+        path = str(raw or "").strip()
+        if not path:
+            continue
+        if not any(path.startswith(prefix) for prefix in USER_MEDIA_PREFIXES):
+            raise ValueError("演示版只能使用内置图片，暂不支持上传自己的照片")
+        if path not in out:
+            out.append(path)
+        if len(out) >= USER_MEDIA_MAX:
+            break
+    return out
+
+
+def _clean_user_tags(tags: Iterable[str] | None) -> list[str]:
+    """标签：去 #、去空白、限长、去重、限量。"""
+    out: list[str] = []
+    for raw in tags or []:
+        tag = str(raw or "").strip().lstrip("#").strip()
+        if not tag:
+            continue
+        tag = tag[:USER_TAG_MAX_LEN]
+        if tag not in out:
+            out.append(tag)
+        if len(out) >= USER_TAGS_MAX:
+            break
+    return out
+
+
 def _clean(value: Any, limit: int = 2000) -> str:
     text = " ".join(str(value or "").split())
     return text[:limit].strip()
@@ -475,6 +513,8 @@ class V3Service:
         text = _clean(content, 1000)
         if not text:
             raise ValueError("动态内容不能为空")
+        media_list = _clean_user_media(media)
+        tag_list = _clean_user_tags(tags)
         vis = visibility if visibility in VISIBILITIES else "public"
         post_id = f"up_{_uuid()}"
         name = _clean(author_name, 40) or self._user_name(user_id)
@@ -483,8 +523,8 @@ class V3Service:
                 "INSERT INTO user_posts (id, user_id, author_name, content, media, tags,"
                 " visibility, like_count, comment_count, created_at)"
                 " VALUES (?,?,?,?,?,?,?,0,0,?)",
-                (post_id, user_id, name, text, _dumps(list(media or [])),
-                 _dumps(list(tags or [])), vis, _iso()),
+                (post_id, user_id, name, text, _dumps(media_list),
+                 _dumps(tag_list), vis, _iso()),
             )
             row = self.conn.execute("SELECT * FROM user_posts WHERE id=?", (post_id,)).fetchone()
         self._feed_cache["at"] = 0.0

@@ -210,7 +210,9 @@ V3 的「捏人」只发生一次，产物就是整个信息流世界：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v3/posts` | `{content, visibility: public\|friends\|private, media[], tags[]}` |
+| POST | `/api/v3/posts` | 发动态。**media 只接受内置图片**（`/mock/photos/*`，最多 4 张），
+上传/外链返回 400；tags 去 `#`、去重、单条 ≤16 字、最多 6 个（预设 8 个 + 可自定义） |
+ `{content, visibility: public\|friends\|private, media[], tags[]}` |
 | GET | `/api/v3/posts/mine` | 自己的全部动态 |
 | DELETE | `/api/v3/posts/{id}` | 仅作者可删（越权 404） |
 | POST | `/api/v3/persona-posts/{id}/like` | 点赞/取消（幂等切换） |

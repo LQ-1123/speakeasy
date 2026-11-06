@@ -428,6 +428,51 @@ def test_api_persona_carries_avatar_options(world_db):
         assert friend["avatar_options"]
 
 
+def test_user_post_media_limited_to_mock_and_tags_cleaned(world_db):
+    """用户动态只允许内置图片；标签去 #、去重、限量。"""
+    db, tmp_path = world_db
+    app, _service, _voice = _make_app(db, tmp_path)
+    with TestClient(app) as client:
+        headers = _register(client, "device_user_media_0001")
+
+        ok = client.post(
+            "/api/v3/posts",
+            headers=headers,
+            json={
+                "content": "today was good",
+                "visibility": "public",
+                "media": ["/mock/photos/cafe.jpg", "/mock/photos/beach.jpg"],
+                "tags": ["#咖啡", "咖啡", "", " 旅行 ", "旅行"],
+            },
+        )
+        assert ok.status_code == 200
+        post = ok.json()["post"]
+        assert post["media"] == ["/mock/photos/cafe.jpg", "/mock/photos/beach.jpg"]
+        assert post["tags"] == ["咖啡", "旅行"]
+
+        for bad in (
+            "https://example.com/cat.jpg",
+            "data:image/png;base64,AAAA",
+            "/media/abc.webp",
+        ):
+            res = client.post(
+                "/api/v3/posts",
+                headers=headers,
+                json={"content": "nope", "media": [bad]},
+            )
+            assert res.status_code == 400, bad
+            assert "内置图片" in res.json()["detail"]
+
+        # 标签上限 6 个
+        many = client.post(
+            "/api/v3/posts",
+            headers=headers,
+            json={"content": "tags", "tags": [f"t{i}" for i in range(9)]},
+        )
+        assert many.status_code == 200
+        assert len(many.json()["post"]["tags"]) == 6
+
+
 def test_health_reports_world(world_db):
     db, tmp_path = world_db
     app, _service, _voice = _make_app(db, tmp_path)

@@ -258,17 +258,35 @@ class WikimediaAdapter:
 
 
 async def download_image(client: httpx.AsyncClient, item: MediaItem, media_dir: str) -> str | None:
-    """下载并压缩成 900px webp，返回 /media/xxx.webp；失败返回 None。"""
+    """下载并压缩成 900px webp，返回 /media/xxx.webp；失败返回 None。
+
+    流式读取 + 单文件字节上限（``SE_MEDIA_DOWNLOAD_MAX_BYTES``，默认 12MB）：
+    超大图直接放弃，避免把整张原图读进内存。
+    """
     os.makedirs(media_dir, exist_ok=True)
     url = item.thumb_url or item.image_url
     if not url:
         return None
     try:
-        resp = await client.get(url, headers=_headers(), timeout=30.0)
-        resp.raise_for_status()
-        if not str(resp.headers.get("content-type", "")).startswith("image/"):
-            return None
-        image = Image.open(io.BytesIO(resp.content)).convert("RGB")
+        max_bytes = int(float(os.getenv("SE_MEDIA_DOWNLOAD_MAX_BYTES", "") or 12 * 1024 * 1024))
+    except (TypeError, ValueError):
+        max_bytes = 12 * 1024 * 1024
+    data = bytearray()
+    try:
+        async with client.stream("GET", url, headers=_headers(), timeout=30.0) as resp:
+            resp.raise_for_status()
+            if not str(resp.headers.get("content-type", "")).startswith("image/"):
+                return None
+            declared = int(resp.headers.get("content-length") or 0)
+            if declared and declared > max_bytes:
+                log.warning("图片过大（%d bytes），跳过 %s", declared, url)
+                return None
+            async for chunk in resp.aiter_bytes(65536):
+                data.extend(chunk)
+                if len(data) > max_bytes:
+                    log.warning("图片下载超过上限（%d bytes），放弃 %s", max_bytes, url)
+                    return None
+        image = Image.open(io.BytesIO(bytes(data))).convert("RGB")
     except Exception as exc:  # noqa: BLE001
         log.warning("图片下载失败 %s: %s", url, exc)
         return None

@@ -47,7 +47,6 @@ import {
   loadSettings as apiLoadSettings,
   patchExpression as apiPatchExpression,
   publishMomentToServer as apiPublishMoment,
-  saveTts as apiSaveTts,
   translate as apiTranslate,
   deleteMoment as apiDeleteMoment,
   loadFriendList as apiLoadFriendList,
@@ -1072,10 +1071,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((s) => ({ ...s, ...patch }));
-    // 只同步后端真正支持的字段（TTS provider）；密钥类不在这里回写
-    if (patch.tts) {
-      void apiSaveTts({ provider: patch.tts.provider === "fish" ? "fish" : "system" });
-    }
+    // 模型/语音/密钥配置统一在管理端，客户端只保存本地展示状态（不回写后端）
   }, []);
 
   const updateFriendVoice = useCallback((friendId: string, voice: string, voiceLabel: string) => {

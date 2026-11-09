@@ -11,7 +11,9 @@
 param(
     [string]$ApiBase = "http://47.104.24.236:8000",
     [ValidateSet("debug", "release")][string]$Mode = "release",
-    [switch]$AllowLocalhost
+    [switch]$AllowLocalhost,
+    [int]$VersionCode = 0,
+    [string]$VersionName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +42,24 @@ if (Test-Path "$Root/mobile/www") { Remove-Item -Recurse -Force "$Root/mobile/ww
 New-Item -ItemType Directory -Path "$Root/mobile/www" | Out-Null
 Copy-Item -Recurse -Force "$Root/frontend/out/*" "$Root/mobile/www/"
 
+Write-Host "==> 2.5/6 inject remote-bootstrap shell"
+$shellBase = $ApiBase.TrimEnd("/")
+$bootstrap = Get-Content "$Root/mobile/bootstrap/index.html" -Raw -Encoding UTF8
+$bootstrap = $bootstrap.Replace("__API_BASE__", $shellBase)
+[IO.File]::WriteAllText("$Root/mobile/www/index.html", $bootstrap, (New-Object System.Text.UTF8Encoding($false)))
+$offline = Get-Content "$Root/mobile/bootstrap/offline.html" -Raw -Encoding UTF8
+$offline = $offline.Replace("__API_BASE__", $shellBase)
+[IO.File]::WriteAllText("$Root/mobile/www/offline.html", $offline, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "    shell -> $shellBase"
+
+$updaterFile = "$Root/mobile/android/app/src/main/java/com/speakeasy/app/UpdateChecker.java"
+if (Test-Path $updaterFile) {
+    $updaterText = [IO.File]::ReadAllText($updaterFile)
+    $updaterText = [regex]::Replace($updaterText, 'String BASE = "[^"]*"', "String BASE = `"$shellBase`"")
+    [IO.File]::WriteAllText($updaterFile, $updaterText, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "    updater BASE -> $shellBase"
+}
+
 Write-Host "==> 3/6 capacitor sync"
 Set-Location "$Root/mobile"
 npx cap sync android
@@ -64,6 +84,20 @@ if (-not $env:JAVA_HOME) {
 }
 Write-Host "    ANDROID_HOME=$env:ANDROID_HOME"
 Write-Host "    JAVA_HOME=$env:JAVA_HOME"
+
+if ($VersionCode -gt 0 -or $VersionName -ne "") {
+    Write-Host "==> 3.6/6 set versionCode/versionName"
+    $gradleFile = "$Root/mobile/android/app/build.gradle"
+    $gradleText = [IO.File]::ReadAllText($gradleFile)
+    if ($VersionCode -gt 0) {
+        $gradleText = [regex]::Replace($gradleText, 'versionCode\s+\d+', "versionCode $VersionCode")
+    }
+    if ($VersionName -ne "") {
+        $gradleText = [regex]::Replace($gradleText, 'versionName\s+"[^"]*"', "versionName `"$VersionName`"")
+    }
+    [IO.File]::WriteAllText($gradleFile, $gradleText, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "    versionCode=$VersionCode versionName=$VersionName"
+}
 
 Write-Host "==> 4/6 gradle assemble ($Mode)"
 Set-Location "$Root/mobile/android"

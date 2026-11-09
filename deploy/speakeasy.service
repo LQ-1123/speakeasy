@@ -10,8 +10,10 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/root/speakeasy/backend
 # 单用户老库兼容：owner=local 的历史好友/聊天对当前身份只读可见
 Environment=SE_LEGACY_SHARED_OWNER=1
-# 线上锁定 key 编辑（如需在 App 里改 key，改成 1）
+# 线上锁定 key 编辑（客户端不再提供配置入口；管理台在 /admin）
 Environment=ALLOW_KEY_EDIT=0
+# 公网管理台口令：设置后 /admin?token=<口令> 才能打开（也可用 SSH 隧道走回环）
+# Environment=SE_ADMIN_TOKEN=change-me
 # 前端域名（前后端分离时填写，逗号分隔；同源部署可留空）
 Environment=CORS_ORIGINS=https://your-domain.example.com
 # 服务器出站代理（如果你的 VPN 是本地 socks/http 代理，按实际端口改）

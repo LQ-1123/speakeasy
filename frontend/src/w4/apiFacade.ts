@@ -125,10 +125,6 @@ export async function publishMomentToServer(text: string, mood: string) {
   return server.publishMomentToServer(text, mood);
 }
 
-export async function saveTts(body: Record<string, string | undefined>) {
-  if (isLocalMode()) return null;
-  return server.saveTts(body);
-}
 
 export async function deleteMoment(momentId: string) {
   if (isLocalMode()) return (await local()).localDeleteMoment(momentId);
@@ -143,16 +139,6 @@ export async function discover(language?: string) {
 export async function discoverLanguages() {
   if (isLocalMode()) return ["en", "ja", "ko", "es", "fr", "de", "it", "pt"];
   return server.discoverLanguages();
-}
-
-export async function loadArchetypes() {
-  if (isLocalMode()) return [];
-  return server.loadArchetypes();
-}
-
-export async function changeFriendVoice(friendId: string, archetypeId: string) {
-  if (isLocalMode()) return null;
-  return server.changeFriendVoice(friendId, archetypeId);
 }
 
 /** 本地模式没有服务器音频 URL（语音由本地 Fish 合成 blob），返回空串 */

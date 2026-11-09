@@ -13,21 +13,39 @@ if str(BACKEND) not in sys.path:
 from app.v3.media import MediaItem, credit_text, is_life_safe, queries_for  # noqa: E402
 
 
-def test_fish_tts_toggle_and_token():
-    """provider=fish 且有 key 时才启用；token 对同一参考音频稳定。"""
+def test_fish_voice_binding_is_stable_and_configured_only_with_key(monkeypatch):
+    """音色身份由统一解析器给出：同一角色 token 稳定；Fish 只在有 key 时算「已配置」。"""
     from types import SimpleNamespace
 
-    from app.v3.audio_cache import _fish_enabled, _fish_token
+    from app.voice import voice_registry
 
-    fish = SimpleNamespace(provider="fish", fish_api_key="k", fish_reference_id="ref-1")
-    assert _fish_enabled(fish) is True
-    assert _fish_token(fish) == _fish_token(fish)
-    assert _fish_token(fish).startswith("fish-")
+    monkeypatch.setenv("SE_TTS_FISH", "1")
+    fish = SimpleNamespace(
+        provider="fish",
+        fish_api_key="k",
+        fish_base_url="https://api.fish.audio",
+        fish_model="s2.1-pro",
+        fish_reference_id="ref-1",
+        fish_format="mp3",
+    )
+    assert voice_registry.fish_configured(fish) is True
+    persona = {"id": "p1", "nickname": "X", "fish_voice_id": "ref-1",
+               "voice_id": "en-GB-RyanNeural"}
+    first = voice_registry.binding_for_persona(persona, fish)
+    again = voice_registry.binding_for_persona(persona, fish)
+    assert first.token == again.token
+    assert first.token.startswith("fish-")
+    assert len(first.token) == len("fish-") + 8
 
-    no_key = SimpleNamespace(provider="fish", fish_api_key="", fish_reference_id="ref-1")
-    assert _fish_enabled(no_key) is False
-    edge = SimpleNamespace(provider="system", fish_api_key="k", fish_reference_id="")
-    assert _fish_enabled(edge) is False
+    no_key = SimpleNamespace(
+        provider="fish", fish_api_key="", fish_base_url="", fish_model="",
+        fish_reference_id="ref-1", fish_format="mp3",
+    )
+    assert voice_registry.fish_configured(no_key) is False
+
+    # 没有 Fish 音色的人物：身份就是自己的 Edge 声线
+    edge_persona = {"id": "p2", "nickname": "Y", "fish_voice_id": "", "voice_id": "en-GB-RyanNeural"}
+    assert voice_registry.binding_for_persona(edge_persona, fish).token == "edge-en-GB-RyanNeural"
 
 
 def _item(title: str, tags: list[str] | None = None) -> MediaItem:

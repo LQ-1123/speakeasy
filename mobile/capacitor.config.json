@@ -5,6 +5,7 @@
   "server": {
     "androidScheme": "http",
     "cleartext": true,
+    "errorPath": "offline.html",
     "allowNavigation": [
       "*"
     ]

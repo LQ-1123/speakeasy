@@ -47,7 +47,7 @@ class CustomPersona:
     name: str
     city: str = ""
     job: str = ""
-    #: 口音声线，来自口音市场，如 en-IN-PrabhatNeural
+    #: Edge 降级声线（口音系统已下线；主音色由 Fish 音色库统一分配）
     voice: str = "en-GB-RyanNeural"
     #: 性别：male / female（只用于展示与默认声线筛选）
     gender: str = "male"
@@ -67,9 +67,8 @@ class CustomPersona:
     updated_at: float = field(default_factory=time.time)
 
     def to_public(self) -> dict[str, Any]:
-        from app.voice.accent_market import get_accent  # noqa: PLC0415
-
-        acc = get_accent(self.voice) or {}
+        # 阶段四：口音系统已下线。voice 字段只作为 Edge 降级声线保留，
+        # 不再从口音市场反查 label/flag（AI 角色主音色由 Fish 音色库统一分配）。
         return {
             "id": self.id,
             "name": self.name,
@@ -86,9 +85,11 @@ class CustomPersona:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "custom": True,
-            "accent_label": acc.get("label", ""),
-            "flag": acc.get("flag", "🌐"),
-            "accent_kind": acc.get("kind", "official"),
+            # 兼容旧前端字段：口音已下线，恒为空
+            "accent_label": "",
+            "flag": "",
+            "accent_kind": "",
+            "voice_mode": "fish",
         }
 
     def build_system_prompt(self, scene_text: str = "") -> str:
@@ -294,13 +295,23 @@ class CustomStore:
 
         existing = self.get_persona(pid)
         now = time.time()
+        gender = str(payload.get("gender") or "male")[:10]
+        # 阶段四：不再按口音选声线。voice 只作为 Edge 降级声线，
+        # 用户没给就按性别挑一个稳定默认值（真正的 AI 音色由 Fish 分配）。
+        voice = str(payload.get("voice") or "").strip()[:64]
+        if not voice:
+            voice = (
+                "en-US-AvaMultilingualNeural"
+                if gender.strip().lower() == "female"
+                else "en-GB-RyanNeural"
+            )
         persona = CustomPersona(
             id=pid,
             name=str(payload.get("name") or "未命名角色")[:40],
             city=str(payload.get("city") or "")[:40],
             job=str(payload.get("job") or "")[:60],
-            voice=str(payload.get("voice") or "en-GB-RyanNeural")[:64],
-            gender=str(payload.get("gender") or "male")[:10],
+            voice=voice,
+            gender=gender,
             traits=str(payload.get("traits") or "")[:200],
             style=str(payload.get("style") or "")[:300],
             opening_line=str(payload.get("opening_line") or "")[:300],

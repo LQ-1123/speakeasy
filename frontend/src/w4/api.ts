@@ -450,35 +450,6 @@ export async function loadSettings(): Promise<LiveSettings | null> {
   return r;
 }
 
-/** 保存 TTS（只传有变化的字段，后端按部分更新处理） */
-export async function saveTts(body: Record<string, string | undefined>) {
-  return getJson(`${BASE}/settings/tts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function resetTts() {
-  return getJson(`${BASE}/settings/tts/reset`, { method: "POST" });
-}
-
-export async function testTts() {
-  return getJson(`${BASE}/settings/tts/test`, { method: "POST" });
-}
-
-export async function saveStt(body: Record<string, string | undefined>) {
-  return getJson(`${BASE}/settings/stt`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function testStt() {
-  return getJson(`${BASE}/settings/stt/test`, { method: "POST" });
-}
-
 /* ========================================================================== */
 /* 朋友圈                                                                      */
 /* ========================================================================== */
@@ -634,66 +605,6 @@ export async function sendVoiceBlob(
     return null;
   }
   return fetchMessages(friendId);
-}
-
-/* ========================================================================== */
-/* 对话模型设置                                                                */
-/* ========================================================================== */
-
-/** 保存对话模型（后端会重建客户端，下一条消息即生效） */
-export async function saveLlm(body: {
-  base_url?: string;
-  model?: string;
-  api_key?: string;
-  temperature?: number;
-  max_tokens?: number;
-  verify?: boolean;
-}) {
-  return getJson(`${BASE}/settings/llm`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ verify: true, ...body }),
-  });
-}
-
-/* ========================================================================== */
-/* 好友口音                                                                    */
-/* ========================================================================== */
-
-export type ArchetypeLite = {
-  archetype_id: string;
-  display_name: string;
-  accent_label: string;
-  voice_id: string;
-  native_lang: string;
-  country: string;
-};
-
-let ARCHETYPES_CACHE: ArchetypeLite[] | null = null;
-
-/** 可选口音列表（按原生语言过滤用） */
-export async function loadArchetypes(): Promise<ArchetypeLite[]> {
-  if (ARCHETYPES_CACHE) return ARCHETYPES_CACHE;
-  const r = await getJson<{ archetypes?: Record<string, any>[] }>(`${BASE}/archetypes`);
-  if (!r) return [];
-  ARCHETYPES_CACHE = (r.archetypes ?? []).map((a) => ({
-    archetype_id: String(a.archetype_id ?? ""),
-    display_name: String(a.display_name ?? ""),
-    accent_label: String(a.accent_label ?? ""),
-    voice_id: String(a.voice_id ?? ""),
-    native_lang: String((a.locale_info ?? {}).native_lang ?? ""),
-    country: String((a.locale_info ?? {}).country ?? ""),
-  }));
-  return ARCHETYPES_CACHE;
-}
-
-/** 给好友换口音：后端按 archetype 的 voice_id + prosody 一起改 */
-export async function changeFriendVoice(friendId: string, archetypeId: string) {
-  return getJson(`${BASE}/friends/${friendId}/voice`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ archetype_id: archetypeId }),
-  });
 }
 
 /* ========================================================================== */
@@ -903,43 +814,4 @@ export async function callTurnFromText(
     }
   }
   return true;
-}
-
-/* ------------------------------------------------------- Deepgram 流式识别 */
-
-export type DeepgramSettings = {
-  available: boolean;
-  configured: boolean;
-  source: string;
-  keyMasked: string;
-};
-
-function mapDeepgram(raw: Record<string, any> | undefined): DeepgramSettings | null {
-  if (!raw) return null;
-  return {
-    available: Boolean(raw.available),
-    configured: Boolean(raw.configured),
-    source: String(raw.source ?? ""),
-    keyMasked: String(raw.key_masked ?? ""),
-  };
-}
-
-export async function loadDeepgramSettings(): Promise<DeepgramSettings | null> {
-  const r = await getJson<{ deepgram?: Record<string, any> }>(`${BASE}/settings/deepgram`);
-  return mapDeepgram(r?.deepgram);
-}
-
-export async function saveDeepgramKey(apiKey: string): Promise<DeepgramSettings | null> {
-  try {
-    const res = await fetch(`${BASE}/settings/deepgram`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey }),
-    });
-    if (!res.ok) return null;
-    const j = (await res.json()) as { deepgram?: Record<string, any> };
-    return mapDeepgram(j?.deepgram);
-  } catch {
-    return null;
-  }
 }

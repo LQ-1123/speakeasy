@@ -2,17 +2,19 @@
 
 为什么需要
 ----------
-edge-TTS 合成一条动态需要 ~8 秒；用户点「朗读」再合成必然卡顿。
-但信息流是**预生成语料**：内容固定、数量有限（当前 36 条），
-完全可以在后台提前合成好，点击时直接读文件（毫秒级）。
+TTS 合成一条动态要几秒；用户点「朗读」再合成必然卡顿。
+信息流是**预生成语料**：内容固定、数量有限，可以在后台提前合成好，
+点击时直接读文件（毫秒级）。
 
-设计
-----
-- 文件名 = ``{post_id}-{content_hash}-{voice}.wav``：内容/语言/声线任一变化，
-  文件名就变 → 天然避免播放旧音频，也不需要手动失效。
-- 启动后后台预热第一页（``WARM_STARTUP_ITEMS`` 条），信息流接口返回时
-  顺带把本页动态放进合成队列；队列单并发（避免打爆 edge-TTS）。
-- 点击时：文件存在 → 立即返回；不存在 → 同步合成并落盘（兜底）。
+音色一致性（第四阶段重点）
+--------------------------
+朗读必须用**角色自己的声音**，且与聊天/通话完全一致：
+
+* 音色解析统一走 :mod:`app.voice.voice_registry`（不再自己拼 reference_id）；
+* 文件名里带 provider token（``fish-<hash8>`` / ``edge-<voice>``）：
+  Fish 不可用时缓存的是 Edge 版本，Fish 恢复后 token 变化 → 自动重新合成 Fish 版本，
+  **不会**把降级音频当成正式音色一直播下去；
+* 不再按帖子语言换声线（Fish 是多语言的），否则同一个人在动态里会变成另一个声音。
 """
 
 from __future__ import annotations
@@ -21,11 +23,11 @@ import asyncio
 import hashlib
 import os
 import shutil
-import time
 from typing import Any
 
 from app.logging_utils import get_logger
-from app.v3.seed_data import detect_language, voice_for_language
+from app.voice import voice_registry
+from app.v3.seed_data import detect_language
 
 log = get_logger(__name__)
 
@@ -37,67 +39,15 @@ MP3_BITRATE = "64k"
 _FFMPEG = os.getenv("SE_FFMPEG") or shutil.which("ffmpeg") or ""
 
 
-_TTS_CFG: dict[str, Any] = {"at": 0.0, "cfg": None}
+def _binding_for(post: dict, persona: dict) -> voice_registry.VoiceBinding:
+    """朗读用角色音色（**不**按帖子语言换声线）。"""
+    return voice_registry.binding_for_persona(persona)
 
 
-def _load_tts_cfg() -> Any:
-    """读取用户 TTS 配置（30s 缓存）：provider=fish 时 v3 朗读也走 Fish。"""
-    if os.getenv("SE_TTS_FISH", "1") == "0":
-        return None
-    now = time.time()
-    if _TTS_CFG["cfg"] is not None and now - float(_TTS_CFG["at"]) < 30:
-        return _TTS_CFG["cfg"]
-    cfg = None
-    try:
-        from app.config import get_settings  # noqa: PLC0415
-        from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
-
-        cfg = TTSConfigStore(str(get_settings().data_path)).load()
-    except Exception:  # noqa: BLE001
-        cfg = None
-    _TTS_CFG.update(at=now, cfg=cfg)
-    return cfg
-
-
-def _fish_enabled(cfg: Any) -> bool:
-    return bool(
-        cfg is not None
-        and str(getattr(cfg, "provider", "") or "") == "fish"
-        and str(getattr(cfg, "fish_api_key", "") or "").strip()
-    )
-
-
-def _fish_ref(cfg: Any) -> str:
-    return str(getattr(cfg, "fish_reference_id", "") or "")
-
-
-def _fish_token(cfg: Any, persona: dict | None = None) -> str:
-    ref = _persona_ref(cfg, persona)
-    digest = hashlib.sha1(ref.encode("utf-8")).hexdigest()[:8] if ref else "default"
-    return f"fish-{digest}"
-
-
-def _persona_ref(cfg: Any, persona: dict | None = None) -> str:
-    """人物专属音色优先，没有才用全局参考音色。"""
-    own = str((persona or {}).get("fish_voice_id") or "").strip()
-    return own or _fish_ref(cfg)
-
-
-def _voice_for(post: dict, persona: dict) -> tuple[str, str]:
-    """返回 (语言, 声线)：帖子的语言优先，人物声线只在同语言时复用。"""
+def _post_lang(post: dict, persona: dict) -> str:
     content = str(post.get("content") or "")
     persona_lang = str(persona.get("language") or "en").strip().lower()
-    post_lang = (
-        str(post.get("language") or "").strip().lower()
-        or detect_language(content)
-        or persona_lang
-    )
-    persona_voice = str(persona.get("voice_id") or "")
-    if post_lang == persona_lang and persona_voice:
-        return post_lang, persona_voice
-    return post_lang, voice_for_language(
-        post_lang, seed=str(persona.get("id") or ""), gender=str(persona.get("gender") or "")
-    )
+    return str(post.get("language") or "").strip().lower() or detect_language(content) or persona_lang
 
 
 class PersonaAudioCache:
@@ -116,32 +66,31 @@ class PersonaAudioCache:
         self.failed = 0
         self._inflight: dict[str, asyncio.Future] = {}
         self.ffmpeg = _FFMPEG
-        self.ext = "mp3" if self.ffmpeg else "wav"
-        # 有 ffmpeg 时清掉旧的 wav（否则会优先命中旧 wav，拿不到 mp3 的体积优势）
-        if self.ffmpeg:
-            try:
-                for name in os.listdir(self.cache_dir):
-                    if name.endswith(".wav"):
-                        os.remove(os.path.join(self.cache_dir, name))
-            except OSError:
-                pass
 
     # ---------------------------------------------------------------- 路径
-    def path_for(self, post: dict, persona: dict) -> tuple[str, str, str]:
-        import hashlib
+    def _base_name(self, post: dict, persona: dict) -> tuple[str, str, str]:
+        """返回 (无后缀文件名, 语言, 音色身份 token)。
 
+        文件名里带 ``render_key``（provider + 身份）：降级期间生成的 Edge 版本与
+        Fish 版本是不同文件，Fish 恢复后自动重新合成，不会继续播降级音频。
+        """
         content = str(post.get("content") or "")
         content_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
-        lang, voice = _voice_for(post, persona)
-        cfg = _load_tts_cfg()
-        if _fish_enabled(cfg):
-            voice = _fish_token(cfg, persona)
-        safe_voice = voice.replace("/", "_")
-        name = f"{post['id']}-{content_hash}-{safe_voice}.{self.ext}"
-        return os.path.join(self.cache_dir, name), lang, voice
+        binding = _binding_for(post, persona)
+        safe_key = binding.render_key.replace("/", "_").replace(":", "_")
+        return f"{post['id']}-{content_hash}-{safe_key}", _post_lang(post, persona), binding.token
+
+    def _candidates(self, base: str) -> list[str]:
+        """已有缓存的可能后缀（优先 mp3，体积小）。"""
+        return [os.path.join(self.cache_dir, f"{base}.{ext}") for ext in ("mp3", "wav")]
+
+    def path_for(self, post: dict, persona: dict) -> tuple[str, str, str]:
+        """优先返回 mp3 路径（预热/入队用），其余逻辑见 get_or_synth。"""
+        base, lang, token = self._base_name(post, persona)
+        return self._candidates(base)[0], lang, token
 
     async def _to_mp3(self, wav_path: str, mp3_path: str) -> bool:
-        """wav → mp3（失败返回 False，调用方回落 wav）。"""
+        """wav → mp3（失败返回 False，调用方保留 wav）。"""
         if not self.ffmpeg:
             return False
         try:
@@ -153,80 +102,73 @@ class PersonaAudioCache:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.wait(), timeout=20)
-            return proc.returncode == 0 and os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0
+            return (
+                proc.returncode == 0
+                and os.path.exists(mp3_path)
+                and os.path.getsize(mp3_path) > 0
+            )
         except Exception as exc:  # noqa: BLE001
-            log.debug("mp3 转码失败，回落 wav: %s", exc)
+            log.debug("mp3 转码失败，保留 wav: %s", exc)
             return False
 
     # ---------------------------------------------------------------- 合成
     async def get_or_synth(self, post: dict, persona: dict) -> tuple[str, str, str]:
-        """返回 (音频路径, 语言, 声线)；文件已在则直接命中（毫秒级）。"""
-        path, lang, voice = self.path_for(post, persona)
-        alt_wav = path[: -len("." + self.ext)] + ".wav"
-        for candidate in (path, alt_wav):
+        """返回 (音频路径, 语言, 音色 token)；文件已在则直接命中（毫秒级）。"""
+        base, lang, token = self._base_name(post, persona)
+        for candidate in self._candidates(base):
             if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
-                return candidate, lang, voice
+                return candidate, lang, token
 
-        # 同一文件正在合成时，复用同一个任务（防止并发重复合成）
-        existing = self._inflight.get(path)
+        existing = self._inflight.get(base)
         if existing is not None:
             await asyncio.shield(existing)
-            for candidate in (path, alt_wav):
+            for candidate in self._candidates(base):
                 if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
-                    return candidate, lang, voice
-            return path, lang, voice
+                    return candidate, lang, token
+            raise RuntimeError("朗读音频合成失败")
 
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._inflight[path] = fut
+        self._inflight[base] = fut
         try:
             text = str(post.get("content") or "")[:280]
-            tmp = ""
-            cfg = _load_tts_cfg()
-            if _fish_enabled(cfg):
-                try:
-                    from app.voice import fish_tts  # noqa: PLC0415
+            result = await voice_registry.synthesize(
+                persona,
+                text,
+                binding=_binding_for(post, persona),
+                edge_engine=self.voice,
+                out_dir=self.cache_dir,
+            )
+            if result is None or not result.data:
+                raise RuntimeError("朗读音频合成失败（Fish 与 Edge 均不可用）")
 
-                    audio = await fish_tts.synthesize(
-                        text,
-                        api_key=str(getattr(cfg, "fish_api_key", "") or ""),
-                        base_url=str(getattr(cfg, "fish_base_url", "") or ""),
-                        model=str(getattr(cfg, "fish_model", "") or ""),
-                        reference_id=_persona_ref(cfg, persona),
-                        audio_format="wav",
-                    )
-                    if audio:
-                        tmp = os.path.join(self.cache_dir, f".fish-{post['id']}.wav")
-                        with open(tmp, "wb") as fh:  # noqa: PTH123
-                            fh.write(audio)
-                except Exception as exc:  # noqa: BLE001 - Fish 失败回落 edge
-                    log.warning("v3 Fish TTS 失败（%s），回落 edge", exc)
-                    tmp = ""
-            if not tmp:
-                tmp, _duration = await self.voice.synth_to_wav(
-                    text, voice, out_dir=self.cache_dir
-                )
-            target = path
-            if self.ext == "mp3":
-                if not await self._to_mp3(tmp, path):
-                    target = alt_wav
-                    shutil.move(tmp, alt_wav)
-                else:
+            if result.ext == "wav":
+                wav_path = os.path.join(self.cache_dir, f"{base}.wav")
+                with open(wav_path, "wb") as fh:  # noqa: PTH123
+                    fh.write(result.data)
+                mp3_path = os.path.join(self.cache_dir, f"{base}.mp3")
+                if self.ffmpeg and await self._to_mp3(wav_path, mp3_path):
                     try:
-                        os.remove(tmp)
+                        os.remove(wav_path)  # noqa: PTH107
                     except OSError:
                         pass
+                    target = mp3_path
+                else:
+                    target = wav_path
             else:
-                shutil.move(tmp, path)
+                target = os.path.join(self.cache_dir, f"{base}.{result.ext}")
+                with open(target, "wb") as fh:  # noqa: PTH123
+                    fh.write(result.data)
+
             self.done += 1
             fut.set_result(True)
-            return target, lang, voice
+            return target, lang, token
         except Exception as exc:  # noqa: BLE001
             self.failed += 1
             if not fut.done():
                 fut.set_exception(exc)
             raise
         finally:
-            self._inflight.pop(path, None)
+            self._inflight.pop(base, None)
 
     # ---------------------------------------------------------------- 预热
     def enqueue(self, post: dict, persona: dict) -> None:
@@ -267,13 +209,17 @@ class PersonaAudioCache:
             files = [n for n in os.listdir(self.cache_dir) if n.endswith((".wav", ".mp3"))]
         except OSError:
             files = []
+        fish_files = sum(1 for name in files if "-fish-" in name)
         return {
             "ready": len(files),
             "queued": self._queue.qsize(),
             "generated": self.done,
             "failed": self.failed,
-            "format": self.ext,
+            "format": "mp3" if self.ffmpeg else "wav",
+            "fish_files": fish_files,
+            "edge_files": len(files) - fish_files,
             "dir": self.cache_dir,
+            "fish": voice_registry.fish_status(),
         }
 
     def warm(self, service: Any, limit: int = WARM_STARTUP_ITEMS) -> int:

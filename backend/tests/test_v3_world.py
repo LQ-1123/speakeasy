@@ -301,7 +301,9 @@ def test_audio_cache_serves_from_disk_without_resynth(world_db):
         post = service.get_persona_post_row("pp_lin_27")
         persona = service.persona_by_id(str(post["persona_id"]))
         path, lang, voice_id = cache.path_for(post, persona)
-        assert "pp_lin_27" in path and lang == "zh" and voice_id.startswith("zh-")
+        # 第四阶段：朗读用**角色自己**的声线（测试环境无 Fish → edge-<persona.voice_id>）
+        assert "pp_lin_27" in path and lang == "zh"
+        assert voice_id == f"edge-{persona['voice_id']}"
 
         first = client.get("/api/v3/persona-posts/pp_lin_27/speech")
         assert first.status_code == 200
@@ -639,51 +641,57 @@ def test_profile_language_levels_and_feed_filter(world_db):
         assert "de" in langs
 
 
-def test_persona_fish_voice_assignment_and_friend_sync(world_db, monkeypatch):
-    """每个 AI 人物分到固定 Fish 音色；加好友后好友继承同一音色。"""
+def test_persona_fish_voice_assignment_and_friend_sync(world_db):
+    """每个 AI 人物分到**唯一**的 Fish 音色；好友行同步同一音色（第四阶段）。"""
     import asyncio
-    from types import SimpleNamespace
+
+    from app.v3.seed_data import ensure_persona_voices
 
     db, tmp_path = world_db
-    app, service, _voice = _make_app(db, tmp_path)
+    app, service, _voice = _make_app(db, tmp_path)  # noqa: F841 - 只用于建 app
 
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(personas)")}
     assert "fish_voice_id" in cols
 
-    fake_cfg = SimpleNamespace(
-        provider="fish",
-        fish_api_key="test-key",
-        fish_base_url="https://api.fish.audio",
-    )
-    import app.voice.fish_tts as fish_tts
-    import app.voice.tts_config as tts_config
+    # 离线注入音色池：不需要联网，也能验证「一人一色 + 同步」
+    pool = [
+        {"id": f"fish-{lang}-{gender}-{idx}", "languages": [lang], "tags": [gender]}
+        for lang in ("en", "es", "de", "fr", "ja", "ko", "it", "pt", "zh")
+        for gender in ("male", "female")
+        for idx in range(3)
+    ]
+    assigned = asyncio.run(ensure_persona_voices(db, limit=40, pool=pool))
+    assert assigned >= 12
 
-    monkeypatch.setattr(tts_config.TTSConfigStore, "load", lambda self: fake_cfg)
-
-    picked: list[str] = []
-
-    async def fake_pick(**kwargs):
-        ref = f"fv-{kwargs.get('gender') or 'x'}-{kwargs.get('language') or 'en'}"
-        picked.append(ref)
-        return ref
-
-    monkeypatch.setattr(fish_tts, "pick_voice_for", fake_pick)
-
-    assigned = asyncio.run(service.assign_fish_voices(limit=5))
-    assert assigned == 5
     rows = db.conn.execute(
-        "SELECT id, nickname, fish_voice_id FROM personas WHERE fish_voice_id != '' LIMIT 5"
+        "SELECT id, fish_voice_id FROM personas WHERE COALESCE(fish_voice_id,'') <> ''"
     ).fetchall()
-    assert len(rows) == 5
-    assert all(r["fish_voice_id"].startswith("fv-") for r in rows)
+    assert len(rows) >= 12
+    voices = [str(r["fish_voice_id"]) for r in rows]
+    assert len(set(voices)) == len(voices), "不允许两个人物共用同一个 Fish 音色"
 
-    # 再加好友：好友行必须带上人物的 Fish 音色
-    pid = rows[0]["id"]
-    result = service.add_friend("u_fish_voice_test", pid)
-    friend_id = result["friend_id"]
-    friend = db.get_friend(friend_id, any_owner=True)
+    # 幂等：再跑一次不会改动任何已分配的音色
+    again = asyncio.run(ensure_persona_voices(db, limit=40, pool=pool))
+    assert again == 0
+    assert [
+        str(r["fish_voice_id"])
+        for r in db.conn.execute(
+            "SELECT fish_voice_id FROM personas ORDER BY id"
+        ).fetchall()
+    ] == [
+        str(r["fish_voice_id"])
+        for r in db.conn.execute(
+            "SELECT fish_voice_id FROM personas ORDER BY id"
+        ).fetchall()
+    ]
+
+    # 加好友：好友行必须继承人物音色（聊天与动态朗读才能一致）
+    persona_id = str(rows[0]["id"])
+    persona_voice = str(rows[0]["fish_voice_id"])
+    result = service.add_friend("u_fish_voice_test", persona_id)
+    friend = db.get_friend(result["friend_id"], any_owner=True)
     assert friend is not None
-    assert friend["fish_voice_id"] == rows[0]["fish_voice_id"]
+    assert friend["fish_voice_id"] == persona_voice
 
 
 def test_speech_version_tracks_persona_voice(world_db):

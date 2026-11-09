@@ -3,23 +3,13 @@
 /**
  * 创建/编辑自定义角色。
  *
- * 结构化表单：名字、城市、职业、口音、性格、风格、开场白、难度、场景。
- * 口音从口音市场里选（可按地区筛选、可试听）。
+ * 结构化表单：名字、城市、职业、性格、风格、开场白、难度、场景。
+ * 声线（Fish 音色）由后端按语言/性别自动分配，创建后不可手动更换。
  * 保存时后端自动生成 system_prompt（用户不用写 prompt）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader2, Play, Trash2, Volume2, X } from "lucide-react";
-
-interface AccentItem {
-  voice: string;
-  label: string;
-  label_zh: string;
-  kind: "official" | "foreign_fallback";
-  region_zh: string;
-  flag: string;
-  vibe: string;
-}
+import { useCallback, useEffect, useState } from "react";
+import { Check, Loader2, Trash2, Volume2, X } from "lucide-react";
 
 interface SceneOption {
   id: string;
@@ -65,24 +55,19 @@ interface CreatePersonaDialogProps {
 
 export function CreatePersonaDialog({ open, onClose, onSaved }: CreatePersonaDialogProps) {
   const [form, setForm] = useState<PersonaForm>(EMPTY);
-  const [accents, setAccents] = useState<AccentItem[]>([]);
   const [scenes, setScenes] = useState<SceneOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [playing, setPlaying] = useState(false);
   /** 内联新建场景的草稿（下拉选「＋ 新建场景…」时展开） */
   const [sceneDraft, setSceneDraft] = useState({ title: "", text: "" });
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [a, s, mus] = await Promise.all([
-        fetch("/api/market/accents", { cache: "no-store" }).then((r) => r.json()),
+      const [s, mus] = await Promise.all([
         fetch("/api/custom/scenes", { cache: "no-store" }).then((r) => r.json()),
         fetch("/api/custom/scene-templates", { cache: "no-store" }).then((r) => r.json()),
       ]);
-      setAccents(a.accents ?? []);
       const custom = (s.scenes ?? []) as SceneOption[];
       const tpl = (mus.templates ?? []).map((t: { key: string; name: string }) => ({
         id: t.key,
@@ -105,46 +90,6 @@ export function CreatePersonaDialog({ open, onClose, onSaved }: CreatePersonaDia
 
   const set = <K extends keyof PersonaForm>(k: K, v: PersonaForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
-
-  /** 按性别筛选默认口音 */
-  const accentOptions = useMemo(() => {
-    const rows = accents;
-    return rows;
-  }, [accents]);
-
-  const previewOpening = async () => {
-    setPlaying(true);
-    setErr("");
-    try {
-      const r = await fetch("/api/custom/personas/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          city: form.city,
-          job: form.job,
-          voice: form.voice,
-          opening_line: form.opening_line,
-          traits: form.traits,
-          style: form.style,
-        }),
-      });
-      if (!r.ok) {
-        const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
-        throw new Error(typeof j.detail === "string" ? j.detail : `HTTP ${r.status}`);
-      }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.onended = () => setPlaying(false);
-        await audioRef.current.play().catch(() => setPlaying(false));
-      }
-    } catch (e) {
-      setErr(`试听失败：${e instanceof Error ? e.message : String(e)}`);
-      setPlaying(false);
-    }
-  };
 
   const save = async () => {
     if (!form.name.trim()) {
@@ -206,8 +151,6 @@ export function CreatePersonaDialog({ open, onClose, onSaved }: CreatePersonaDia
   };
 
   if (!open) return null;
-
-  const currentAccent = accents.find((a) => a.voice === form.voice);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
@@ -281,32 +224,11 @@ export function CreatePersonaDialog({ open, onClose, onSaved }: CreatePersonaDia
             </Field>
           </div>
 
-          {/* 口音 */}
-          <Field label="口音（来自口音市场）">
-            <div className="flex gap-1.5">
-              <select value={form.voice} onChange={(e) => set("voice", e.target.value)} className={`${INPUT} min-w-0 flex-1`}>
-                {accentOptions.map((a) => (
-                  <option key={a.voice} value={a.voice}>
-                    {a.flag} {a.region_zh} · {a.label_zh}
-                    {a.kind !== "official" ? "（兜底）" : ""}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void previewOpening()}
-                disabled={playing}
-                className="flex shrink-0 items-center gap-1 rounded-[2px] border border-[color:var(--line-strong)] bg-[color:var(--surface-2)] px-2.5 text-[10.5px] text-[color:var(--text-dim)] transition-colors hover:text-[color:var(--accent)] disabled:opacity-50"
-              >
-                {playing ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
-                试听
-              </button>
-            </div>
-            {currentAccent && (
-              <p className="mt-1 text-[9.5px] text-[color:var(--text-faint)]">
-                {currentAccent.vibe}
-              </p>
-            )}
+          {/* 声线：由系统自动分配（Fish 音色库），不提供手动选择 */}
+          <Field label="声线">
+            <p className="rounded-[2px] border border-[color:var(--line)] bg-[color:var(--surface-2)] px-2.5 py-1.5 text-[10.5px] leading-relaxed text-[color:var(--text-dim)]">
+              声线由系统自动分配（Fish 音色库），创建后不可手动更换。
+            </p>
           </Field>
 
           {/* 性格与风格 */}
@@ -445,8 +367,6 @@ export function CreatePersonaDialog({ open, onClose, onSaved }: CreatePersonaDia
             </button>
           </div>
         </div>
-
-        <audio ref={audioRef} className="hidden" />
       </div>
     </div>
   );

@@ -27,6 +27,11 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try {
+            UpdateChecker.checkAndPrompt(this);
+        } catch (Throwable ignored) {
+            // 检查更新失败不影响正常启动
+        }
+        try {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView != null) {
                 wv = webView;
@@ -169,6 +174,16 @@ public class MainActivity extends BridgeActivity {
                         // 播放失败静默忽略
                     }
                 });
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        try {
+            UpdateChecker.onResume(this);
+        } catch (Throwable ignored) {
+            // 权限引导回来后继续安装；失败忽略
+        }
     }
 
     @Override

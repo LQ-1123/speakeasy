@@ -26,9 +26,34 @@ import {
   relTimeOf,
   type FeedItem,
   type PersonaProfile,
+  type PersonaRelationBrief,
 } from "./api";
 import { FeedCard } from "./FeedView";
 import "./v3.css";
+
+/**
+ * 把「TA 身边的人」翻译成一句自然中文。
+ *
+ * 只做展示：不显示 closeness / tension 数字，也不显示任何内部 ID。
+ * 有摩擦的人优先（对用户更有信息量），其次才是常来往的人。
+ */
+function relationsLine(relations?: PersonaRelationBrief[]): string {
+  if (!relations || !relations.length) return "";
+  const tense = relations.filter((r) => r.tension >= 3 && r.nickname).slice(0, 2);
+  if (tense.length) {
+    return `最近和 ${tense.map((r) => r.nickname).join("、")} 有点小摩擦`;
+  }
+  const close = relations.filter((r) => r.closeness >= 3 && r.nickname).slice(0, 3);
+  if (close.length) {
+    // 只把「愉快的共同经历」写成例子：吵架/冲突不适合用「一起」的口吻展示
+    const recent = close.find(
+      (r) => r.recent_event?.title && r.recent_event.event_type !== "conflict",
+    );
+    const base = `最近常和 ${close.map((r) => r.nickname).join("、")} 一起`;
+    return recent?.recent_event?.title ? `${base}（比如「${recent.recent_event.title}」）` : base;
+  }
+  return "";
+}
 
 export function PersonaProfileView({
   personaId,
@@ -238,6 +263,13 @@ export function PersonaProfileView({
                       </span>
                     ))}
                   </div>
+                </div>
+              ) : null}
+
+              {relationsLine(profile.relations) ? (
+                <div className="v3-profile-section">
+                  <span className="v3-profile-label">身边的人</span>
+                  <p>{relationsLine(profile.relations)}</p>
                 </div>
               ) : null}
 

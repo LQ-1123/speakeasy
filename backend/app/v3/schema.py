@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS personas (
     lifecycle TEXT NOT NULL DEFAULT 'permanent',
     expires_at TEXT NOT NULL DEFAULT '',
     last_interaction_at TEXT NOT NULL DEFAULT '',
-    interaction_count INTEGER NOT NULL DEFAULT 0
+    interaction_count INTEGER NOT NULL DEFAULT 0,
+    speech_dna TEXT NOT NULL DEFAULT '{}',
+    emotion_state TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_personas_status ON personas(status);
 
@@ -78,7 +80,11 @@ CREATE TABLE IF NOT EXISTS persona_posts (
     interaction_count INTEGER NOT NULL DEFAULT 0,
     post_kind TEXT NOT NULL DEFAULT 'life_text',
     alt_text TEXT NOT NULL DEFAULT '',
-    source_ref TEXT NOT NULL DEFAULT ''
+    source_ref TEXT NOT NULL DEFAULT '',
+    source_event_id TEXT NOT NULL DEFAULT '',
+    post_type TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_persona_posts_time ON persona_posts(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_persona_posts_persona ON persona_posts(persona_id, created_at DESC);
@@ -95,11 +101,81 @@ CREATE INDEX IF NOT EXISTS idx_ppl_post ON persona_post_likes(post_id);
 CREATE TABLE IF NOT EXISTS persona_post_comments (
     id TEXT PRIMARY KEY,
     post_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    author_persona_id TEXT NOT NULL DEFAULT '',
+    author_type TEXT NOT NULL DEFAULT 'user'
 );
 CREATE INDEX IF NOT EXISTS idx_ppc_post ON persona_post_comments(post_id, created_at);
+
+-- 示例对话：每个 Persona 12 个情境各一组，按需检索注入（不是固定台词）
+CREATE TABLE IF NOT EXISTS persona_example_dialogs (
+    id TEXT PRIMARY KEY,
+    persona_id TEXT NOT NULL,
+    scene TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT '',
+    user_line TEXT NOT NULL,
+    persona_line TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ped_persona ON persona_example_dialogs(persona_id, scene, ordinal);
+
+-- 人物生活事件：人物自己的生活（与 social_events 的「用户通知」职责不同）
+CREATE TABLE IF NOT EXISTS persona_events (
+    id TEXT PRIMARY KEY,
+    persona_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL DEFAULT '',
+    participants TEXT NOT NULL DEFAULT '[]',
+    location TEXT NOT NULL DEFAULT '',
+    related_personas TEXT NOT NULL DEFAULT '[]',
+    event_status TEXT NOT NULL DEFAULT 'planned',
+    source_type TEXT NOT NULL DEFAULT 'rule',
+    source_reference TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    dedupe_key TEXT NOT NULL UNIQUE,
+    day TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pe_persona ON persona_events(persona_id, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_pe_status ON persona_events(event_status, start_time);
+CREATE INDEX IF NOT EXISTS idx_pe_day ON persona_events(day);
+
+-- 人物之间的人际关系（Persona 不能只认识用户）
+CREATE TABLE IF NOT EXISTS persona_relationships (
+    id TEXT PRIMARY KEY,
+    persona_a TEXT NOT NULL,
+    persona_b TEXT NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'friend',
+    closeness INTEGER NOT NULL DEFAULT 2,
+    shared_events INTEGER NOT NULL DEFAULT 0,
+    last_shared_at TEXT NOT NULL DEFAULT '',
+    tension INTEGER NOT NULL DEFAULT 0,
+    last_conflict_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(persona_a, persona_b)
+);
+
+-- 人物作息（规则引擎的基座，不是逐分钟模拟）
+CREATE TABLE IF NOT EXISTS persona_schedules (
+    persona_id TEXT PRIMARY KEY,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    weekday_blocks TEXT NOT NULL DEFAULT '[]',
+    weekend_blocks TEXT NOT NULL DEFAULT '[]',
+    work_hours TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS friendships (
     id TEXT PRIMARY KEY,
@@ -216,7 +292,80 @@ CREATE TABLE IF NOT EXISTS v3_discover_views (
 #: ``v3_meta`` 里标记「语料已入库」的键
 SEED_KEY = "persona_seed_version"
 #: 语料版本：v3 = 种子化头像（Persona 头像由 avatar_seed 生成，不再用 mock 图片）
-SEED_VERSION = "2026-11-06.4"
+#: 2026-11-07.1 = Persona 升级：种子人物带上 Speech DNA（结构化表达配置）
+SEED_VERSION = "2026-11-07.1"
+
+#: 轻量迁移表：表名 → ((列名, 列定义), ...)。全部幂等，老库直接补列，数据不丢。
+_COLUMN_MIGRATIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "personas": (
+        ("speech_dna", "TEXT NOT NULL DEFAULT '{}'"),
+        ("emotion_state", "TEXT NOT NULL DEFAULT '{}'"),
+    ),
+    "persona_posts": (
+        ("source_event_id", "TEXT NOT NULL DEFAULT ''"),
+        ("post_type", "TEXT NOT NULL DEFAULT ''"),
+        ("published_at", "TEXT NOT NULL DEFAULT ''"),
+        ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+    ),
+    "persona_post_comments": (
+        ("author_persona_id", "TEXT NOT NULL DEFAULT ''"),
+        ("author_type", "TEXT NOT NULL DEFAULT 'user'"),
+    ),
+    # V2 聊天主体：行为历史 + 反向指向 personas（激活 Persona 生活层）
+    "friends": (
+        ("recent_behaviors", "TEXT NOT NULL DEFAULT '[]'"),
+        ("persona_id", "TEXT NOT NULL DEFAULT ''"),
+    ),
+    # 第二阶段：人物关系的「共同经历」证据；第三阶段：关系张力
+    "persona_relationships": (
+        ("shared_events", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_shared_at", "TEXT NOT NULL DEFAULT ''"),
+        ("tension", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_conflict_at", "TEXT NOT NULL DEFAULT ''"),
+    ),
+}
+
+
+def _migrate_columns(db: Any, table: str, columns: tuple[tuple[str, str], ...]) -> None:
+    """给已存在的表补列（幂等）。表不存在时静默跳过（由调用方决定建表顺序）。"""
+    try:
+        rows = db.conn.execute(f"PRAGMA table_info({table})").fetchall()
+    except sqlite3.Error:  # pragma: no cover - 表不存在
+        return
+    existing = {row[1] for row in rows}
+    if not existing:
+        return
+    for name, ddl in columns:
+        if name in existing:
+            continue
+        try:
+            db.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+            log.info("migrated %s: added %s column", table, name)
+        except sqlite3.Error as exc:  # pragma: no cover - 并发/只读库
+            log.warning("migrated %s: 加 %s 列失败（忽略）: %s", table, name, exc)
+
+
+#: 依赖「新增列」的索引：**必须在 _migrate_columns 之后执行**，
+#: 否则老库里列还不存在，executescript 会报 "no such column"。
+_EXTRA_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS idx_pp_source_event"
+    " ON persona_posts(source_event_id)",
+    # 事件驱动动态的唯一性：一个事件对同一人物最多一条动态（部分索引，非事件动态不受影响）
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pp_event_persona"
+    " ON persona_posts(source_event_id, persona_id) WHERE source_event_id <> ''",
+    # 一个 Persona 对同一条动态最多一条评论（用户评论不受影响）
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_ppc_post_persona"
+    " ON persona_post_comments(post_id, author_persona_id) WHERE author_persona_id <> ''",
+)
+
+
+def _ensure_extra_indexes(db: Any) -> None:
+    """建依赖新列的索引（幂等；列缺失时跳过而不是让整个迁移失败）。"""
+    for statement in _EXTRA_INDEXES:
+        try:
+            db.conn.execute(statement)
+        except sqlite3.Error as exc:  # pragma: no cover - 极端老库
+            log.warning("建索引失败（忽略）: %s", exc)
 
 
 def _now_utc() -> datetime:
@@ -323,6 +472,29 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 )
                 log.info("migrated friends: added %s column", col)
                 fcols.add(col)
+
+        # Persona 升级：Speech DNA / 情绪状态 / 事件来源 / AI 评论 / 行为历史
+        for table, columns in _COLUMN_MIGRATIONS.items():
+            _migrate_columns(db, table, columns)
+        # 图库：记录图片来源人物（按角色补图/去重/生命周期用）
+        _migrate_columns(
+            db,
+            "media_library",
+            (("persona_id", "TEXT NOT NULL DEFAULT ''"),),
+        )
+        # 依赖新列的索引必须在这里建（DDL 里的 CREATE TABLE IF NOT EXISTS 不会给老表补列）
+        _ensure_extra_indexes(db)
+        # 老库的 lifecycle 是「ALTER TABLE 加列」产生的 DEFAULT ''，
+        # 而新表默认是 'permanent'。统一一下，否则「常驻人物」过滤器找不到人。
+        try:
+            cur = db.conn.execute(
+                "UPDATE personas SET lifecycle='permanent'"
+                " WHERE COALESCE(lifecycle, '') = ''"
+            )
+            if cur.rowcount:
+                log.info("migrated personas: %d 行 lifecycle '' → permanent", cur.rowcount)
+        except sqlite3.Error as exc:  # pragma: no cover
+            log.debug("lifecycle 归一化失败（忽略）: %s", exc)
     if seed:
         seed_if_needed(db)
 
@@ -348,11 +520,12 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
 
         now = _now_utc()
         for p in PERSONAS:
+            speech_dna = _json(p.get("speech_dna") or {})
             db.conn.execute(
                 "INSERT INTO personas (id, nickname, avatar, avatar_seed, avatar_style,"
                 " bio, personality, interests, language, country, city, timezone, occupation,"
-                " age, gender, voice_id, archetype_id, ai_config, status, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " age, gender, voice_id, archetype_id, ai_config, status, created_at, speech_dna)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET nickname=excluded.nickname,"
                 " avatar=excluded.avatar, avatar_seed=excluded.avatar_seed,"
                 " avatar_style=excluded.avatar_style,"
@@ -361,14 +534,17 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
                 " timezone=excluded.timezone, occupation=excluded.occupation, age=excluded.age,"
                 " gender=excluded.gender, voice_id=excluded.voice_id,"
                 " archetype_id=excluded.archetype_id, ai_config=excluded.ai_config,"
-                " status=excluded.status",
+                " status=excluded.status,"
+                # DNA 只在语料提供了非空值时才覆盖，保护已生成/已调优的旧数据
+                " speech_dna=CASE WHEN excluded.speech_dna NOT IN ('', '{}')"
+                " THEN excluded.speech_dna ELSE personas.speech_dna END",
                 (
                     p["id"], p["nickname"], "", p.get("avatar_seed", ""), "avataaars",
                     p["bio"], p["personality"],
                     _json(p["interests"]), p["language"], p["country"], p["city"],
                     p["timezone"], p["occupation"], int(p["age"]), p["gender"],
                     p["voice_id"], p["archetype_id"], _json(p["ai_config"]),
-                    p.get("status", "active"), _iso(now),
+                    p.get("status", "active"), _iso(now), speech_dna,
                 ),
             )
 
@@ -446,6 +622,13 @@ def sync_persona_friends(db: Any) -> int:
     """
     with db._lock, db.conn:  # noqa: SLF001
         try:
+            # Persona 生活层外键：老库里的好友行也补上 persona_id（幂等）
+            db.conn.execute(
+                "UPDATE friends SET persona_id = ("
+                "  SELECT f.persona_id FROM friendships f WHERE f.friend_id = friends.id LIMIT 1"
+                ") WHERE COALESCE(persona_id, '') = '' AND EXISTS ("
+                "  SELECT 1 FROM friendships f WHERE f.friend_id = friends.id)"
+            )
             cur = db.conn.execute(
                 """
                 UPDATE friends SET

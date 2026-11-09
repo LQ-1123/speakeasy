@@ -56,34 +56,50 @@ _MOCK_TOPIC_REPLIES: dict[str, tuple[str, ...]] = {
     "coffee": (
         "{q}coffee is serious business around {city}. What's your go-to order?",
         "{q}I'm picky about coffee, honestly. Do you take yours black or with milk?",
+        "{q}coffee is a personality, not a habit. Three cups in and it's not even noon.",
+        "{q}I'd start a fight over a bad flat white. Almost did last week.",
     ),
     "games": (
         "{q}indie games are the best — no big studio nonsense. Which one are you playing right now?",
         "{q}I lose whole evenings to games like that. What's the last one that got you hooked?",
+        "{q}I lost an entire Sunday to one of those. No regrets, honestly.",
+        "{q}games are how I stop thinking about work. Cheap therapy.",
     ),
     "interview": (
         "{q}an interview on Friday? That's exciting. How are you prepping for it?",
         "{q}you'll be fine — just be yourself. What's the role about?",
+        "{q}interviews are just a conversation with worse lighting.",
+        "{q}prep helps, but half of it is whether you like them. Weird but true.",
     ),
     "english": (
         "{q}your English is way better than you think. What part feels hardest right now?",
         "{q}the trick is to stop translating in your head. What do you usually talk about in English?",
+        "{q}honestly, nobody is grading you. That's the whole point.",
+        "{q}I've heard worse English from people who've lived here ten years.",
     ),
     "food": (
         "{q}now I'm hungry. What's the best thing you've eaten this week?",
         "{q}food is the most important part of the day, obviously. Do you cook much?",
+        "{q}I cooked something ambitious and it was fine. Just fine.",
+        "{q}I could eat the same thing four days straight and be happy.",
     ),
     "travel": (
         "{q}travel changes your whole brain, I swear. Where do you want to go next?",
         "{q}I'd pack a bag tomorrow if I could. What's your dream trip?",
+        "{q}I've got a list of places I keep not going to. Very productive list.",
+        "{q}the best trips I've had were the badly planned ones.",
     ),
     "work": (
         "{q}that sounds like a lot. How are you balancing it with everything else?",
         "{q}sounds busy — is it the kind of busy you enjoy, or the exhausting kind?",
+        "{q}work has been one long meeting this week. I'm basically a calendar now.",
+        "{q}I'm tired, but the good kind of tired. Mostly.",
     ),
     "music": (
         "{q}music is basically medicine. What have you had on repeat lately?",
         "{q}my taste is all over the place. What are you listening to these days?",
+        "{q}I've had the same album on repeat for a week. Not sorry.",
+        "{q}someone put a record on and the whole room went quiet. Good night.",
     ),
 }
 
@@ -92,6 +108,10 @@ _MOCK_DEFAULT_REPLIES: tuple[str, ...] = (
     "{q}I get what you mean. How did that make you feel?",
     "{q}haha, seriously? What happened next?",
     "{q}fair enough. What are you up to later today?",
+    "{q}yeah. That tracks.",
+    "{q}hmm. I get that.",
+    "{q}honestly? Same.",
+    "{q}mm. Long day.",
 )
 
 #: 多语言回复：display name（用于 prompt）与确定性 mock 回复池（无 LLM key 时也能说对语言）
@@ -112,41 +132,57 @@ _MOCK_LANG_REPLIES: dict[str, tuple[str, ...]] = {
         "{q}なるほどね。最近は何をしてることが多い？",
         "{q}それはいいね。週末は何をする予定？",
         "{q}へえ、面白いね。もう少し詳しく聞かせて？",
+        "{q}うん、わかる。今日はちょっと疲れた。",
+        "{q}それ、いいな。",
     ),
     "ko": (
         "{q}그렇구나. 요즘 뭐 하고 지내?",
         "{q}오, 재밌다. 주말에 뭐 해?",
         "{q}그래? 좀 더 얘기해 줄래?",
+        "{q}응, 알겠어. 오늘은 좀 피곤하네.",
+        "{q}그거 좋다.",
     ),
     "pt": (
         "{q}entendi. E o que você tem feito ultimamente?",
         "{q}que legal. O que você costuma fazer no fim de semana?",
         "{q}sério? Me conta mais sobre isso.",
+        "{q}pois é. Hoje estou meio cansado.",
+        "{q}isso é bom.",
     ),
     "es": (
         "{q}ya veo. ¿Y qué has estado haciendo últimamente?",
         "{q}qué bien. ¿Qué te gusta hacer los fines de semana?",
         "{q}¿en serio? Cuéntame un poco más.",
+        "{q}ya. Hoy estoy un poco cansado.",
+        "{q}eso está bien.",
     ),
     "de": (
         "{q}verstehe. Und was machst du so in letzter Zeit?",
         "{q}schön. Was machst du am Wochenende?",
         "{q}echt? Erzähl mir mehr davon.",
+        "{q}ja. Heute bin ich ein bisschen müde.",
+        "{q}das ist gut.",
     ),
     "fr": (
         "{q}je vois. Et qu'est-ce que tu fais en ce moment ?",
         "{q}super. Qu'est-ce que tu fais le week-end ?",
         "{q}sérieux ? Raconte-moi un peu plus.",
+        "{q}ouais. Là je suis un peu fatigué.",
+        "{q}c'est bien ça.",
     ),
     "it": (
         "{q}capisco. E cosa fai in questi giorni?",
         "{q}bello. Cosa fai nel fine settimana?",
         "{q}davvero? Raccontami qualcosa in più.",
+        "{q}sì. Oggi sono un po' stanco.",
+        "{q}va bene così.",
     ),
     "zh": (
         "{q}原来是这样。你最近在忙什么？",
         "{q}挺好的。周末一般做什么？",
         "{q}真的吗？多说一点吧。",
+        "{q}嗯，今天有点累。",
+        "{q}挺好的。",
     ),
 }
 
@@ -581,10 +617,16 @@ class ChatService:
             log.warning("通话单句 Fish TTS 失败（%s: %s），回落 edge", type(exc).__name__, exc)
         if self.voice is None:
             return None
+        binding = self._voice_binding(friend)
+        edge_voice = (
+            binding.edge_voice
+            if binding is not None
+            else (friend.get("voice_id") or "en-GB-RyanNeural")
+        )
         try:
             path, duration_ms = await self.voice.synth_to_wav(
                 clean,
-                friend.get("voice_id") or "en-GB-RyanNeural",
+                edge_voice,
                 rate=friend.get("voice_rate") or "+0%",
                 pitch=friend.get("voice_pitch") or "+0Hz",
                 out_dir=self.audio.audio_dir,
@@ -680,21 +722,9 @@ class ChatService:
             total_turns=total_turns,
             last_interaction_at=_now_iso(),
         )
-        # 通话专用紧凑 prompt：不拼长记忆/表达本，减少 TTFT 与 token 数
-        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())[:700]
-        call_lang = _language_of(friend)
-        call_lang_name = LANGUAGE_NAMES[call_lang]
-        call_hint = (
-            f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
-            f"{friend.get('nationality', '')}, on a LIVE voice call with your friend. "
-            f"Reply ONLY in natural {call_lang_name}, in ONE short spoken sentence "
-            "(max ~18 words), directly to what they just said. "
-            "Talk like a real person on the phone, not a narrator: always use contractions, "
-            "keep it loose and unfinished (fragments are fine), and open with a small filler "
-            "(\"yeah\", \"hmm\", \"ah\", \"well\", \"I mean\") when it fits. "
-            "No greeting, no markdown, no stage directions. You may add at most one emoji."
-        )
-        system_prompt = "\n\n".join(p for p in (persona, call_hint) if p)
+        # 通话专用紧凑 prompt：不拼长记忆/表达本/示例，减少 TTFT 与 token 数
+        plan = self._call_turn_plan(friend, transcript)
+        system_prompt = self._call_system_prompt(friend, plan)
         messages: list[Any] = [{"role": "system", "content": system_prompt}]
         for item in history[-2:]:
             # 通话历史里不要把「通话摘要」当对话内容喂回模型（否则可能被模仿/复读）
@@ -765,6 +795,11 @@ class ChatService:
             raise
         except Exception as exc:  # noqa: BLE001 - 生成失败降级
             log.warning("通话流式生成失败（%s: %s），用模板兜底", type(exc).__name__, exc)
+        finally:
+            # 通话回合也要记住「这轮用了什么行为」并轻微更新情绪，下一轮才不会重复同一个模式。
+            # 只有真的产出了内容才记：用户中途挂断/取消不应该污染行为历史。
+            if str(full_text or "").strip():
+                self._after_reply_hooks(friend, plan, transcript)
 
         if not fallback_used and buffer.strip():
             event = await synth_and_event(buffer.strip())
@@ -917,11 +952,17 @@ class ChatService:
         instruction = (
             f"The user sent you a photo. Caption from them: {caption!r}. "
             "Look at the photo carefully and react like a friend in a chat: mention one "
-            "specific thing you see, then ask one natural follow-up question. "
-            "Keep it to 1-2 short spoken sentences."
+            "specific thing you actually see. Then follow the [This turn] directive about "
+            "whether to ask anything — do not default to a question."
         )
+        plan = self._turn_plan(friend, caption or "")
         messages: list[Any] = [
-            {"role": "system", "content": self._system_prompt(friend, review_exprs)}
+            {
+                "role": "system",
+                "content": self._system_prompt(
+                    friend, review_exprs, user_text=caption or "", plan=plan
+                ),
+            }
         ]
         for item in history[-10:]:
             # 通话摘要只是系统记录，不能当对话内容喂给模型（否则会被复读进回复）
@@ -1127,7 +1168,14 @@ class ChatService:
     def _reply_language(self, friend: dict) -> str:
         return _language_of(friend)
 
-    def _system_prompt(self, friend: dict, review_exprs: list[dict]) -> str:
+    def _system_prompt(
+        self,
+        friend: dict,
+        review_exprs: list[dict],
+        *,
+        user_text: str = "",
+        plan: Any = None,
+    ) -> str:
         persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())
         try:
             memory_ctx = self.memory.build_context(friend, review_expressions=review_exprs)
@@ -1138,15 +1186,12 @@ class ChatService:
         lang_name = LANGUAGE_NAMES[lang]
         if lang == "en":
             language_rule = (
-                "Reply with 1-2 VERY short lines of casual spoken English, like a text from a "
-                "friend — not written English. Rules:\n"
+                "Speak like a real friend texting out loud — not written English. Rules:\n"
                 "- ALWAYS use contractions (I'm, don't, it's, that's, gonna, wanna, kinda, sorta).\n"
                 "- Start with a small reaction or filler when it fits: \"yeah\", \"oh\", "
                 "\"ah\", \"hmm\", \"well\", \"right\", \"I mean\", \"honestly\", \"like\".\n"
                 "- Sentence fragments are good. You may drop the subject: \"Sounds rough.\" "
                 "\"Not bad, you?\" \"Yeah, same here.\"\n"
-                "- End with a casual tag or short question sometimes: \"though\", \"innit\", "
-                "\"you know?\", \"what about you?\"\n"
                 "- NEVER sound like a narrator or a report. Banned words: moreover, furthermore, "
                 "therefore, in addition, nevertheless, it is important to, I would suggest.\n"
                 "- No full formal sentences, no listing, no summarizing. Just talk.\n"
@@ -1164,9 +1209,8 @@ class ChatService:
             language_rule = (
                 f"You always reply in natural {lang_name}. Even if the learner writes in English or "
                 f"mixes languages, answer ONLY in {lang_name} — never write an English sentence "
-                "as the reply, and never translate. Keep it to 1-2 short spoken sentences "
-                "that sound like a real person talking out loud, not a narrator reading a "
-                "script. "
+                "as the reply, and never translate. Keep it spoken and natural like a real person "
+                "talking out loud, not a narrator reading a script. "
             )
         base = (
             f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
@@ -1180,47 +1224,195 @@ class ChatService:
                 "just react to what they MEANT and carry on.\n"
                 "- Never say \"good job\", \"well done\", \"let me correct you\", "
                 "\"you should say\", or anything that sounds like a teacher.\n"
-                "- Keep YOUR turns short - they should be doing most of the talking.\n"
-                "- Always leave an easy way in: a simple question they can answer in a few "
-                "words, or two options to pick from (\"sofa or a proper brew?\").\n"
-                "- If they answer in very little English, be warm and make it easy - make the "
-                "question smaller, never interrogate, never pile on questions.\n"
+                "- Do not interrogate: at most one question, and only if the [This turn] "
+                "directive allows one.\n"
+                "- If they answer in very little English, be warm and make it easy - never "
+                "interrogate and never pile on questions.\n"
                 "- If they drop Chinese words in, you understood fine - just keep going in "
                 "the target language, never switch to Chinese to explain.\n"
                 "- No quizzes, no exercises, no grammar talk. This is a chat, not a class.\n"
             )
-            + "Never mention being an AI. Always leave a hook (a question or an invitation to continue). "
+            + "Never mention being an AI. Match the length and energy the [This turn] directive "
+            "gives you, and do not default to reacting plus a question every single time. "
             "You may occasionally add ONE fitting emoji at the very end (not in the middle of a "
             "sentence); no markdown, no action descriptions."
         )
-        return "\n\n".join(p for p in (persona, base, memory_ctx) if p)
+        persona_layer = self._persona_layer(friend, user_text, plan)
+        return "\n\n".join(p for p in (persona, base, memory_ctx, persona_layer) if p)
 
-    def _mock_reply(self, friend: dict, user_text: str) -> str:
-        """无 key 时的 deterministic 人设回复（比通用模板更像真人）。
+    def _persona_layer(self, friend: dict, user_text: str, plan: Any) -> str:
+        """Speech DNA / 本轮行为 / 生活事实 / 示例对话。
 
+        整段是**增量**信息：任何一步失败都降级为「没有这段」，绝不阻断聊天。
+        """
+        try:
+            from app.v3 import persona_context  # noqa: PLC0415 - 避免 v2/v3 循环导入
+
+            if plan is None:
+                plan = persona_context.build_turn_plan(
+                    getattr(self, "db", None), friend, str(user_text or "")
+                )
+            return persona_context.build_persona_layer(
+                getattr(self, "db", None), friend, plan, language=_language_of(friend)
+            )
+        except Exception as exc:  # noqa: BLE001 - 生活层失败不影响聊天
+            log.debug("persona layer 构建失败（忽略）: %s: %s", type(exc).__name__, exc)
+            return ""
+
+    # ------------------------------------------------------------------ #
+    # Persona 生活层：本轮计划 + 回合后写回
+    # ------------------------------------------------------------------ #
+    def _turn_plan(self, friend: dict, user_text: str) -> Any:
+        """构建本轮 Persona 计划（DNA / 行为 / 情绪 / 生活事实）。失败返回 None。"""
+        try:
+            from app.v3 import persona_context  # noqa: PLC0415 - 避免 v2/v3 循环导入
+
+            return persona_context.build_turn_plan(
+                getattr(self, "db", None), friend, str(user_text or "")
+            )
+        except Exception as exc:  # noqa: BLE001 - 生活层失败不影响聊天
+            log.debug("build_turn_plan 失败（忽略）: %s: %s", type(exc).__name__, exc)
+            return None
+
+    def _after_reply_hooks(self, friend: dict, plan: Any, user_text: str) -> None:
+        """回合结束后：记住本轮行为（避免重复模式）+ 轻微更新情绪。"""
+        if plan is None:
+            return
+        try:
+            from app.v3 import behavior as behavior_mod  # noqa: PLC0415
+            from app.v3 import persona_context  # noqa: PLC0415
+
+            db = getattr(self, "db", None)
+            recent = persona_context.record_behavior(db, friend, plan.behavior)
+            if isinstance(friend, dict):
+                friend["recent_behaviors"] = recent
+            persona_context.update_emotion_after_turn(
+                db,
+                plan,
+                intent=behavior_mod.detect_intent(str(user_text or "")),
+                behavior_value=plan.behavior,
+            )
+            log.debug(
+                "persona turn=%s behavior=%s scene=%s examples=%d life=%s",
+                behavior_mod.detect_intent(str(user_text or "")),
+                plan.behavior,
+                plan.scene,
+                len(plan.examples),
+                bool(str(plan.life_block or "").strip()),
+            )
+        except Exception as exc:  # noqa: BLE001 - 写回失败不影响回复
+            log.debug("after_reply hooks 失败（忽略）: %s: %s", type(exc).__name__, exc)
+
+    @staticmethod
+    def _pick_mock_line(pool: tuple[str, ...], *, want_question: bool, seed: int) -> str:
+        """按「这轮是否允许提问」挑模板：不允许提问时**不会**出现问句。"""
+        questions = tuple(x for x in pool if "?" in x or "？" in x)
+        statements = tuple(x for x in pool if "?" not in x and "？" not in x)
+        candidates = questions if (want_question and questions) else (statements or questions or pool)
+        return candidates[seed % len(candidates)]
+
+    def _call_turn_plan(self, friend: dict, transcript: str) -> Any:
+        """通话版本轮计划：与文字聊天同源，但不注入示例对话（省首字延迟）。"""
+        try:
+            from app.v3 import persona_context  # noqa: PLC0415
+
+            return persona_context.build_call_plan(
+                getattr(self, "db", None), friend, str(transcript or "")
+            )
+        except Exception as exc:  # noqa: BLE001 - 生活层失败不影响通话
+            log.debug("build_call_plan 失败（忽略）: %s: %s", type(exc).__name__, exc)
+            return None
+
+    def _call_persona_layer(self, friend: dict, plan: Any, *, language: str) -> str:
+        """通话专用的紧凑 Persona 层（DNA + 此刻生活 + 本轮行为指令）。"""
+        if plan is None:
+            return ""
+        try:
+            from app.v3 import persona_context  # noqa: PLC0415
+
+            return persona_context.build_call_layer(
+                getattr(self, "db", None), friend, plan, language=language
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("通话 persona 层构建失败（忽略）: %s: %s", type(exc).__name__, exc)
+            return ""
+
+    def _call_system_prompt(self, friend: dict, plan: Any) -> str:
+        """通话 system prompt：人设 + 通话规则 + Persona 层。
+
+        长度目标由 Speech DNA 的 verbosity 决定（不是所有人统一的「一句 18 词」）；
+        Persona 层放最后，模型对末尾指令最敏感。
+        """
+        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())[:700]
+        call_lang = _language_of(friend)
+        call_lang_name = LANGUAGE_NAMES[call_lang]
+        traits = dict(getattr(plan, "dna_traits", None) or {})
+        verbosity = float(traits.get("verbosity", 0.4) or 0.4)
+        if verbosity < 0.30:
+            call_length = "ONE short spoken line (max ~12 words)"
+        elif verbosity < 0.55:
+            call_length = "one or two short spoken sentences (max ~20 words)"
+        elif verbosity < 0.80:
+            call_length = "two short spoken sentences (max ~30 words)"
+        else:
+            call_length = "two or three spoken sentences (max ~40 words), still conversational"
+        call_hint = (
+            f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
+            f"{friend.get('nationality', '')}, on a LIVE voice call with your friend. "
+            f"Reply ONLY in natural {call_lang_name}, {call_length}, "
+            "directly to what they just said. "
+            "Talk like a real person on the phone, not a narrator: always use contractions, "
+            "keep it loose and unfinished (fragments are fine), and open with a small filler "
+            "(\"yeah\", \"hmm\", \"ah\", \"well\", \"I mean\") when it fits. "
+            "No greeting, no markdown, no stage directions. You may add at most one emoji."
+        )
+        call_layer = self._call_persona_layer(friend, plan, language=call_lang)
+        return "\n\n".join(p for p in (persona, call_hint, call_layer) if p)
+
+    def _mock_reply(self, friend: dict, user_text: str, *, plan: Any = None) -> str:
+        """无 key 时的 deterministic 人设回复。
+
+        升级后不再是「客服句式」：是否提问由本轮行为决定；长度倾向跟随 verbosity。
         非英语好友用该语言的模板，保证「选日语就真的回日语」在演示模式下也成立。
         """
         quirks = friend.get("speech_quirks") or []
+        if isinstance(quirks, str):
+            quirks = [quirks]
         quirk = str(quirks[0]).strip() if quirks else ""
         city = str(friend.get("city") or "here")
         lang = _language_of(friend)
         seed = zlib.crc32(f"{friend.get('id','')}|{user_text}".encode("utf-8")) & 0xFFFFFFFF
 
+        behavior = str(getattr(plan, "behavior", "") or "")
+        traits = dict(getattr(plan, "dna_traits", None) or {})
+        # 只有 ask_question 这一轮允许以问句结尾；行为未知（通话 mock 等老路径）保持原样
+        want_question = (behavior == "ask_question") if behavior else True
+        if behavior in ("acknowledge",) and traits.get("verbosity", 0.5) > 0.5:
+            want_question = False
+        # 口头禅是「调味」不是固定前缀：约 40% 的回复才带，且不会被堆叠
+        use_quirk = bool(quirk) and ((seed >> 8) % 5) < 2
+
         if lang != "en":
             pool = _MOCK_LANG_REPLIES.get(lang) or _MOCK_DEFAULT_REPLIES
-            prefix = _native_quirk_prefix(quirk, lang)
-            text = pool[seed % len(pool)].format(q=prefix, city=city)
-            return _clean_reply(text)
+            prefix = _native_quirk_prefix(quirk, lang) if use_quirk else ""
+            return _clean_reply(
+                self._pick_mock_line(pool, want_question=want_question, seed=seed).format(
+                    q=prefix, city=city
+                )
+            )
 
-        prefix = f"{quirk[:1].upper()}{quirk[1:]}, " if quirk else ""
+        prefix = f"{quirk[:1].upper()}{quirk[1:]}, " if use_quirk else ""
         topic = "default"
         for name, pattern in _TOPIC_PATTERNS:
             if pattern.search(user_text or ""):
                 topic = name
                 break
         pool = _MOCK_TOPIC_REPLIES.get(topic) or _MOCK_DEFAULT_REPLIES
-        text = pool[seed % len(pool)].format(q=prefix, city=city)
-        return _clean_reply(text)
+        return _clean_reply(
+            self._pick_mock_line(pool, want_question=want_question, seed=seed).format(
+                q=prefix, city=city
+            )
+        )
 
     async def _llm_reply(
         self,
@@ -1229,49 +1421,66 @@ class ChatService:
         history: list[dict],
         review_exprs: list[dict],
     ) -> str:
-        # 无 key（mock）时不走通用模板，直接用带人设/话题的 deterministic 回复
-        if getattr(self.engines.llm, "uses_mock", False):
-            return self._mock_reply(friend, user_text)
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": self._system_prompt(friend, review_exprs)}
-        ]
-        for item in history[-10:]:
-            # 通话摘要只是系统记录，不能当对话内容喂给模型（否则会被复读进回复）
-            if item.get("msg_type") == "call_summary":
-                continue
-            role = "user" if item.get("sender") == "user" else "assistant"
-            content = (item.get("transcript") or "").strip()
-            if content:
-                messages.append({"role": role, "content": content})
-        messages.append({"role": "user", "content": user_text})
+        """一轮回复：**先做行为选择**（零 LLM），再拼 prompt 生成。
 
-        chunks: list[str] = []
+        普通一轮仍然只有 1 次 LLM 调用；只有回复语言不对时才多一次纠偏调用。
+        """
+        plan = self._turn_plan(friend, user_text)
+        reply = ""
         try:
-            async for delta in self.engines.llm.stream_chat(
-                messages, temperature=0.85, max_tokens=600
-            ):
-                if delta:
-                    chunks.append(delta)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            log.warning("LLM 回复失败（使用规则兜底）: %s: %s", type(exc).__name__, exc)
+            if getattr(self.engines.llm, "uses_mock", False):
+                # 无 key（mock）时走 deterministic 人设回复，但同样遵守本轮行为
+                reply = self._mock_reply(friend, user_text, plan=plan)
+                return reply
 
-        text = _clean_reply("".join(chunks))
-        if text:
+            messages: list[dict[str, str]] = [
+                {
+                    "role": "system",
+                    "content": self._system_prompt(
+                        friend, review_exprs, user_text=user_text, plan=plan
+                    ),
+                }
+            ]
+            for item in history[-10:]:
+                # 通话摘要只是系统记录，不能当对话内容喂给模型（否则会被复读进回复）
+                if item.get("msg_type") == "call_summary":
+                    continue
+                role = "user" if item.get("sender") == "user" else "assistant"
+                content = (item.get("transcript") or "").strip()
+                if content:
+                    messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": user_text})
+
+            chunks: list[str] = []
+            try:
+                async for delta in self.engines.llm.stream_chat(
+                    messages, temperature=0.85, max_tokens=600
+                ):
+                    if delta:
+                        chunks.append(delta)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning("LLM 回复失败（使用规则兜底）: %s: %s", type(exc).__name__, exc)
+
+            text = _clean_reply("".join(chunks))
+            if not text:
+                reply = self._mock_reply(friend, user_text, plan=plan)
+                return reply
             lang = _language_of(friend)
-            if not _matches_language(text, lang):
-                log.info(
-                    "好友回复语言不符（期望 %s，实际 %r），尝试纠偏",
-                    lang, text[:80],
-                )
-                fixed = await self._rewrite_in_language(friend, text, lang)
-                if fixed:
-                    return fixed
-                # 纠偏失败：用目标语言的确定性回复兜底，绝不发错语言
-                return self._mock_reply(friend, user_text)
-            return text
-        return self._mock_reply(friend, user_text)
+            if _matches_language(text, lang):
+                reply = text
+                return reply
+            log.info(
+                "好友回复语言不符（期望 %s，实际 %r），尝试纠偏",
+                lang, text[:80],
+            )
+            fixed = await self._rewrite_in_language(friend, text, lang)
+            # 纠偏失败：用目标语言的确定性回复兜底，绝不发错语言
+            reply = fixed or self._mock_reply(friend, user_text, plan=plan)
+            return reply
+        finally:
+            self._after_reply_hooks(friend, plan, user_text)
 
     async def _rewrite_in_language(self, friend: dict, text: str, lang: str) -> str | None:
         """让模型把自己刚写错语言的回复改写成目标语言；失败返回 None。"""
@@ -1306,25 +1515,61 @@ class ChatService:
         return None
 
     def _fallback_reply(self, friend: dict) -> str:
+        """最后兜底（LLM 与 mock 都不可用时）。
+
+        旧实现是四句「that sounds interesting / how did that make you feel」的客服话术，
+        正是人物模板化的来源之一。这里改成最短的中性反应——**不提问**。
+        """
         quirks = friend.get("speech_quirks") or []
-        quirk = str(quirks[0]) if quirks else "well"
-        name = friend.get("name", "your friend")
-        options = [
-            f"{quirk}, that sounds interesting. Tell me more about it?",
-            f"{quirk}, I get what you mean. How did that make you feel?",
-            f"Haha, {quirk}, seriously? What happened next?",
-            f"{quirk}, I'm curious — what are you up to later today?",
-        ]
-        idx = int(time.time() * 1000 + len(name)) % len(options)
-        return options[idx]
+        if isinstance(quirks, str):
+            quirks = [quirks]
+        quirk = str(quirks[0]).strip() if quirks else ""
+        options = ("Yeah.", "Hmm.", "Right.", "Okay.", "Mm.")
+        idx = int(time.time() * 1000 + len(str(friend.get("name", "")))) % len(options)
+        line = options[idx]
+        return f"{quirk}. {line}" if quirk and quirk.lower() not in line.lower() else line
 
 #: 情绪 -> (rate 增量, pitch 增量)。值是相对该好友基础 prosody 的偏移。
 
+
+    def _voice_binding(self, friend: dict) -> Any:
+        """该好友的声音身份（与动态朗读/通话共用同一个 resolver）。
+
+        有 ``persona_id`` 时**实时**读 personas 行：好友行里的 fish_voice_id 是建好友时的快照，
+        重新分配音色后不同步会导致「聊天一个声音、动态另一个声音」。
+        """
+        try:
+            from app.voice import voice_registry  # noqa: PLC0415
+
+            return voice_registry.binding_for_friend(
+                getattr(self, "db", None), friend, cfg=self._tts_cfg()
+            )
+        except Exception as exc:  # noqa: BLE001 - 音色解析失败不阻断聊天
+            log.debug("解析好友音色失败（用好友行兜底）: %s", exc)
+            return None
+
+    def _tts_cfg(self) -> Any:
+        """读取 TTS 配置（chat_service 自带 store 优先）。"""
+        try:
+            store = getattr(self, "tts_config", None)
+            if store is not None:
+                return store.load()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("读取 TTS 配置失败: %s", exc)
+        return None
 
     async def _fish_voice(
         self, text: str, emotion: str, friend: dict | None = None
     ) -> bytes | None:
         """走 Fish 合成；未启用/失败返回 None（调用方回落 edge）。"""
+        try:
+            from app.voice import voice_registry  # noqa: PLC0415
+
+            # SE_TTS_FISH=0（测试/离线环境）时整条链路都用 Edge，避免测试打真实 API
+            if voice_registry.load_cfg() is None:
+                return None
+        except Exception:  # noqa: BLE001
+            return None
         try:
             store = getattr(self, "tts_config", None)
             if store is None:
@@ -1342,6 +1587,10 @@ class ChatService:
                 return None
             from app.voice import fish_tts  # noqa: PLC0415
 
+            binding = self._voice_binding(friend)
+            # Fish 已熔断 / 该角色没有 Fish 音色 → 直接走 Edge，不再等超时
+            if binding is not None and not binding.fish_enabled:
+                return None
             # LLM 已经给了 [tag] 就不再叠加，避免 "[excited] [sympathetic] ..."
             has_tag = bool(re.search(r"^\s*\[", text or ""))
             tagged = text if has_tag else _tag_emotion(text, emotion)
@@ -1350,7 +1599,10 @@ class ChatService:
                 api_key=cfg.fish_api_key,
                 base_url=cfg.fish_base_url,
                 model=cfg.fish_model,
-                reference_id=str((friend or {}).get("fish_voice_id") or "") or cfg.fish_reference_id,
+                reference_id=(
+                    binding.ref if binding is not None and binding.ref
+                    else str((friend or {}).get("fish_voice_id") or "") or cfg.fish_reference_id
+                ),
                 audio_format=cfg.fish_format or "wav",
             )
         except Exception as exc:  # noqa: BLE001
@@ -1399,9 +1651,15 @@ class ChatService:
                     path = None
 
             if path is None:
+                binding = self._voice_binding(friend)
+                edge_voice = (
+                    binding.edge_voice
+                    if binding is not None
+                    else (friend.get("voice_id") or "en-GB-RyanNeural")
+                )
                 path, duration_ms = await self.voice.synth_to_wav(
                     speak_text,
-                    friend.get("voice_id") or "en-GB-RyanNeural",
+                    edge_voice,
                     rate=rate,
                     pitch=pitch,
                     out_dir=self.audio.audio_dir,

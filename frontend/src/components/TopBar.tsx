@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, AudioLines, Cpu, Gauge, Globe2, Plus, Power, RefreshCw, Settings2, Volume2, Zap } from "lucide-react";
+import { Activity, AudioLines, Cpu, Gauge, Plus, Power, RefreshCw, Settings2, Volume2, Zap } from "lucide-react";
 
 import type { ConnectionStatus, EnginesInfo, TurnMetrics } from "@/lib/types";
 
@@ -17,8 +17,6 @@ interface TopBarProps {
   onOpenSettings: () => void;
   /** 打开声音克隆弹窗 */
   onOpenVoiceClone: () => void;
-  /** 打开口音市场 */
-  onOpenAccentMarket: () => void;
   /** 打开创建角色 */
   onOpenCreatePersona: () => void;
 }
@@ -78,7 +76,6 @@ export function TopBar({
   firstAudioMs,
   onOpenSettings,
   onOpenVoiceClone,
-  onOpenAccentMarket,
   onOpenCreatePersona,
 }: TopBarProps) {
   const meta = STATUS_META[status];
@@ -154,17 +151,6 @@ export function TopBar({
             <span className="tnum text-[11px] text-[color:var(--text-dim)]">{fmtMs(metrics.total_ms)}</span>
           </div>
         )}
-
-        {/* 口音市场 */}
-        <button
-          type="button"
-          onClick={onOpenAccentMarket}
-          title="浏览全部口音，给角色换个口音"
-          className="flex items-center gap-1.5 rounded-sm border border-[color:var(--line-strong)] bg-[color:var(--surface-2)] px-2.5 py-1.5 text-[11px] font-medium text-[color:var(--text-dim)] transition-colors hover:border-[color:var(--accent-line)] hover:text-[color:var(--accent)]"
-        >
-          <Globe2 size={11} />
-          <span className="hidden md:inline">口音市场</span>
-        </button>
 
         {/* 创建角色 */}
         <button

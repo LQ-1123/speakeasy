@@ -907,10 +907,13 @@ class MemoryManager:
                 lines.append(f"- {better}{suffix}")
 
         # --- 硬约束 ---
+        # 注意：这里**不再**强制「每轮 1-2 句 + 以问题结尾」。
+        # 长度、是否提问、是否热情由 system prompt 里的 [This turn] 行为指令决定
+        # （见 app.v3.persona_context / app.v3.behavior），否则所有人物都会变成客服腔。
         lines.append(
             "[Rules] Stay 100% in character as a real human: never say you are an AI, a model or a bot. "
-            "Reply with 1-2 short spoken English sentences (under 40 words total): react to what they "
-            "just said, then end with a hook (a question or a playful tease). No markdown, no bullet "
+            "Follow the length and question policy given by the [This turn] directive — do not "
+            "default to a short reply plus a question every single time. No markdown, no bullet "
             "lists, no grammar explanations, no emoji spam."
         )
         return "\n".join(lines)

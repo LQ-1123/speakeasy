@@ -1,5 +1,16 @@
 """口音市场：全部可用声线 + 元数据（地区、语言、口音来源、示例）。
 
+.. deprecated:: 阶段四（语音专项）
+    **口音系统已下线**。用户验收要求「一个角色 = 一个声音」，AI 角色的主音色
+    统一由 Fish 音色库按语言+性别自动分配（见 ``app.v3.seed_data.ensure_persona_voices``），
+    不再按「口音」挑声线。本模块保留两件事：
+
+    1. 旧数据/旧接口的只读元数据（``get_accent`` 等），避免老库直接报错；
+    2. Edge 降级合成时需要的声线元数据。
+
+    新代码**不要**再用它给 AI 角色选声线；``/api/market/accents`` 已标记 deprecated，
+    ``/api/market/assign`` 直接返回 410。
+
 设计原则
 --------
 1. **官方英语变体优先** —— 真实地区口音，100% 自然
@@ -12,6 +23,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+#: 口音系统已下线（阶段四）。保留常量供调用方/测试显式判断。
+ACCENT_MARKET_DEPRECATED = True
+
+#: 统一的下线说明（路由响应 / 日志共用）
+DEPRECATION_MESSAGE = "口音系统已下线：AI 角色音色统一由 Fish 音色库自动分配。"
 
 # --------------------------------------------------------------------------- #
 # 地区元数据

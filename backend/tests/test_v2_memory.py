@@ -128,9 +128,11 @@ def test_build_context_injects_time_facts_episodes_reviews(db):
     assert "周四下午有场技术面试" in context
     # 待复习表达
     assert "I'm down for that" in context
-    # 硬约束
+    # 硬约束：人设/事实约束保留；「每轮 1-2 句 + 以问题结尾」已移除（改由行为指令决定）
     assert "never say you are an AI" in context
-    assert "1-2 short spoken English sentences" in context
+    assert "[This turn]" in context
+    assert "end with a hook" not in context
+    assert "1-2 short spoken English sentences" not in context
     assert len(context) < 5000
 
 

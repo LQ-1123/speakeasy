@@ -1,4 +1,4 @@
-"""SpeakEasy V3 REST 路由（``/api/v3``）。
+﻿"""SpeakEasy V3 REST 路由（``/api/v3``）。
 
 与 V2 的关系
 ------------
@@ -132,6 +132,35 @@ async def health(request: Request) -> dict:
             daily = await asyncio.to_thread(daily_status, db)
         except Exception:  # noqa: BLE001
             daily = {}
+    voice: dict = {}
+    if db is not None:
+        try:
+            from app.voice import voice_registry  # noqa: PLC0415
+
+            cfg = await asyncio.to_thread(voice_registry.load_cfg)
+            status = voice_registry.fish_status()
+            # Fish 曾失败且冷却已过：顺手做一次轻量探测（不合成音频），
+            # 网络恢复后四条链路会自动切回 Fish。
+            if cfg is not None and status.get("attempt_ok") is not True and status.get("retry_in_s", 0) <= 0:
+                await voice_registry.probe(cfg)
+                status = voice_registry.fish_status()
+            rows = await _run(
+                lambda: service.db.conn.execute(
+                    "SELECT COUNT(*) AS n,"
+                    " SUM(CASE WHEN COALESCE(fish_voice_id,'')<>'' THEN 1 ELSE 0 END) AS with_fish"
+                    " FROM personas"
+                ).fetchone()
+            )
+            voice = {
+                "provider": str(getattr(cfg, "provider", "") or "none"),
+                "fish": status,
+                "personas_total": int(rows["n"] or 0) if rows else 0,
+                "personas_with_fish": int(rows["with_fish"] or 0) if rows else 0,
+                # 一致性契约：这些链路共用同一个 resolver
+                "paths": ["chat", "post_speech", "call", "sample"],
+            }
+        except Exception as exc:  # noqa: BLE001 - 健康检查不因诊断失败而失败
+            voice = {"error": f"{type(exc).__name__}: {exc}"}
     return {
         "status": "ok",
         "version": V3_VERSION,
@@ -139,6 +168,7 @@ async def health(request: Request) -> dict:
         "world": world,
         "audio": audio_stats,
         "daily": daily,
+        "voice": voice,
         "personas": world.get("personas") or len(service._personas()),  # noqa: SLF001 - 只读计数
     }
 
@@ -394,6 +424,7 @@ async def persona_post_speech(request: Request, post_id: str, v: str | None = No
                 headers={
                     "Cache-Control": "public, max-age=31536000, immutable",
                     "X-Voice": voice,
+                    "X-Voice-Provider": ("fish" if "-fish-fish-" in os.path.basename(str(path)) or "-fish-edge-" in os.path.basename(str(path)) else "edge"),
                     "X-Language": lang,
                     "X-Audio-Cached": "1",
                 },
@@ -643,6 +674,83 @@ async def social_stats(
     request: Request, user_id: str = Depends(bind_current_user)
 ) -> dict:
     return await _run(_v3(request).stats, user_id)
+
+
+@router.get("/stats/persona")
+async def persona_stats(request: Request) -> dict:
+    """Persona 生活系统只读观测（调参/验收用）。
+
+    只做聚合查询：不触发任何 LLM / 不写库 / 不包含任何用户数据。
+    """
+    return await _run(_v3(request).stats_persona)
+
+
+@router.get("/stats/voice")
+async def voice_stats(request: Request, persona_id: str = "") -> dict:
+    """音色一致性自检（只读，不合成音频）。
+
+    在**服务端进程内**同时算「聊天侧绑定」和「朗读侧绑定」，
+    两者必须完全一致——这正是用户反馈「消息和动态声音不一样」的验收点。
+    """
+    service = _v3(request)
+    from app.voice import voice_registry  # noqa: PLC0415
+
+    cfg = await asyncio.to_thread(voice_registry.load_cfg)
+    db = service.db
+
+    def _resolve(pid: str) -> dict | None:
+        persona = service.persona_by_id(pid)
+        if persona is None:
+            return None
+        speech_binding = voice_registry.binding_for_persona(persona, cfg)
+        chat_binding = None
+        try:
+            row = db.conn.execute(
+                "SELECT * FROM friends WHERE persona_id=? LIMIT 1", (pid,)
+            ).fetchone()
+            if row is not None:
+                chat_binding = voice_registry.binding_for_friend(db, dict(row), cfg)
+        except Exception:  # noqa: BLE001
+            chat_binding = None
+        return {
+            "persona_id": pid,
+            "nickname": str(persona.get("nickname") or ""),
+            "speech": {
+                "provider": speech_binding.provider,
+                "token": speech_binding.token,
+                "edge_voice": speech_binding.edge_voice,
+            },
+            "chat": (
+                {
+                    "provider": chat_binding.provider,
+                    "token": chat_binding.token,
+                    "edge_voice": chat_binding.edge_voice,
+                }
+                if chat_binding is not None
+                else None
+            ),
+            "consistent": (
+                chat_binding is None or chat_binding.token == speech_binding.token
+            ),
+        }
+
+    if persona_id:
+        ids = [persona_id]
+    else:
+        ids = [
+            str(r[0])
+            for r in db.conn.execute(
+                "SELECT id FROM personas ORDER BY nickname LIMIT 6"
+            ).fetchall()
+        ]
+    items = [item for item in (_resolve(pid) for pid in ids) if item is not None]
+    return {
+        "provider": str(getattr(cfg, "provider", "") or "none"),
+        "fish": voice_registry.fish_status(),
+        "paths": ["chat", "post_speech", "call", "sample"],
+        "items": items,
+        "all_consistent": all(bool(item["consistent"]) for item in items),
+    }
 
 
 __all__ = ["V3_VERSION", "router"]

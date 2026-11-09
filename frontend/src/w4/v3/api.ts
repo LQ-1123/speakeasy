@@ -95,12 +95,24 @@ export interface Friendship {
   persona?: { id: string; nickname: string; avatar: string; avatar_seed?: string; avatar_style?: string; avatar_options?: Record<string, unknown>; is_ai: boolean } | null;
 }
 
+export interface PersonaRelationBrief {
+  persona_id: string;
+  nickname: string;
+  relation_type: string;
+  closeness: number;
+  tension: number;
+  shared_events: number;
+  recent_event?: { title: string; event_type: string } | null;
+}
+
 export interface PersonaProfile extends PersonaBrief {
   personality: string;
   timezone: string;
   post_count: number;
   posts: { items: FeedItem[]; next_cursor: string };
   friendship: Friendship | null;
+  /** TA 身边的人（最近共同经历 / 关系摩擦），可能为空 */
+  relations?: PersonaRelationBrief[];
 }
 
 export interface SocialEvent {
@@ -158,9 +170,30 @@ function writeLocal(key: string, value: unknown): void {
   }
 }
 
+/** APK 从本地壳切到远程 UI 时，用 ?se_device_key= 把旧设备身份带过来（只消费一次）。 */
+function deviceKeyFromUrl(): string {
+  try {
+    const url = new URL(window.location.href);
+    const key = url.searchParams.get("se_device_key") || "";
+    if (key.length >= 8 && key.length <= 128 && /^[0-9a-zA-Z_-]+$/.test(key)) {
+      url.searchParams.delete("se_device_key");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      return key;
+    }
+  } catch {
+    /* 非浏览器环境忽略 */
+  }
+  return "";
+}
+
 function deviceKey(): string {
   const existing = readLocal<string>(DEVICE_STORE);
   if (typeof existing === "string" && existing.length >= 8) return existing;
+  const migrated = deviceKeyFromUrl();
+  if (migrated) {
+    writeLocal(DEVICE_STORE, migrated);
+    return migrated;
+  }
   const bytes = new Uint8Array(16);
   if (typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(bytes);
   else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);

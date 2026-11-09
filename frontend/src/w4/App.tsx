@@ -102,8 +102,8 @@ function parseRoute(): Route {
     case "requests":
       return { name: "requests" };
     default:
-      /* 新用户首屏直接进 Discover 信息流（不再依赖先生成好友） */
-      return { name: "discover" };
+      /* 首次进入落在「消息页」：先看谁在等你说话，而不是被推进发现页 */
+      return { name: "chats" };
   }
 }
 
@@ -160,7 +160,7 @@ function Shell() {
   useEffect(() => {
     const onHash = () => setRoute(parseRoute());
     window.addEventListener("hashchange", onHash);
-    if (!window.location.hash) window.history.replaceState(null, "", "#/discover");
+    if (!window.location.hash) window.history.replaceState(null, "", "#/chats");
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 

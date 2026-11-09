@@ -268,27 +268,199 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
 }
 
 
-def _fallback_persona(index: int, day: str, language: str = "en") -> dict:
-    """分语言兜底人物：保证角标语言与内容语言一致。"""
+
+# --------------------------------------------------------------------------- #
+# 捏人素材池（data/lexicons/world.json，管理台可编辑）
+# --------------------------------------------------------------------------- #
+def _world_pools() -> dict:
+    """读取捏人素材池；词库不可用时返回空 dict（走内置文案）。"""
+    try:
+        from app.v3 import lexicon  # noqa: PLC0415
+
+        return lexicon.load("world") or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _pool_items(pools: dict, category: str, language: str = "") -> list[str]:
+    """取某类池子：优先该语言分组，其次 any，再次任意非空分组。"""
+    group = pools.get(category) or {}
+    if not isinstance(group, dict):
+        return []
+    if language and isinstance(group.get(language), list) and group[language]:
+        return [str(x) for x in group[language] if str(x).strip()]
+    if isinstance(group.get("any"), list) and group["any"]:
+        return [str(x) for x in group["any"] if str(x).strip()]
+    for items in group.values():
+        if isinstance(items, list) and items:
+            return [str(x) for x in items if str(x).strip()]
+    return []
+
+
+def _name_entries(pools: dict, language: str = "") -> list[dict]:
+    """名字池归一化：兼容旧格式（纯字符串）与新格式（带性别/国家）。"""
+    raw: list = []
+    names = pools.get("names") or {}
+    if not isinstance(names, dict):
+        return []
+    if language and isinstance(names.get(language), list) and names[language]:
+        raw = list(names[language])
+    elif isinstance(names.get("any"), list) and names["any"]:
+        raw = list(names["any"])
+    else:
+        for items in names.values():
+            if isinstance(items, list) and items:
+                raw = list(items)
+                break
+    out: list[dict] = []
+    for item in raw:
+        if isinstance(item, str):
+            if item.strip():
+                out.append({"name": item.strip(), "gender": "", "country": ""})
+        elif isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+            if name:
+                out.append(
+                    {
+                        "name": name,
+                        "gender": str(item.get("gender") or "").strip().lower(),
+                        "country": str(item.get("country") or "").strip(),
+                    }
+                )
+    return out
+
+
+def _city_for(pools: dict, country: str, index: int, day: str) -> str:
+    """按名字标注的国家挑城市；该国没有城市池时退回 any / 第一个非空分组。"""
+    cities = pools.get("cities") or {}
+    if not isinstance(cities, dict):
+        return ""
+    group: list = []
+    if country and isinstance(cities.get(country), list) and cities[country]:
+        group = cities[country]
+    elif isinstance(cities.get("any"), list) and cities["any"]:
+        group = cities["any"]
+    else:
+        for items in cities.values():
+            if isinstance(items, list) and items:
+                group = items
+                break
+    items = [str(x) for x in group if str(x).strip()]
+    return _pick_sequence(items, index, f"city:{day}")
+
+
+def _pick_stable(items: list[str], index: int, salt: str = "") -> str:
+    """确定性取一个：同一天同一索引永远取同一个（方便测试与复盘）。"""
+    if not items:
+        return ""
+    digest = hashlib.sha256(f"{salt}:{index}".encode("utf-8")).hexdigest()[:8]
+    return items[int(digest, 16) % len(items)]
+
+
+def _pick_sequence(items: list[str], index: int, salt: str = "") -> str:
+    """确定性顺序取：同一天内 index 不同就取不同项（池子够大时不重名）。"""
+    if not items:
+        return ""
+    offset = int(hashlib.sha256(salt.encode("utf-8")).hexdigest()[:8], 16) % len(items)
+    return items[(offset + index) % len(items)]
+
+
+def _pick_many(items: list[str], index: int, count: int, salt: str = "") -> list[str]:
+    """确定性取多个（不重复相邻），用于兴趣标签。"""
+    if not items:
+        return []
+    offset = int(hashlib.sha256(salt.encode("utf-8")).hexdigest()[:8], 16) % len(items) if salt else 0
+    picked: list[str] = []
+    for step in range(count):
+        value = items[(offset + index + step) % len(items)]
+        if value not in picked:
+            picked.append(value)
+    return picked
+
+
+def _pool_hint(pools: dict, language: str) -> str:
+    """给 LLM 的素材提示：只给候选，不要求照抄（允许它自己衍生）。"""
+    name_entries = _name_entries(pools, language)[:8]
+    names = [
+        f"{item['name']} ({item['gender']})" if item.get("gender") else item["name"]
+        for item in name_entries
+    ]
+    occupations = _pool_items(pools, "occupations", language)[:10]
+    cities = _pool_items(pools, "cities", language)[:8]
+    interests = _pool_items(pools, "interests", language)[:14]
+    lines: list[str] = []
+    if names:
+        lines.append(f"- Name ideas: {', '.join(names)}")
+    if occupations:
+        lines.append(f"- Occupation ideas: {', '.join(occupations)}")
+    if cities:
+        lines.append(f"- City ideas: {', '.join(cities)}")
+    if interests:
+        lines.append(f"- Interest tags to prefer: {', '.join(interests)}")
+    if not lines:
+        return ""
+    return (
+        "\n\nEditorial material (pick from these or invent close variants; "
+        "keep the same style/level):\n" + "\n".join(lines)
+    )
+
+
+def _fallback_persona(
+    index: int, day: str, language: str = "en", *, gender: str = ""
+) -> dict:
+    """分语言兜底人物：优先用管理台配置的素材池，池子为空时退回内置文案。
+
+    ``gender``：强制性别（"female"/"male"）；为空时按 index 男女交替，保证新人物性别平衡。
+    """
     lang = language if language in _FALLBACK_LANG else "en"
     spec = _FALLBACK_LANG[lang]
-    suffix = hashlib.sha256(f"{day}:{index}".encode("utf-8")).hexdigest()[:4]
-    name = spec["names"][index % len(spec["names"])]
+    pools = _world_pools()
+
+    names = _pool_items(pools, "names", lang)
+    occupations = _pool_items(pools, "occupations", lang)
+    cities = _pool_items(pools, "cities", lang)  # 仅用于"有没有城市池"的判断
+    interests = _pool_items(pools, "interests", lang)
+
+    name_entries = _name_entries(pools, lang)
+    target_gender = str(gender or "").strip().lower()
+    if target_gender not in ("female", "male"):
+        target_gender = "female" if index % 2 == 0 else "male"
+    entry: dict = {}
+    if name_entries:
+        same_gender = [
+            e for e in name_entries if str(e.get("gender") or "").lower() == target_gender
+        ]
+        pool = same_gender or name_entries
+        entry = pool[
+            (
+                int(hashlib.sha256(f"name:{day}".encode()).hexdigest()[:8], 16)
+                + index
+            )
+            % len(pool)
+        ]
+        name = entry["name"]
+    else:
+        suffix = hashlib.sha256(f"{day}:{index}".encode("utf-8")).hexdigest()[:4]
+        name = f"{spec['names'][index % len(spec['names'])]} {suffix[:2]}"
+
     posts = [
         {"content": text, "tags": []} if isinstance(text, str) else text
         for text in spec["posts"]
     ]
+    gender = entry.get("gender") or target_gender
+    country = entry.get("country") or spec["country"]
     return {
-        "nickname": f"{name} {suffix[:2]}",
-        "gender": "female" if index % 2 == 0 else "male",
+        "nickname": name,
+        "gender": gender,
         "age": 24 + (index * 3) % 12,
-        "country": spec["country"],
-        "city": spec["city"],
+        "country": country,
+        "city": _city_for(pools, country, index, day) or spec["city"],
         "language": lang,
-        "occupation": spec["occupation"],
+        "occupation": _pick_sequence(occupations, index, f"job:{day}") or spec["occupation"],
         "bio": spec["bio"],
         "personality": "curious, calm, a little funny",
-        "interests": ["coffee", "books", "walking"],
+        "interests": _pick_many(interests, index, 4, f"interest:{day}")
+        or ["coffee", "books", "walking"],
         "posts": posts,
     }
 
@@ -351,6 +523,9 @@ async def _llm_persona(
         return None
     guide = LEVEL_GUIDE.get(level, LEVEL_GUIDE["能聊几句"]) if level else ""
     parts = [_PROMPT, f"\n\nCreate persona #{index + 1} for {day}."]
+    hint = _pool_hint(_world_pools(), language)
+    if hint:
+        parts.append(hint)
     if language:
         parts.append(f"Write ALL text (bio, personality, posts) in language code '{language}'.")
     if level:
@@ -406,10 +581,14 @@ async def _llm_persona(
 
 
 async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
-    """从 Fish 音色库挑一个尽量没被别人用过的音色（按语言+性别）。"""
+    """从 Fish 音色库挑一个尽量没被别人用过的音色（按语言+性别）。
+
+    Fish 不可达时**立即返回空串**（由调用方用 Edge 声线兜底）：
+    否则每生成一个人物都要等 3 页音色列表 × 30s 超时，每日世界会卡住好几分钟。
+    """
     try:
         from app.config import get_settings  # noqa: PLC0415
-        from app.voice import fish_tts  # noqa: PLC0415
+        from app.voice import fish_tts, voice_registry  # noqa: PLC0415
         from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
 
         cfg = TTSConfigStore(str(get_settings().data_path)).load()
@@ -418,6 +597,8 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
         key = str(getattr(cfg, "fish_api_key", "") or "").strip()
         if not key:
             return ""
+        if not voice_registry.fish_usable(cfg):
+            return ""  # 熔断窗口内：不再尝试联网
         with db._lock:  # noqa: SLF001
             used = {
                 str(r[0])
@@ -427,6 +608,25 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
                 ).fetchall()
             }
         base_url = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "")
+        # 管理台「音色池」里手动加入的音色优先（排除已被占用的）
+        try:
+            from app.admin import voice_pool  # noqa: PLC0415
+
+            picked = voice_pool.pick_from_pool(language or "en", gender or "", used)
+            if picked:
+                return picked
+        except Exception as exc:  # noqa: BLE001
+            log.debug("从素材池挑音色失败（继续用 Fish 官方池）: %s", exc)
+        # 先做一次 5 秒探测：不可达就熔断，后面的人物直接走 Edge 声线，
+        # 否则每个新人物都要等一次网络超时，每日世界会卡住几分钟。
+        try:
+            await fish_tts.list_models(
+                api_key=key, base_url=base_url, page_size=1, timeout=5.0
+            )
+        except Exception as exc:  # noqa: BLE001
+            voice_registry.mark_fish_failure(exc)
+            log.info("Fish 音色库不可达，本轮新人物改用 Edge 声线兜底")
+            return ""
         plan = [
             (language or "en", gender or ""),
             (language or "en", gender or ""),
@@ -442,11 +642,19 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
                 gender=gender_arg,
                 api_key=key,
                 base_url=base_url,
+                timeout=5.0,  # 网络不可达时快速失败，别拖住每日世界
+                pages=1,
             )
             if candidate and candidate not in used:
                 return candidate
         return candidate or ""
     except Exception as exc:  # noqa: BLE001
+        try:
+            from app.voice import voice_registry  # noqa: PLC0415
+
+            voice_registry.mark_fish_failure(exc)
+        except Exception:  # noqa: BLE001
+            pass
         log.debug("分配 Fish 音色失败: %s", exc)
         return ""
 
@@ -565,6 +773,16 @@ async def generate_daily(
         created_posts += posts
         persona_rows.append({**persona, "id": pid})
 
+    # 游客人物的表达层（Speech DNA + 12 组示例）：确定性生成，**0 次 LLM 调用**
+    if persona_rows:
+        try:
+            from app.v3.speech_dna import ensure_persona_dna  # noqa: PLC0415
+
+            dna_stats = await ensure_persona_dna(db, None, persona_rows, use_llm=False)
+            log.info("每日人物表达层：%s", dna_stats)
+        except Exception as exc:  # noqa: BLE001 - 表达层失败不影响信息流
+            log.debug("每日人物表达层补齐失败（忽略）: %s", exc)
+
     # 生活图文 + 纯文字（图库零 key 源，人设硬过滤）
     life_stats = {"image_posts": 0, "text_posts": 0, "skipped_images": 0}
     if persona_rows:
@@ -668,6 +886,84 @@ async def daily_loop(db: Any, llm: Any, *, tick_s: float = 30.0, media_dir: str 
             log.warning("每日世界循环异常: %s", exc)
 
 
+
+
+def _total_entries(group: Any) -> int:
+    """统计一个素材类别的总条数（列表或"分组 → 列表"都支持）。"""
+    if isinstance(group, list):
+        return len([x for x in group if str(x).strip()])
+    if isinstance(group, dict):
+        return sum(
+            len([x for x in items if str(x).strip()])
+            for items in group.values()
+            if isinstance(items, list)
+        )
+    return 0
+
+
+def preview_personas(count: int = 3, language: str = "en", day: str = "") -> list[dict]:
+    """按当前素材池"试捏"几个人物（**不写库、不调 LLM**），用于管理台预览。
+
+    走的是与兜底捏人完全相同的取池逻辑，所以池子改了，这里立刻能看出效果。
+    """
+    lang = str(language or "en").strip().lower() or "en"
+    target = max(1, min(8, int(count or 3)))
+    seed_day = day or day_key()
+    pools = _world_pools()
+    out: list[dict] = []
+    for index in range(target):
+        persona = _fallback_persona(index, f"{seed_day}:preview", lang)
+        out.append(
+            {
+                "nickname": persona.get("nickname"),
+                "gender": persona.get("gender"),
+                "age": persona.get("age"),
+                "country": persona.get("country"),
+                "city": persona.get("city"),
+                "occupation": persona.get("occupation"),
+                "language": persona.get("language"),
+                "interests": list(persona.get("interests") or []),
+                "bio": persona.get("bio"),
+            }
+        )
+    def _total(group: Any) -> int:
+        if isinstance(group, list):
+            return len([x for x in group if str(x).strip()])
+        if isinstance(group, dict):
+            return sum(
+                len([x for x in items if str(x).strip()])
+                for items in group.values()
+                if isinstance(items, list)
+            )
+        return 0
+
+    warnings: list[str] = []
+    name_count = len(_name_entries(pools, lang))
+    if 0 < name_count < target:
+        warnings.append(f"名字池只有 {name_count} 个，预览会出现重复；建议补到 {target} 个以上")
+    occupation_count = _total(pools.get("occupations"))
+    if 0 < occupation_count < target:
+        warnings.append(
+            f"职业池只有 {occupation_count} 个，同一天可能出现重复职业；建议补到 {target} 个以上"
+        )
+    interest_count = _total(pools.get("interests"))
+    if 0 < interest_count < 8:
+        warnings.append(f"兴趣池只有 {interest_count} 个，人物标签会比较雷同；建议补到 8 个以上")
+    return {
+        "day": seed_day,
+        "language": lang,
+        "count": len(out),
+        "warnings": warnings,
+        "pools": {
+            "names": len(_name_entries(pools, lang)),
+            "occupations": _total_entries(pools.get("occupations")),
+            "cities": _total_entries(pools.get("cities")),
+            "interests": _total_entries(pools.get("interests")),
+        },
+        "personas": out,
+    }
+
+
 __all__ = [
     "DAILY_HOUR",
     "DAILY_PERSONAS",
@@ -681,4 +977,5 @@ __all__ = [
     "generate_daily",
     "next_run_at",
     "now_local",
+    "preview_personas",
 ]

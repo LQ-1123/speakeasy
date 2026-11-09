@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#f7f7f5" />
+<title>SpeakEasy · 连接断开</title>
+<style>
+  html,body{margin:0;height:100%;background:#f7f7f5;color:#1f2329;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;box-sizing:border-box;}
+  .logo{font-size:26px;font-weight:700;}
+  .tip{font-size:14px;color:#7a828e;text-align:center;line-height:1.6;max-width:320px;}
+  button{margin-top:8px;padding:10px 26px;border-radius:10px;border:0;background:#3aae7d;color:#fff;
+    font-size:15px;font-weight:600;cursor:pointer;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">SpeakEasy</div>
+    <div class="tip" id="tip">网络断开了，正在尝试重连…</div>
+    <button id="retry">重试</button>
+  </div>
+<script>
+(function () {
+  var API = "__API_BASE__";
+  var KEY = "speakeasy.device_key.v1";
+
+  function deviceKey() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return "";
+      var value = JSON.parse(raw);
+      return typeof value === "string" && value.length >= 8 ? value : "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function targetUrl() {
+    var server = String(API || "").replace(/\/+$/, "");
+    var key = deviceKey();
+    var query = key ? "?se_device_key=" + encodeURIComponent(key) : "";
+    return server + "/" + query + (location.hash || "");
+  }
+
+  document.getElementById("retry").onclick = function () {
+    location.replace(targetUrl());
+  };
+  setTimeout(function () {
+    location.replace(targetUrl());
+  }, 4000);
+})();
+</script>
+</body>
+</html>

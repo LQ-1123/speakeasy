@@ -31,9 +31,8 @@ import {
   X,
 } from "lucide-react";
 
-import { AccentMarketDialog } from "@/components/AccentMarketDialog";
 import { CreatePersonaDialog } from "@/components/CreatePersonaDialog";
-import { LlmSettingsDialog } from "@/components/LlmSettingsDialog";
+import { ConfigLockedDialog } from "@/components/ConfigLockedDialog";
 import { FALLBACK_MODES, FALLBACK_PERSONAS } from "@/lib/fallback";
 import type { ChatMessage, Notice, PersonaPublic } from "@/lib/types";
 import { useConversation } from "@/lib/useConversation";
@@ -115,9 +114,7 @@ export function WeChatApp() {
     cancel: false,
     secs: 0,
   });
-  const [marketOpen, setMarketOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [marketPersona, setMarketPersona] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 清空对话确认弹窗 */
   const [clearOpen, setClearOpen] = useState(false);
@@ -367,21 +364,15 @@ export function WeChatApp() {
       {/* ============================================ 右侧聊天区 */}
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#f5f5f5]">
         <header className="flex h-[54px] shrink-0 items-center gap-2.5 px-5 shadow-[0_0.5px_0_rgba(0,0,0,.07)]">
-          <button
-            type="button"
-            onClick={() => {
-              setMarketPersona(active?.id ?? "");
-              setMarketOpen(true);
-            }}
-            title="换口音 / 编辑角色"
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-[5px] text-[13px] font-medium text-white transition-transform active:scale-[0.97]"
+          <span
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-[5px] text-[13px] font-medium text-white"
             style={{
               backgroundImage: `linear-gradient(145deg, ${pairFor(active?.id ?? "x")[0]}, ${pairFor(active?.id ?? "x")[1]})`,
               boxShadow: "inset 0 0.5px 0 rgba(255,255,255,.22), 0 0.5px 1px rgba(0,0,0,.06)",
             }}
           >
             {(active?.name ?? "?").trim()[0]}
-          </button>
+          </span>
           <span className="text-[14px] font-medium leading-[18px] text-[#191919]">{active?.name ?? "对方"}</span>
           {active?.accent_short && !(active.accent ?? "").startsWith(active.accent_short) && (
             <span className="rounded-[3px] bg-black/[0.055] px-[3.5px] pb-[1px] text-[9px] font-medium leading-[12px] text-[#6e6e6e]">
@@ -634,12 +625,6 @@ export function WeChatApp() {
         </div>
       )}
 
-      <AccentMarketDialog
-        open={marketOpen}
-        onClose={() => setMarketOpen(false)}
-        personaId={marketPersona || active?.id || ""}
-        personaName={active?.name ?? "对方"}
-      />
       <CreatePersonaDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       {deleteOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
@@ -714,12 +699,9 @@ export function WeChatApp() {
         </div>
       )}
 
-      <LlmSettingsDialog
+      <ConfigLockedDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSaved={() => {
-          void fetchLlmInfo();
-        }}
       />
     </div>
   );

@@ -20,7 +20,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # 人物
@@ -45,6 +48,27 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "en-GB-RyanNeural",
         "archetype_id": "uk_male_01",
         "ai_config": {"temperament": "witty", "energy": 0.55},
+        # Speech DNA：表达配置。13 个枚举维度 + 口头禅/禁语/标点习惯/一句补充。
+        # 枚举取值域见 app/v3/speech_dna.py::DNA_ENUMS（不要写 1-10 分）。
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "blunt",
+            "humor_style": "dry",
+            "emotional_expression": "reserved",
+            "vocabulary_style": "precise",
+            "slang_usage": "none",
+            "emoji_usage": "never",
+            "verbosity": "one_line",
+            "conversation_initiative": "low",
+            "self_disclosure": "measured",
+            "social_distance": "neutral",
+            "disagreement_style": "state_plainly",
+            "topic_transition": "abrupt_shift",
+            "signature_phrases": ["right", "honestly"],
+            "banned_phrases": ["So excited to share", "circle back", "reach out"],
+            "punctuation_habit": "full stops only; never an exclamation mark",
+            "note": "Deadpan understatement is the joke; complaining is affection.",
+        },
     },
     {
         "id": "p_annika",
@@ -63,6 +87,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "en-US-AvaMultilingualNeural",
         "archetype_id": "us_multilingual_female_01",
         "ai_config": {"temperament": "calm", "energy": 0.45},
+        "speech_dna": {
+            "sentence_rhythm": "measured",
+            "directness": "diplomatic",
+            "humor_style": "playful",
+            "emotional_expression": "warm",
+            "vocabulary_style": "precise",
+            "slang_usage": "rare",
+            "emoji_usage": "rare",
+            "verbosity": "medium",
+            "conversation_initiative": "high",
+            "self_disclosure": "measured",
+            "social_distance": "familiar",
+            "disagreement_style": "soften",
+            "topic_transition": "gentle_shift",
+            "signature_phrases": ["I'm curious", "wait, really?"],
+            "banned_phrases": ["whatever you think", "it doesn't matter"],
+            "punctuation_habit": "asks a real question, then actually waits",
+            "note": "Curious-interviewer energy: more interested than impressive.",
+        },
     },
     {
         "id": "p_callum",
@@ -81,6 +124,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "en-AU-WilliamMultilingualNeural",
         "archetype_id": "au_male_01",
         "ai_config": {"temperament": "sarcastic", "energy": 0.7},
+        "speech_dna": {
+            "sentence_rhythm": "fragmented",
+            "directness": "direct",
+            "humor_style": "sarcastic",
+            "emotional_expression": "expressive",
+            "vocabulary_style": "street",
+            "slang_usage": "heavy",
+            "emoji_usage": "sometimes",
+            "verbosity": "medium",
+            "conversation_initiative": "high",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "challenge",
+            "topic_transition": "abrupt_shift",
+            "signature_phrases": ["mate", "sweet"],
+            "banned_phrases": ["per my last email", "at your earliest convenience"],
+            "punctuation_habit": "trails off with '...' then lands the joke",
+            "note": "Warm underneath the sarcasm; never punches down.",
+        },
     },
     {
         "id": "p_camila",
@@ -99,6 +161,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "pt-BR-ThalitaMultilingualNeural",
         "archetype_id": "br_female_01",
         "ai_config": {"temperament": "warm", "energy": 0.85},
+        "speech_dna": {
+            "sentence_rhythm": "flowing",
+            "directness": "direct",
+            "humor_style": "playful",
+            "emotional_expression": "expressive",
+            "vocabulary_style": "plain",
+            "slang_usage": "moderate",
+            "emoji_usage": "often",
+            "verbosity": "long",
+            "conversation_initiative": "high",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "state_plainly",
+            "topic_transition": "callback",
+            "signature_phrases": ["gente", "olha"],
+            "banned_phrases": ["tanto faz", "não tenho opinião"],
+            "punctuation_habit": "many commas, sentences run together",
+            "note": "Body-first storyteller; volume goes up when she's excited.",
+        },
     },
     {
         "id": "p_finn",
@@ -117,6 +198,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "en-IE-ConnorNeural",
         "archetype_id": "ie_male_01",
         "ai_config": {"temperament": "poetic", "energy": 0.5},
+        "speech_dna": {
+            "sentence_rhythm": "flowing",
+            "directness": "diplomatic",
+            "humor_style": "dry",
+            "emotional_expression": "warm",
+            "vocabulary_style": "literary",
+            "slang_usage": "rare",
+            "emoji_usage": "never",
+            "verbosity": "long",
+            "conversation_initiative": "medium",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "soften",
+            "topic_transition": "callback",
+            "signature_phrases": ["sure", "to be fair"],
+            "banned_phrases": ["lol", "no cap"],
+            "punctuation_habit": "loves a dash — and an aside",
+            "note": "Talks in small stories; teases the people he likes.",
+        },
     },
     {
         "id": "p_giulia",
@@ -135,6 +235,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "it-IT-IsabellaNeural",
         "archetype_id": "it_female_01",
         "ai_config": {"temperament": "passionate", "energy": 0.8},
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "blunt",
+            "humor_style": "dry",
+            "emotional_expression": "expressive",
+            "vocabulary_style": "plain",
+            "slang_usage": "rare",
+            "emoji_usage": "rare",
+            "verbosity": "medium",
+            "conversation_initiative": "high",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "challenge",
+            "topic_transition": "abrupt_shift",
+            "signature_phrases": ["senti", "ma dai"],
+            "banned_phrases": ["I don't have an opinion", "whatever works"],
+            "punctuation_habit": "short sentences, then one long rant",
+            "note": "No patience for shortcuts; generous with food and opinions.",
+        },
     },
     {
         "id": "p_haruto",
@@ -153,6 +272,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "ja-JP-KeitaNeural",
         "archetype_id": "jp_male_01",
         "ai_config": {"temperament": "quiet", "energy": 0.35},
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "indirect",
+            "humor_style": "none",
+            "emotional_expression": "reserved",
+            "vocabulary_style": "precise",
+            "slang_usage": "none",
+            "emoji_usage": "never",
+            "verbosity": "one_line",
+            "conversation_initiative": "low",
+            "self_disclosure": "guarded",
+            "social_distance": "distant",
+            "disagreement_style": "avoid",
+            "topic_transition": "stay",
+            "signature_phrases": ["まあね", "そうだね"],
+            "banned_phrases": ["Let's chat!", "Yay"],
+            "punctuation_habit": "one short sentence; the subject is often implied",
+            "note": "Silence is part of his reply; notices light and small differences.",
+        },
     },
     {
         "id": "p_ines",
@@ -171,6 +309,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "es-ES-XimenaNeural",
         "archetype_id": "es_female_01",
         "ai_config": {"temperament": "dry", "energy": 0.5},
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "blunt",
+            "humor_style": "dry",
+            "emotional_expression": "reserved",
+            "vocabulary_style": "precise",
+            "slang_usage": "none",
+            "emoji_usage": "never",
+            "verbosity": "short",
+            "conversation_initiative": "medium",
+            "self_disclosure": "guarded",
+            "social_distance": "distant",
+            "disagreement_style": "state_plainly",
+            "topic_transition": "stay",
+            "signature_phrases": ["mira", "en fin"],
+            "banned_phrases": ["¡Qué chévere!", "todo es posible"],
+            "punctuation_habit": "full stops, almost no adjectives",
+            "note": "Architect's economy: says the useful part, then stops.",
+        },
     },
     {
         "id": "p_jiwoo",
@@ -189,6 +346,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "ko-KR-SunHiNeural",
         "archetype_id": "kr_female_01",
         "ai_config": {"temperament": "playful", "energy": 0.65},
+        "speech_dna": {
+            "sentence_rhythm": "fragmented",
+            "directness": "indirect",
+            "humor_style": "playful",
+            "emotional_expression": "expressive",
+            "vocabulary_style": "technical",
+            "slang_usage": "moderate",
+            "emoji_usage": "often",
+            "verbosity": "medium",
+            "conversation_initiative": "high",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "soften",
+            "topic_transition": "callback",
+            "signature_phrases": ["아 진짜", "헐"],
+            "banned_phrases": ["I never make mistakes", "as you wish"],
+            "punctuation_habit": "self-interrupting, then a punchline",
+            "note": "Jokes about her own code before anyone else can.",
+        },
     },
     {
         "id": "p_lin",
@@ -207,6 +383,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "zh-CN-XiaoyiNeural",
         "archetype_id": "cn_female_01",
         "ai_config": {"temperament": "upbeat", "energy": 0.75},
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "direct",
+            "humor_style": "playful",
+            "emotional_expression": "warm",
+            "vocabulary_style": "plain",
+            "slang_usage": "moderate",
+            "emoji_usage": "sometimes",
+            "verbosity": "short",
+            "conversation_initiative": "high",
+            "self_disclosure": "measured",
+            "social_distance": "familiar",
+            "disagreement_style": "state_plainly",
+            "topic_transition": "abrupt_shift",
+            "signature_phrases": ["可以 lah", "真的"],
+            "banned_phrases": ["maybe later", "随便"],
+            "punctuation_habit": "fast and practical, no wasted words",
+            "note": "Gets to the point, then goes to get food.",
+        },
     },
     {
         "id": "p_mei",
@@ -225,6 +420,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "en-US-AvaMultilingualNeural",
         "archetype_id": "us_multilingual_female_01",
         "ai_config": {"temperament": "sleepy", "energy": 0.4},
+        "speech_dna": {
+            "sentence_rhythm": "fragmented",
+            "directness": "indirect",
+            "humor_style": "absurd",
+            "emotional_expression": "warm",
+            "vocabulary_style": "plain",
+            "slang_usage": "rare",
+            "emoji_usage": "sometimes",
+            "verbosity": "short",
+            "conversation_initiative": "low",
+            "self_disclosure": "open",
+            "social_distance": "familiar",
+            "disagreement_style": "avoid",
+            "topic_transition": "callback",
+            "signature_phrases": ["honestly", "anyway"],
+            "banned_phrases": ["I'm an early bird", "circle back"],
+            "punctuation_habit": "understatement, then a weird comparison",
+            "note": "Sleepy deadpan; treats the cat as a coworker.",
+        },
     },
     {
         "id": "p_morten",
@@ -243,6 +457,25 @@ PERSONAS: list[dict[str, Any]] = [
         "voice_id": "de-DE-FlorianMultilingualNeural",
         "archetype_id": "de_male_01",
         "ai_config": {"temperament": "blunt", "energy": 0.55},
+        "speech_dna": {
+            "sentence_rhythm": "clipped",
+            "directness": "blunt",
+            "humor_style": "dry",
+            "emotional_expression": "reserved",
+            "vocabulary_style": "technical",
+            "slang_usage": "none",
+            "emoji_usage": "never",
+            "verbosity": "short",
+            "conversation_initiative": "low",
+            "self_disclosure": "guarded",
+            "social_distance": "neutral",
+            "disagreement_style": "state_plainly",
+            "topic_transition": "abrupt_shift",
+            "signature_phrases": ["na ja", "genau"],
+            "banned_phrases": ["touch base", "super excited"],
+            "punctuation_habit": "periods only; irony delivered flat",
+            "note": "Engineer's report, then one unexpectedly soft sentence.",
+        },
     },
 ]
 
@@ -466,6 +699,242 @@ def voice_for_language(language: str, *, seed: str = "", gender: str = "") -> st
     idx = sum(ord(ch) for ch in f"{seed}:{lang}") % len(voices)
     return voices[idx]
 
+
+# --------------------------------------------------------------------------- #
+# 阶段四：一个角色 = 一个声音（Fish 音色库一人一色）
+# --------------------------------------------------------------------------- #
+#: 口音系统已下线；AI 角色的声音统一从 Fish 音色库按「语言 + 性别」分配。
+#: 该模块只提供**兜底 Edge 声线**（`voice_for_language`），不再决定主音色。
+
+
+def _normalize_voice_pool(pool: Any) -> list[dict[str, Any]]:
+    """把 Fish 音色池（``list_models`` 结果 / 测试假池）规整成统一形状。
+
+    接受 ``[{"id","languages","tags"}]`` 或纯字符串 id 列表；无 id / 重复 id 丢弃。
+    """
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in pool or []:
+        if isinstance(item, str):
+            vid = item.strip()
+            languages: list[str] = []
+            tags: list[str] = []
+        elif isinstance(item, dict):
+            vid = str(item.get("id") or item.get("_id") or "").strip()
+            languages = [
+                str(x).strip().lower() for x in (item.get("languages") or []) if str(x).strip()
+            ]
+            tags = [str(x).strip().lower() for x in (item.get("tags") or []) if str(x).strip()]
+        else:
+            continue
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        entries.append({"id": vid, "languages": languages, "tags": tags})
+    return entries
+
+
+def _pick_voice_for_persona(
+    entries: list[dict[str, Any]],
+    *,
+    language: str,
+    gender: str,
+    used: set[str],
+) -> str:
+    """按优先级挑一个**未被占用**的音色：同语言+同性别 → 同性别 → 任意。"""
+    lang = str(language or "").strip().lower()
+    g = str(gender or "").strip().lower()
+
+    def _free(items: list[dict[str, Any]]) -> list[str]:
+        # 保持传入顺序（素材池在前 → 优先被选中），不再按 id 排序
+        return [item["id"] for item in items if item["id"] not in used]
+
+    tiers: list[list[dict[str, Any]]] = []
+    if lang and g:
+        tiers.append(
+            [e for e in entries if lang in e["languages"] and g in e["tags"]]
+        )
+    if g:
+        tiers.append([e for e in entries if g in e["tags"]])
+    tiers.append(list(entries))
+    for tier in tiers:
+        candidates = _free(tier)
+        if candidates:
+            return candidates[0]
+    return ""
+
+
+def _sync_friend_rows(db: Any, persona_id: str, voice: str) -> int:
+    """把 persona 的音色写回它对应的 friends 行（V2 聊天读 friends.fish_voice_id）。
+
+    兼容两种链接方式：``friends.persona_id`` 直连 + ``friendships.friend_id`` 映射。
+    任何一列不存在都静默跳过，不影响分配主流程。
+    """
+    synced = 0
+    for sql in (
+        "UPDATE friends SET fish_voice_id=? WHERE persona_id=?"
+        " AND COALESCE(fish_voice_id, '') != ?",
+        "UPDATE friends SET fish_voice_id=? WHERE id IN"
+        " (SELECT friend_id FROM friendships WHERE persona_id=?)"
+        " AND COALESCE(fish_voice_id, '') != ?",
+    ):
+        try:
+            with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层共用连接与锁
+                cursor = db.conn.execute(sql, (voice, persona_id, voice))
+                synced += max(0, int(cursor.rowcount or 0))
+        except Exception:  # noqa: BLE001 - 老库缺少列/表时跳过
+            continue
+    return synced
+
+
+async def ensure_persona_voices(
+    db: Any,
+    limit: int = 40,
+    *,
+    pool: Any = None,
+    invalid_refs: Any = (),
+) -> int:
+    """给 AI 人物分配**唯一**的 Fish 音色，并同步到好友行。
+
+    规则（阶段四用户验收：一个角色 = 一个声音）
+
+    - **一人一色**：任何两个 persona 不允许共用同一个 ``fish_voice_id``；
+      历史脏数据里重复的后来者会被重新分配（先出现的保留，不改已有好值）；
+    - **优先级**：同语言+同性别 → 同性别 → 任意（都只从**未被占用**的音色里挑）；
+    - **幂等**：已有非重复值不覆盖，重复调用返回 0；
+    - **安全降级**：Fish 音色池拿不到（无 key / provider 不是 fish / 网络不可达 /
+      池为空）直接返回 0，绝不抛异常；池子不够时宁可留空也不制造重复；
+    - 分配成功立刻写回 ``friends.fish_voice_id``，保证 V2 聊天与动态朗读同声。
+
+    ``pool``：测试/离线注入的音色池（``list_models`` 结果或 id 列表）；
+    为 ``None`` 时才尝试真实读取 Fish 音色库。``invalid_refs``：视为「非专属」
+    的音色 id（例如账号全局默认参考音色），遇到会被重新分配。
+
+    返回本轮成功分配的人物数。
+    """
+    try:
+        entries: list[dict[str, Any]] = []
+        invalid: set[str] = {
+            str(item).strip() for item in (invalid_refs or ()) if str(item).strip()
+        }
+        if pool is not None:
+            entries = _normalize_voice_pool(pool)
+        else:
+            try:
+                from app.config import get_settings  # noqa: PLC0415
+                from app.voice import fish_tts  # noqa: PLC0415
+                from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+
+                cfg = TTSConfigStore(str(get_settings().data_path)).load()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("读取 TTS 配置失败（跳过音色分配）: %s", exc)
+                return 0
+            if str(getattr(cfg, "provider", "")).strip().lower() != "fish":
+                return 0
+            api_key = str(getattr(cfg, "fish_api_key", "") or "").strip()
+            if not api_key:
+                return 0
+            base_url = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "")
+            try:
+                raw: list[dict[str, Any]] = []
+                # 管理台手动加入的「素材池」音色优先
+                try:
+                    from app.admin import voice_pool  # noqa: PLC0415
+
+                    custom = voice_pool.pool_entries()
+                    if custom:
+                        raw.extend(custom)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("读取自定义音色池失败（忽略）: %s", exc)
+                for page in range(1, 4):
+                    rows = await fish_tts.list_models(
+                        api_key=api_key, base_url=base_url, page_number=page, page_size=100
+                    )
+                    raw.extend(rows)
+                    if len(rows) < 100:
+                        break
+            except Exception as exc:  # noqa: BLE001 - Fish 不可达：安全跳过
+                log.warning("Fish 音色库不可用（跳过音色分配）: %s", exc)
+                return 0
+            entries = _normalize_voice_pool(raw)
+            default_ref = str(getattr(cfg, "fish_reference_id", "") or "").strip()
+            if default_ref:
+                invalid.add(default_ref)
+
+        if not entries:
+            return 0
+
+        with db._lock:  # noqa: SLF001 - 只读
+            rows = db.conn.execute(
+                "SELECT id, language, gender, fish_voice_id FROM personas ORDER BY id"
+            ).fetchall()
+        personas = [dict(row) for row in rows]
+
+        used: set[str] = set()
+        owners: dict[str, str] = {}
+        pending: list[dict[str, Any]] = []
+        for row in personas:
+            pid = str(row.get("id") or "").strip()
+            voice = str(row.get("fish_voice_id") or "").strip()
+            if not pid:
+                continue
+            if voice and voice not in invalid and voice not in owners:
+                owners[voice] = pid
+                used.add(voice)
+                continue
+            pending.append(row)  # 空值 / 全局默认音色 / 重复占用 → 需要分配
+
+        cap = int(limit) if limit is not None else 0
+        if cap <= 0:
+            return 0
+        pending = pending[:cap]
+
+        assigned = 0
+        for row in pending:
+            pid = str(row.get("id") or "").strip()
+            if not pid:
+                continue
+            voice = _pick_voice_for_persona(
+                entries,
+                language=str(row.get("language") or ""),
+                gender=str(row.get("gender") or ""),
+                used=used,
+            )
+            if not voice:
+                break  # 池子耗尽：宁可留空，也不允许两人共用一色
+            try:
+                with db._lock, db.conn:  # noqa: SLF001
+                    db.conn.execute(
+                        "UPDATE personas SET fish_voice_id=? WHERE id=?", (voice, pid)
+                    )
+            except Exception as exc:  # noqa: BLE001 - 单个人失败不影响其他人
+                log.warning("分配 %s 的 Fish 音色失败（跳过）: %s", pid, exc)
+                continue
+            used.add(voice)
+            assigned += 1
+
+        # 无论本轮有没有新分配，都把「人物音色 → friends 行」对齐一次：
+        # 好友行是建好友时的快照，重新分配/老库遗留会陈旧，V2 聊天读的就是它。
+        try:
+            with db._lock:  # noqa: SLF001 - 只读
+                final_rows = db.conn.execute(
+                    "SELECT id, fish_voice_id FROM personas"
+                ).fetchall()
+            for row in final_rows:
+                voice = str(row["fish_voice_id"] or "").strip()
+                if voice:
+                    _sync_friend_rows(db, str(row["id"]), voice)
+        except Exception as exc:  # noqa: BLE001 - 同步失败不影响分配结果
+            log.debug("同步 friends.fish_voice_id 失败（忽略）: %s", exc)
+
+        if assigned:
+            log.info("已为 %d 个 AI 人物分配唯一 Fish 音色", assigned)
+        return assigned
+    except Exception as exc:  # noqa: BLE001 - 启动链路必须安全
+        log.warning("ensure_persona_voices 失败（已忽略）: %s: %s", type(exc).__name__, exc)
+        return 0
+
+
 #: 兴趣标签词表（中英文都认），用于用户动态主题匹配
 INTEREST_KEYWORDS: dict[str, tuple[str, ...]] = {
     "coffee": ("coffee", "latte", "cafe", "espresso", "咖啡", "拿铁"),
@@ -516,6 +985,7 @@ __all__ = [
     "POSTS",
     "VOICE_LANG_PREFIX",
     "detect_language",
+    "ensure_persona_voices",
     "persona_by_id",
     "voice_for_language",
 ]

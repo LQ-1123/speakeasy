@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import sqlite3
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -300,7 +301,45 @@ class V3Service:
             ).fetchone()
         profile["post_count"] = int(row["n"]) if row else 0
         profile["posts"] = self.persona_posts(persona_id, user_id=uid, limit=30)
+        profile["relations"] = self._persona_relations(persona_id)
         return profile
+
+    def _persona_relations(self, persona_id: str, *, limit: int = 3) -> list[dict]:
+        """TA 身边最近常出现的人（只给展示用的最小信息，不暴露内部数字）。"""
+        try:
+            from app.v3.life_events import relationship_summary  # noqa: PLC0415
+
+            rows = relationship_summary(self.db, persona_id, limit=limit)
+        except Exception as exc:  # noqa: BLE001 - 关系数据缺失不影响主页
+            log.debug("relationship_summary 失败（忽略）: %s", exc)
+            return []
+        relations: list[dict] = []
+        for rel in rows or []:
+            if not isinstance(rel, dict):
+                continue
+            other = str(rel.get("persona_id") or "").strip()
+            if not other or other == persona_id:
+                continue
+            recent = rel.get("recent_event")
+            relations.append(
+                {
+                    "persona_id": other,
+                    "nickname": str(rel.get("nickname") or ""),
+                    "relation_type": str(rel.get("relation_type") or "friend"),
+                    "closeness": int(rel.get("closeness") or 0),
+                    "tension": int(rel.get("tension") or 0),
+                    "shared_events": int(rel.get("shared_events") or 0),
+                    "recent_event": (
+                        {
+                            "title": str((recent or {}).get("title") or ""),
+                            "event_type": str((recent or {}).get("event_type") or ""),
+                        }
+                        if isinstance(recent, dict)
+                        else None
+                    ),
+                }
+            )
+        return relations[: max(1, limit)]
 
     @staticmethod
     def _persona_public_from_full(persona: dict) -> dict:
@@ -417,6 +456,9 @@ class V3Service:
             "speech_version": speech_version,
             "visibility": "public",
             "created_at": row["created_at"],
+            # 事件驱动动态：可追溯到来源 life event（前端不展示内部 ID，仅做关联）
+            "source_event_id": (row["source_event_id"] if "source_event_id" in row.keys() else "") or "",
+            "post_type": (row["post_type"] if "post_type" in row.keys() else "") or "",
             "like_count": int(row["like_count"] or 0),
             "comment_count": int(comment_count or 0),
             "liked_by_me": bool(liked),
@@ -426,15 +468,40 @@ class V3Service:
                 "id": row["persona_id"], "nickname": "AI 人物", "avatar": "",
                 "is_ai": True, "ai_label": "AI 人物",
             },
-            "comments": [
-                {
-                    "id": c["id"],
-                    "content": c["content"],
-                    "created_at": c["created_at"],
-                    "author": {"type": "user", "nickname": "我", "is_ai": False},
-                }
-                for c in comments
-            ],
+            "comments": [self._comment_public(c, pmap) for c in comments],
+        }
+
+    def _comment_public(self, row: Any, pmap: dict[str, dict]) -> dict:
+        """评论的公开视图：区分「我」与「其他 AI 人物」。
+
+        事件驱动动态会让别的 Persona 也来评论，前端据此显示 AI 头像与 AI 标识。
+        """
+        keys = row.keys()
+        author_type = str(row["author_type"] if "author_type" in keys else "user") or "user"
+        author_pid = str(row["author_persona_id"] if "author_persona_id" in keys else "") or ""
+        if author_type == "persona" and author_pid:
+            author = pmap.get(author_pid) or {}
+            nickname = str(author.get("nickname") or "AI 人物")
+            return {
+                "id": row["id"],
+                "content": row["content"],
+                "created_at": row["created_at"],
+                "author": {
+                    "type": "persona",
+                    "nickname": nickname,
+                    "persona_id": author_pid,
+                    "is_ai": True,
+                    "ai_label": "AI 人物",
+                    "avatar_seed": str(author.get("avatar_seed") or author_pid),
+                    "avatar_style": str(author.get("avatar_style") or ""),
+                    "avatar_options": author.get("avatar_options") or {},
+                },
+            }
+        return {
+            "id": row["id"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+            "author": {"type": "user", "nickname": "我", "is_ai": False},
         }
 
     # ------------------------------------------------------------------ #
@@ -833,76 +900,31 @@ class V3Service:
     # 每人固定一个 Fish 音色（发现/试听/聊天/电话一致）
     # -------------------------------------------------------------- #
     async def assign_fish_voices(self, limit: int = 40) -> int:
-        """给还没有 fish 音色的人物从音色库挑一个（按性别+语言），并同步给好友。"""
+        """给还没有 Fish 音色的人物从**音色库**分配（一人一色），并同步给好友行。
+
+        真正的分配逻辑在 :func:`app.v3.seed_data.ensure_persona_voices`
+        （唯一性、幂等、friends 同步、Fish 不可用安全跳过都在那里），
+        这里只负责调用 + 缓存失效。字符音色必须一人一色，否则「同一个人两个声音」
+        和「两个人一个声音」都会出现。
+        """
         try:
-            from app.config import get_settings  # noqa: PLC0415
-            from app.voice import fish_tts  # noqa: PLC0415
-            from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
+            from app.v3.seed_data import ensure_persona_voices  # noqa: PLC0415
+            from app.voice import voice_registry  # noqa: PLC0415
 
-            cfg = TTSConfigStore(str(get_settings().data_path)).load()
-        except Exception as exc:  # noqa: BLE001
-            log.debug("读取 TTS 配置失败: %s", exc)
+            cfg = voice_registry.load_cfg()
+            if not voice_registry.fish_usable(cfg):
+                # 熔断窗口内（或未配置 Fish）：不联网，直接跳过；人物仍可用 Edge 声线
+                return 0
+            assigned = await ensure_persona_voices(self.db, limit=limit)
+        except Exception as exc:  # noqa: BLE001 - 分配失败不影响启动
+            log.debug("分配 Fish 音色失败: %s", exc)
             return 0
-        if str(getattr(cfg, "provider", "")) != "fish":
-            return 0
-        key = str(getattr(cfg, "fish_api_key", "") or "").strip()
-        if not key:
-            return 0
-
-        with self.lock:
-            rows = self.conn.execute(
-                "SELECT id, language, gender FROM personas"
-                " WHERE COALESCE(fish_voice_id, '') = '' LIMIT ?",
-                (limit,),
-            ).fetchall()
-            used = {
-                str(r[0])
-                for r in self.conn.execute(
-                    "SELECT DISTINCT fish_voice_id FROM personas WHERE COALESCE(fish_voice_id, '') != ''"
-                ).fetchall()
-            }
-        assigned = 0
-        base_url = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "")
-        for row in rows:
-            lang = str(row["language"] or "en")
-            gender = str(row["gender"] or "")
-            # 先同语言+性别；不够不同就用同性别、再不行任意（保证尽量一人一色）
-            plan = [(lang, gender), (lang, gender), ("", gender), ("", gender), ("", ""), ("", "")]
-            ref = ""
-            for lang_arg, gender_arg in plan:
-                try:
-                    candidate = await fish_tts.pick_voice_for(
-                        language=lang_arg,
-                        gender=gender_arg,
-                        api_key=key,
-                        base_url=base_url,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("挑选 Fish 音色失败: %s", exc)
-                    continue
-                if candidate and candidate not in used:
-                    ref = candidate
-                    break
-                ref = ref or candidate or ""
-            if not ref:
-                continue
-            used.add(ref)
-            with self.lock, self.conn:
-                self.conn.execute(
-                    "UPDATE personas SET fish_voice_id=? WHERE id=?", (ref, row["id"])
-                )
-                self.conn.execute(
-                    "UPDATE friends SET fish_voice_id=? WHERE id IN"
-                    " (SELECT friend_id FROM friendships WHERE persona_id=?)",
-                    (ref, row["id"]),
-                )
-            assigned += 1
         if assigned:
             # 人物缓存 / 信息流缓存都含音色，必须立刻失效，否则预热和 speech_version 还是旧值
             self._persona_cache = {"at": 0.0, "rows": []}
             self._feed_cache = {"at": 0.0, "key": "", "items": []}
             log.info("已为 %d 个 AI 人物分配专属 Fish 音色", assigned)
-        return assigned
+        return int(assigned or 0)
 
     def _persona_fish_voice(self, persona: dict) -> str:
         return str((persona or {}).get("fish_voice_id") or "").strip()
@@ -1090,6 +1112,22 @@ class V3Service:
         lang = str(persona.get("language") or "en").strip().lower()
         from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
 
+        # Speech DNA 里的口头禅 → 好友行的 speech_quirks：
+        # 老 UI 的「说话方式」区块读的就是这一列，不填会显示成空块。
+        # 只放真正的手写口头禅；没有就留空（不编造）。
+        quirks: list[str] = []
+        try:
+            raw_dna = persona.get("speech_dna")
+            dna = json.loads(raw_dna) if isinstance(raw_dna, str) and raw_dna.strip() else raw_dna
+            if isinstance(dna, dict):
+                quirks = [
+                    str(x).strip()
+                    for x in (dna.get("signature_phrases") or [])
+                    if str(x).strip()
+                ][:3]
+        except (TypeError, ValueError):
+            quirks = []
+
         return {
             "name": name,
             "avatar_seed": f"{persona['id']}-{name[:2].lower()}",
@@ -1112,8 +1150,14 @@ class V3Service:
             "gender": str(persona.get("gender") or ""),
             "status": status,
             "request_message": "",
+            "speech_quirks": quirks,
             "closeness_level": 1,
             "total_turns": 0,
+            # Persona 生活层的外键：聊天时据此读 Speech DNA / 情绪 / 生活事件
+            "persona_id": str(persona.get("id") or ""),
+            # 最近行为类型（behavior engine 用来避免重复模式）。
+            # 注意：V2 db.create_friend 只对固定几列做 JSON 编码，这里必须传 JSON 字符串。
+            "recent_behaviors": "[]",
         }
 
     def add_friend(self, user_id: str, persona_id: str, *, request_message: str = "") -> dict:
@@ -1697,6 +1741,151 @@ class V3Service:
             "config": self.config.public(),
             "attempts": [dict(r) for r in attempts],
             "events": [dict(r) for r in events],
+        }
+
+    # ------------------------------------------------------------------ #
+    # 只读观测：Persona 生活系统（不含任何用户数据，不触发任何生成）
+    # ------------------------------------------------------------------ #
+    def stats_persona(self) -> dict:
+        """给调参/验收用的只读快照。
+
+        刻意设计为**纯聚合查询**：不调 LLM、不写库、不改状态，
+        因此可以随时打点，也能安全暴露给前端调试面板。
+        """
+        import os  # noqa: PLC0415
+
+        def scalar(sql: str, params: tuple = ()) -> int:
+            try:
+                row = self.conn.execute(sql, params).fetchone()
+                return int(row[0] or 0) if row is not None else 0
+            except sqlite3.Error as exc:  # pragma: no cover - 极端老库
+                log.debug("stats_persona 查询失败（忽略）: %s", exc)
+                return 0
+
+        def grouped(sql: str) -> dict[str, int]:
+            try:
+                rows = self.conn.execute(sql).fetchall()
+            except sqlite3.Error:  # pragma: no cover
+                return {}
+            return {str(r[0] or ""): int(r[1] or 0) for r in rows}
+
+        with self.lock:
+            lifecycle = grouped("SELECT lifecycle, COUNT(*) FROM personas GROUP BY lifecycle")
+            event_status = grouped(
+                "SELECT event_status, COUNT(*) FROM persona_events GROUP BY event_status"
+            )
+            event_type = grouped(
+                "SELECT event_type, COUNT(*) FROM persona_events GROUP BY event_type"
+            )
+            event_source = grouped(
+                "SELECT source_type, COUNT(*) FROM persona_events GROUP BY source_type"
+            )
+            post_type = grouped(
+                "SELECT post_type, COUNT(*) FROM persona_posts"
+                " WHERE COALESCE(post_type,'') <> '' GROUP BY post_type"
+            )
+            avg = self.conn.execute(
+                "SELECT AVG(closeness), MAX(closeness), SUM(shared_events),"
+                " AVG(tension), SUM(CASE WHEN tension >= 3 THEN 1 ELSE 0 END)"
+                " FROM persona_relationships"
+            ).fetchone()
+            emo = self.conn.execute(
+                "SELECT COUNT(*), AVG(json_extract(emotion_state,'$.energy')),"
+                " AVG(json_extract(emotion_state,'$.stress')) FROM personas"
+                " WHERE emotion_state NOT IN ('', '{}')"
+            ).fetchone()
+
+            relationships_total = scalar("SELECT COUNT(*) FROM persona_relationships")
+            relationship_avg = round(float((avg[0] if avg else 0) or 0), 2)
+            relationship_max = int((avg[1] if avg else 0) or 0)
+            shared_events = int((avg[2] if avg else 0) or 0)
+            avg_tension = round(float((avg[3] if avg else 0) or 0), 2)
+            tense_pairs = int((avg[4] if avg else 0) or 0)
+
+            with_emotion = int((emo[0] if emo else 0) or 0)
+            avg_energy = round(float((emo[1] if emo else 0) or 0), 2)
+            avg_stress = round(float((emo[2] if emo else 0) or 0), 2)
+
+        def _env_float(name: str, default: float) -> float:
+            raw = os.getenv(name)
+            try:
+                return float(raw) if raw not in (None, "") else default
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "personas": {
+                "total": scalar("SELECT COUNT(*) FROM personas"),
+                "permanent": int(lifecycle.get("permanent", 0)) + int(lifecycle.get("", 0)),
+                "adopted": int(lifecycle.get("adopted", 0)),
+                "guest": int(lifecycle.get("guest", 0)),
+                "with_speech_dna": scalar(
+                    "SELECT COUNT(*) FROM personas WHERE COALESCE(speech_dna,'') NOT IN ('', '{}')"
+                ),
+                "with_examples": scalar(
+                    "SELECT COUNT(DISTINCT persona_id) FROM persona_example_dialogs"
+                ),
+            },
+            "events": {
+                "total": scalar("SELECT COUNT(*) FROM persona_events"),
+                "planned": int(event_status.get("planned", 0)),
+                "ongoing": int(event_status.get("ongoing", 0)),
+                "completed": int(event_status.get("completed", 0)),
+                "cancelled": int(event_status.get("cancelled", 0)),
+                "by_type": event_type,
+                "by_source": event_source,
+                "evaluated_for_posts": scalar(
+                    "SELECT COUNT(*) FROM persona_events"
+                    " WHERE metadata LIKE '%posts_evaluated_at%'"
+                ),
+            },
+            "posts": {
+                "persona_posts": scalar("SELECT COUNT(*) FROM persona_posts"),
+                "event_driven": scalar(
+                    "SELECT COUNT(*) FROM persona_posts WHERE COALESCE(source_event_id,'') <> ''"
+                ),
+                "by_type": post_type,
+                "last_24h": scalar(
+                    "SELECT COUNT(*) FROM persona_posts"
+                    " WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%S+00:00','now','-1 day')"
+                ),
+            },
+            "comments": {
+                "persona_comments": scalar(
+                    "SELECT COUNT(*) FROM persona_post_comments WHERE author_type='persona'"
+                ),
+                "user_comments": scalar(
+                    "SELECT COUNT(*) FROM persona_post_comments"
+                    " WHERE COALESCE(author_type,'user') <> 'persona'"
+                ),
+            },
+            "relationships": {
+                "total": relationships_total,
+                "avg_closeness": relationship_avg,
+                "deepest": relationship_max,
+                "shared_events": shared_events,
+                "avg_tension": avg_tension,
+                "tense_pairs": tense_pairs,
+            },
+            "emotion": {
+                "with_state": with_emotion,
+                "avg_energy": avg_energy,
+                "avg_stress": avg_stress,
+            },
+            "background": {
+                "life_llm": str(os.getenv("SE_LIFE_LLM", "1")).strip().lower()
+                not in ("0", "false", "no", "off"),
+                "dna_llm": str(os.getenv("SE_DNA_LLM", "1")).strip().lower()
+                not in ("0", "false", "no", "off"),
+                "life_tick_s": _env_float("SE_LIFE_TICK_S", 300.0),
+                "posts_tick_s": _env_float("SE_POSTS_TICK_S", 240.0),
+                "posts_max_events": int(_env_float("SE_POSTS_MAX_EVENTS", 4.0)),
+                "posts_since_hours": _env_float("SE_POSTS_SINCE_HOURS", 6.0),
+                "event_posts_per_day": int(_env_float("SE_EVENT_POSTS_PER_DAY", 8.0)),
+                "comment_backfill": str(os.getenv("SE_COMMENT_BACKFILL", "1")).strip().lower()
+                not in ("0", "false", "no", "off"),
+            },
+            "social": self.config.public(),
         }
 
 

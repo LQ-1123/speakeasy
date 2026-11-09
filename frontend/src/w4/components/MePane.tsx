@@ -7,25 +7,20 @@
 
 import { useState } from "react";
 import {
-  BookMarked,
   ChevronRight,
-  Headphones,
   Languages,
-  LogOut,
-  MessageCircle,
-  Mic,
   Pencil,
-  Settings,
   ShieldCheck,
-  Sparkles,
-  UsersRound,
 } from "lucide-react";
 
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
-import { Avatar, Dialog, Icon } from "../ui";
+import {
+  Avatar,
+  Dialog,
+} from "../ui";
 
 /** 母语候选：中文 + 现有语言（LANGUAGES 只有在练语言，没有 zh） */
 const NATIVE_LANGUAGES: Array<{ code: string; label: string; flag: string }> = [
@@ -102,33 +97,6 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
           <div className="w4-section">
             <div className="w4-section-title">设置</div>
             <div className="w4-cells">
-              <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "llm" })}>
-                <span className="w4-cell-icon">
-                  <Sparkles size={15} strokeWidth={1.8} />
-                </span>
-                <span className="w4-cell-label">对话模型</span>
-                <span className="w4-cell-value">{settings.llm.hasKey ? settings.llm.model : "未配置"}</span>
-                <ChevronRight size={15} className="w4-cell-chevron" />
-              </button>
-              <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "voice" })}>
-                <span className="w4-cell-icon">
-                  <Headphones size={15} strokeWidth={1.8} />
-                </span>
-                <span className="w4-cell-label">声音</span>
-                <span className="w4-cell-value">
-                  {settings.tts.provider === "fish" ? "Fish Audio" : "系统朗读"}
-                  {settings.tts.emotion ? " · 带情绪" : ""}
-                </span>
-                <ChevronRight size={15} className="w4-cell-chevron" />
-              </button>
-              <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "stt" })}>
-                <span className="w4-cell-icon">
-                  <Mic size={15} strokeWidth={1.8} />
-                </span>
-                <span className="w4-cell-label">语音识别</span>
-                <span className="w4-cell-value">{settings.stt.provider === "auto" ? "自动" : settings.stt.model}</span>
-                <ChevronRight size={15} className="w4-cell-chevron" />
-              </button>
               <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "privacy" })}>
                 <span className="w4-cell-icon">
                   <ShieldCheck size={15} strokeWidth={1.8} />

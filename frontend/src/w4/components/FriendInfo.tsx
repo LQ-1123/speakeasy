@@ -1,61 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 /** 会话页右侧的资料卡。 */
 
 import { Clock, MapPin, Sparkles } from "lucide-react";
 
-import { previewVoice, playVoiceUrl, setFriendVoice as apiSetFriendVoice } from "../apiFacade";
 import { CLOSENESS, languageLabel } from "../format";
-import { cachedFishVoices, loadFishVoices, type FishVoice } from "../local/fish";
-import { COSY_VOICES } from "../local/tts";
-import { isLocalMode } from "../local/keys";
 import type { Friend } from "../model";
 import { useApp } from "../store";
-import { Avatar, Icon } from "../ui";
+import { Avatar } from "../ui";
 
 export function FriendInfo({ friend }: { friend: Friend }) {
-  const { expressions, updateFriendVoice, showToast } = useApp();
+  const { expressions } = useApp();
   const fromThisFriend = expressions.filter((e) => e.sourceFriendId === friend.id).length;
-  const [fishVoices, setFishVoices] = useState<FishVoice[]>(() => cachedFishVoices());
-  useEffect(() => {
-    if (!isLocalMode()) return;
-    let alive = true;
-    void loadFishVoices().then((list) => {
-      if (alive) setFishVoices(list);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const currentVoice = friend.voice || (friend.gender === "male" ? "alex" : "anna");
-
-  const switchVoice = async (voice: string) => {
-    if (!voice) return;
-    const ok = await apiSetFriendVoice(friend.id, voice);
-    if (!ok) {
-      showToast("切换失败，稍后再试", "error");
-      return;
-    }
-    const meta = COSY_VOICES.find((v) => v.id === voice);
-    updateFriendVoice(friend.id, voice, meta ? meta.label : "默认");
-    showToast(`已换成 ${meta ? meta.label : voice}`);
-  };
-
-  const previewCurrent = async () => {
-    const url = await previewVoice(
-      "Hi! This is how I sound when we talk.",
-      currentVoice,
-      friend.id,
-    );
-    if (!url) {
-      showToast("试听失败：检查网络或 Key", "error");
-      return;
-    }
-    await playVoiceUrl(url);
-  };
 
   return (
     <>
@@ -116,68 +72,6 @@ export function FriendInfo({ friend }: { friend: Friend }) {
           </div>
         ) : null}
       </div>
-
-      {isLocalMode() ? (
-        <div className="w4-info-section">
-          <div className="w4-info-label">TA 的声音</div>
-          <select
-            className="w4-select"
-            value={friend.voice.startsWith("fish:") || COSY_VOICES.some((v) => v.id === friend.voice) ? friend.voice : ""}
-            onChange={(e) => void switchVoice(e.target.value)}
-            style={{ marginBottom: 8 }}
-          >
-            {!COSY_VOICES.some((v) => v.id === friend.voice) && !friend.voice.startsWith("fish:") ? (
-              <option value="">当前：默认音色</option>
-            ) : null}
-            {fishVoices.length ? (
-              <optgroup label={`Fish 音色库（${fishVoices.length} 个在线音色）`}>
-                {fishVoices.map((v) => (
-                  <option key={v.id} value={`fish:${v.id}`}>
-                    {v.gender === "male" ? "男" : "女"} · {v.label}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            <optgroup label="内置音色">
-              {COSY_VOICES.filter((v) => v.gender === "female").map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="男声">
-              {COSY_VOICES.filter((v) => v.gender === "male").map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-          <div className="w4-chips">
-            <button
-              className="w4-chip"
-              onClick={() => {
-                if (fishVoices.length) {
-                  const v = fishVoices[Math.floor(Math.random() * fishVoices.length)];
-                  void switchVoice(`fish:${v.id}`);
-                  return;
-                }
-                const v = COSY_VOICES[Math.floor(Math.random() * COSY_VOICES.length)];
-                void switchVoice(v.id);
-              }}
-            >
-              随机
-            </button>
-            <button className="w4-chip" onClick={() => void previewCurrent()}>
-              试听
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: "var(--w-text-3)", marginTop: 4 }}>
-            换完发一条消息或打一次电话就能听到。
-            {fishVoices.length === 0 ? "（Fish 音色库需要 App 内使用；浏览器受跨域限制）" : ""}
-          </div>
-        </div>
-      ) : null}
 
       <div className="w4-info-section">
         <div className="w4-info-label">说话方式</div>

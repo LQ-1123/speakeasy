@@ -17,6 +17,10 @@ import os
 # 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
 os.environ.setdefault("SE_TTS_FISH", "0")
 
+# 历史测试会直接调用客户端 /api/v2/settings/*（产品上已锁死，只允许管理端改）。
+# 测试环境放开编辑权限；管理端的锁定行为由 test_admin_config.py 显式验证。
+os.environ.setdefault("ALLOW_KEY_EDIT", "1")
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BACKEND = ROOT / "backend"

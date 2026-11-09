@@ -721,10 +721,12 @@ class PersonaSpawner:
         try:
             from app.config import get_settings as _gs  # noqa: PLC0415
             from app.voice import fish_tts as _ft  # noqa: PLC0415
+            from app.voice import voice_registry as _vr  # noqa: PLC0415
             from app.voice.tts_config import TTSConfigStore as _TCS  # noqa: PLC0415
 
             _cfg = _TCS(str(_gs().data_path)).load()
-            if _cfg.provider == "fish" and _cfg.fish_api_key.strip():
+            # Fish 不可达时不要等网络：新好友先用 Edge 声线兜底（聊天/朗读仍然一致）
+            if _cfg.provider == "fish" and _cfg.fish_api_key.strip() and _vr.fish_usable(_cfg):
                 # 用与头像一致的那份性别去挑音色
                 _gender = _persona_gender
                 data["fish_voice_id"] = await _ft.pick_voice_for(
@@ -732,6 +734,8 @@ class PersonaSpawner:
                     gender=_gender,
                     api_key=_cfg.fish_api_key,
                     base_url=_cfg.fish_base_url,
+                    timeout=5.0,
+                    pages=1,
                 )
         except Exception as _exc:  # noqa: BLE001
             log.debug("分配 Fish 音色失败（用默认）: %s", _exc)

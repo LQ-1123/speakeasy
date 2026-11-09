@@ -90,11 +90,15 @@ async def pick_voice_for(
     pages: int = 3,
     api_key: str = "",
     base_url: str = "https://api.fish.audio",
+    timeout: float = 30.0,
 ) -> str:
     """捏人时随机挑一个 Fish 音色 id（按语言 + 性别过滤）。
 
     过滤不到就放宽性别，再放宽语言，最后返回空串 = 用账号默认音色，
     绝不因为拿不到音色让捏人失败。
+
+    ``timeout`` 是**单页**请求超时：网络不可达时不要拖住启动流程，
+    调用方（每日世界/音色分配）会传一个很小的值并在失败后熔断。
     """
     import random as _random  # noqa: PLC0415
 
@@ -102,7 +106,11 @@ async def pick_voice_for(
     try:
         for page in range(1, max(1, pages) + 1):
             rows = await list_models(
-                api_key=api_key, base_url=base_url, page_number=page, page_size=100
+                api_key=api_key,
+                base_url=base_url,
+                page_number=page,
+                page_size=100,
+                timeout=timeout,
             )
             pool.extend(rows)
             if len(rows) < 100:
@@ -140,6 +148,7 @@ async def list_models(
     page_number: int = 1,
     page_size: int = 100,
     use_cache: bool = True,
+    timeout: float = 30.0,
 ) -> list[dict]:
     """列出平台音色（Fish Official + 自建）。总计 1000+，按页取。
 
@@ -158,7 +167,7 @@ async def list_models(
 
     url = (base_url or "https://api.fish.audio").rstrip("/") + "/model"
     headers = {"Authorization": f"Bearer {key}"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(
             url, headers=headers, params={"page_size": page_size, "page_number": page_number}
         )

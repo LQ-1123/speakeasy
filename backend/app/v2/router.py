@@ -379,12 +379,18 @@ async def get_stt_settings(request: Request) -> dict:
 
 
 def _key_edit_guard() -> None:
-    """线上部署默认锁定 key 编辑（ALLOW_KEY_EDIT=0），避免任何拿到 App 的人改 key。"""
+    """客户端默认**不允许**改模型/密钥：配置统一在管理端（本机 /admin）。
+
+    需要临时放开（开发调试）时设 ``ALLOW_KEY_EDIT=1``。
+    """
     import os as _os
 
-    allow = _os.getenv("ALLOW_KEY_EDIT", "1").strip().lower()
+    allow = _os.getenv("ALLOW_KEY_EDIT", "0").strip().lower()
     if allow not in ("1", "true", "yes", "on"):
-        raise HTTPException(status_code=403, detail="该部署已锁定密钥配置，请在服务器 .env 中修改")
+        raise HTTPException(
+            status_code=403,
+            detail="配置已移至管理端：请在本机打开 http://127.0.0.1:8000/admin 的「模型与密钥」修改",
+        )
 
 
 @router.post("/settings/llm")
@@ -1877,81 +1883,89 @@ async def get_audio(request: Request, filename: str) -> FileResponse:
 
 
 @router.get("/tts/sample")
-async def tts_sample(request: Request, text: str, voice: str = "en-GB-RyanNeural", friend_id: str | None = None) -> FileResponse:
+async def tts_sample(
+    request: Request,
+    text: str,
+    voice: str = "en-GB-RyanNeural",
+    friend_id: str | None = None,
+) -> FileResponse:
+    """试听：**有 friend_id 时必须用该角色的固定音色**（与聊天/朗读/通话一致）。
+
+    ``voice`` 参数只用于没有角色上下文的老调用；AI 角色不再接受外部指定声线，
+    否则「换口音」这类入口会让同一个角色出现多个声音。
+    """
     services = _services(request)
     text = (text or "").strip()[:300]
     if not text:
         raise HTTPException(status_code=422, detail="text 不能为空")
-    # Fish 优先（~1.5s）；失败/未配置再回落 edge（国内可能很慢）
-    try:
-        from app.config import get_settings as _gs  # noqa: PLC0415
-        from app.voice import fish_tts  # noqa: PLC0415
 
-        cfg = _tts_store(request).load()
-        _ref = cfg.fish_reference_id
-        if friend_id:
-            try:
-                _fr = await asyncio.to_thread(services.db.get_friend, friend_id)
-                if _fr and (_fr.get("fish_voice_id") or "").strip():
-                    _ref = _fr["fish_voice_id"].strip()
-            except Exception:  # noqa: BLE001
-                pass
-        if cfg.provider == "fish" and cfg.fish_api_key.strip():
-            audio = await fish_tts.synthesize(
-                text,
-                api_key=cfg.fish_api_key,
-                base_url=cfg.fish_base_url,
-                model=cfg.fish_model,
-                reference_id=_ref or cfg.fish_reference_id,
-                audio_format=cfg.fish_format or "mp3",
-            )
-            if audio:
-                ext = (cfg.fish_format or "mp3").lower()
-                fname = f"sample_{uuid.uuid4().hex[:10]}.{ext}"
-                fpath = os.path.join(services.audio.audio_dir, fname)
-                with open(fpath, "wb") as fh:
-                    fh.write(audio)
-                mime = "audio/mpeg" if ext == "mp3" else "audio/wav"
-                return FileResponse(
-                    fpath,
-                    media_type=mime,
-                    filename=fname,
-                    headers={"Cache-Control": "no-store"},
+    from app.voice import voice_registry  # noqa: PLC0415
+
+    binding = None
+    if friend_id:
+        try:
+            friend = await asyncio.to_thread(services.db.get_friend, friend_id)
+            if friend is not None:
+                binding = await asyncio.to_thread(
+                    voice_registry.binding_for_friend, services.db, friend
                 )
-    except Exception as _fish_exc:  # noqa: BLE001 - 回落 edge
-        import logging as _logging
+        except Exception as exc:  # noqa: BLE001
+            log.debug("tts/sample 解析角色音色失败: %s", exc)
 
-        _logging.getLogger(__name__).warning("tts/sample 走 Fish 失败，回落 edge: %s", _fish_exc)
-    try:
-        path, _ = await services.voice.synth_to_wav(
-            text, voice, out_dir=services.audio.audio_dir
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"合成失败: {exc}") from exc
+    result = await voice_registry.synthesize(
+        {"id": (binding.persona_id if binding else ""), "voice_id": voice},
+        text,
+        binding=binding,
+        edge_engine=services.voice,
+        audio_format="mp3",
+        out_dir=services.audio.audio_dir,
+    )
+    if result is None or not result.data:
+        raise HTTPException(status_code=502, detail="合成失败：Fish 与 Edge 均不可用")
+    fname = f"sample_{uuid.uuid4().hex[:10]}.{result.ext}"
+    fpath = os.path.join(services.audio.audio_dir, fname)
+    with open(fpath, "wb") as fh:  # noqa: PTH123
+        fh.write(result.data)
     return FileResponse(
-        path,
-        media_type="audio/wav",
-        filename=os.path.basename(path),
-        headers={"Cache-Control": "no-store"},
+        fpath,
+        media_type="audio/mpeg" if result.ext == "mp3" else "audio/wav",
+        filename=fname,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Voice": result.token,
+            "X-Voice-Provider": result.provider,
+        },
     )
 
 
 async def _fish_languages(services: Any) -> set[str]:
-    """Fish 账号里实际可用的音色语言（读不到就返回空集 = 不限制）。"""
+    """Fish 账号里实际可用的音色语言（读不到就返回空集 = 不限制）。
+
+    Fish 不可达时**立刻返回空集**：这个函数在「偶遇」链路上，每次等 30 秒超时
+    会让用户点一下就转圈半分钟。
+    """
     try:
         from app.config import get_settings as _gs  # noqa: PLC0415
         from app.voice import fish_tts as _ft  # noqa: PLC0415
+        from app.voice import voice_registry as _vr  # noqa: PLC0415
         from app.voice.tts_config import TTSConfigStore as _TCS  # noqa: PLC0415
 
         cfg = _TCS(str(_gs().data_path)).load()
         if cfg.provider != "fish" or not cfg.fish_api_key.strip():
             return set()
-        rows = await _ft.list_models(
-            api_key=cfg.fish_api_key,
-            base_url=cfg.fish_base_url,
-            page_number=1,
-            page_size=100,
-        )
+        if not _vr.fish_usable(cfg):
+            return set()  # 熔断窗口内：不再尝试联网
+        try:
+            rows = await _ft.list_models(
+                api_key=cfg.fish_api_key,
+                base_url=cfg.fish_base_url,
+                page_number=1,
+                page_size=100,
+                timeout=5.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _vr.mark_fish_failure(exc)
+            raise
         langs: set[str] = set()
         for r in rows:
             for lang in r.get("languages") or []:

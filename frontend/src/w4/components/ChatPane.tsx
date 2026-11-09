@@ -32,13 +32,11 @@ import {
 
 import { clockTime, dayOf } from "../format";
 import type { Friend, Message, Route } from "../model";
-import { API_ORIGIN, type ArchetypeLite } from "../api";
+import { API_ORIGIN } from "../api";
 import {
   callOpening,
   callTurnStream,
   callWarmup,
-  changeFriendVoice,
-  loadArchetypes,
   playVoiceUrl,
   synthesizeVoice,
   translate as apiTranslate,
@@ -110,7 +108,6 @@ export function ChatPane({
     translateAll,
     showToast,
     settings,
-    updateFriendVoice,
     deleteFriend,
     callSummary,
   } = useApp();
@@ -161,9 +158,6 @@ export function ChatPane({
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [pendingUrl, setPendingUrl] = useState("");
   const [infoOpen, setInfoOpen] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [voiceList, setVoiceList] = useState<ArchetypeLite[]>([]);
-  const [voiceBusy, setVoiceBusy] = useState(false);
   /* ---- 通话中的真实回合 ---- */
   const [callTurns, setCallTurns] = useState(0);
   const [callUserText, setCallUserText] = useState("");
@@ -448,30 +442,6 @@ export function ChatPane({
       void sendVoiceBlob(friendId, blob, ms, { openTranscript: transcribe });
     };
     rec.stop();
-  };
-
-  const openVoicePicker = async () => {
-    if (!friend) return;
-    setVoiceOpen(true);
-    const all = await loadArchetypes();
-    const lang = (friend.language || "en").toLowerCase();
-    const same = all.filter((a) => !a.native_lang || a.native_lang === lang);
-    /* 同语言的口音优先；没有就退回全部（后端会校验） */
-    setVoiceList(same.length ? same : all);
-  };
-
-  const pickVoice = async (a: ArchetypeLite) => {
-    if (!friend) return;
-    setVoiceBusy(true);
-    const ok = await changeFriendVoice(friend.id, a.archetype_id);
-    setVoiceBusy(false);
-    if (!ok) {
-      showToast("换口音失败，稍后再试", "error");
-      return;
-    }
-    updateFriendVoice(friend.id, a.voice_id, a.accent_label || a.display_name);
-    setVoiceOpen(false);
-    showToast(`已换成 ${a.accent_label || a.display_name}`, "success");
   };
 
   /** 顺序播放后端逐句下发的语音；播完自动继续听用户说 */
@@ -1532,8 +1502,8 @@ export function ChatPane({
               </div>
               <div className="w4-info-section">
                 <div className="w4-info-label">TA 的声音</div>
-                <button className="w4-voice-card" onClick={() => void openVoicePicker()}>
-                  <span className="w4-voice-card-icon">
+                <div className="w4-voice-readonly">
+                  <span className="w4-voice-readonly-icon">
                     <Mic size={14} />
                   </span>
                   <span style={{ flex: 1, minWidth: 0 }}>
@@ -1541,11 +1511,10 @@ export function ChatPane({
                       {friend.voiceLabel}
                     </span>
                     <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>
-                      "真人声线 · 可换"
+                      每个角色一个声音 · 系统自动分配
                     </span>
                   </span>
-                  <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>换</span>
-                </button>
+                </div>
               </div>
               <div className="w4-info-section">
                 <button
@@ -1606,36 +1575,6 @@ export function ChatPane({
       ) : null}
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
-
-      {voiceOpen ? (
-        <div className="w4-voice-modal" role="dialog" aria-label="换个口音">
-          <div className="w4-voice-modal-card">
-            <div className="w4-voice-modal-head">
-              <span>给 {friend.name} 换个口音</span>
-              <button className="w4-icon-btn" onClick={() => setVoiceOpen(false)} aria-label="关闭">
-                <X size={16} strokeWidth={2} />
-              </button>
-            </div>
-            <div className="w4-voice-modal-list">
-              {voiceList.map((a) => (
-                <button
-                  key={a.archetype_id}
-                  className="w4-voice-modal-item"
-                  disabled={voiceBusy}
-                  onClick={() => void pickVoice(a)}
-                >
-                  <span className="w4-voice-modal-name">{a.accent_label || a.display_name}</span>
-                  <span className="w4-voice-modal-meta">{a.country || a.native_lang}</span>
-                </button>
-              ))}
-              {voiceList.length === 0 ? (
-                <div className="w4-voice-modal-empty">没有可选的口音</div>
-              ) : null}
-            </div>
-            <div className="w4-voice-modal-hint">换口音只改 TA 的声音和说话节奏，聊天记录不变。</div>
-          </div>
-        </div>
-      ) : null}
 
       {confirmDelete ? (
         <Confirm

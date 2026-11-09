@@ -10,13 +10,19 @@ if (keystorePropsFile.exists()) {
 
 android {
     namespace "com.speakeasy.app"
+    buildFeatures {
+        buildConfig true
+    }
+    compileOptions {
+        encoding "UTF-8"
+    }
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.speakeasy.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 300
-        versionName "3.0.0"
+        versionCode 304
+        versionName "3.0.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -72,3 +78,7 @@ try {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
 
+
+tasks.withType(JavaCompile) {
+    options.encoding = "UTF-8"
+}

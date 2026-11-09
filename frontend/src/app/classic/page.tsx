@@ -1,16 +1,15 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, Settings2, X } from "lucide-react";
 
 import { Composer } from "@/components/Composer";
 import { ConversationView } from "@/components/ConversationView";
-import { LlmSettingsDialog } from "@/components/LlmSettingsDialog";
+import { ConfigLockedDialog } from "@/components/ConfigLockedDialog";
 import { PersonaPanel } from "@/components/PersonaPanel";
 import { SuggestionPanel } from "@/components/SuggestionPanel";
 import { TopBar } from "@/components/TopBar";
 import { VoiceCloneDialog } from "@/components/VoiceCloneDialog";
-import { AccentMarketDialog } from "@/components/AccentMarketDialog";
 import { CreatePersonaDialog } from "@/components/CreatePersonaDialog";
 import { Waveform, type WaveMode } from "@/components/Waveform";
 import { fetchHealth, fetchPersonas } from "@/lib/api";
@@ -30,7 +29,6 @@ export default function Page() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsBannerDismissed, setSettingsBannerDismissed] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [marketOpen, setMarketOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
   const {
@@ -165,7 +163,6 @@ export default function Page() {
         firstAudioMs={firstAudioMs}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenVoiceClone={() => setVoiceOpen(true)}
-        onOpenAccentMarket={() => setMarketOpen(true)}
         onOpenCreatePersona={() => setCreateOpen(true)}
       />
 
@@ -363,14 +360,10 @@ export default function Page() {
           </div>
         </div>
       )}
-      {/* --------------------------------------------------- LLM 设置弹窗 */}
-      <LlmSettingsDialog
+      {/* --------------------------------------------------- 配置已移至管理端 */}
+      <ConfigLockedDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSaved={() => {
-          setSettingsBannerDismissed(false);
-          void fetchHealth();
-        }}
       />
 
       {/* --------------------------------------------------- 声音克隆弹窗 */}
@@ -379,18 +372,6 @@ export default function Page() {
         onClose={() => setVoiceOpen(false)}
         personaId={activePersonaId}
         personaName={activePersona?.name ?? "对方"}
-      />
-
-      {/* --------------------------------------------------- 口音市场 */}
-      <AccentMarketDialog
-        open={marketOpen}
-        onClose={() => setMarketOpen(false)}
-        personaId={activePersonaId}
-        personaName={activePersona?.name ?? "对方"}
-        onApplied={() => {
-          void fetchHealth();
-          void reloadPersonas();
-        }}
       />
 
       {/* --------------------------------------------------- 创建角色 */}

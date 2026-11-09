@@ -1,48 +1,35 @@
-"use client";
+﻿"use client";
 
 /**
- * 设置。分五组：对话模型 / 声音 / 语音识别 / 提醒 / 隐私与关于。
- * 每一组都只做真实存在的事，没有「敬请期待」。
+ * 设置。只保留 提醒 / 隐私与数据 / 关于。
+ *
+ * 模型、密钥、语音识别/合成配置已全部收进本机管理端（/admin），客户端不再提供
+ * 任何配置入口，避免零基础客户误改后整个应用不可用。
  */
 
-import { useEffect, useState } from "react";
 import {
-  CheckCircle2,
+  useState,
+} from "react";
+import {
   ChevronLeft,
-  CircleAlert,
-  Copy,
-  KeyRound,
-  Mic,
-  Play,
-  Sparkles,
-  Volume2,
 } from "lucide-react";
 
-import {
-  loadDeepgramSettings,
-  saveDeepgramKey,
-  saveLlm,
-  saveStt,
-  saveTts,
-  ttsSampleUrl,
-  type DeepgramSettings,
-} from "../api";
+
 import { playMessageSound, playRequestSound } from "../notify";
 
-import { isLocalMode, loadKeys, saveKeys } from "../local/keys";
-import { exportLocalData, importLocalData, playVoiceUrl, synthesizeVoice, wipeLocalData } from "../apiFacade";
 import type { Route } from "../model";
-import { useApp, type Settings } from "../store";
-import { Icon, Segmented, Switch } from "../ui";
+import {
+  useApp,
+  type Settings,
+} from "../store";
+import {
+  Switch,
+} from "../ui";
 
 const SECTIONS = [
-  { key: "llm", label: "对话模型" },
-  { key: "voice", label: "声音" },
-  { key: "stt", label: "语音识别" },
   { key: "notify", label: "提醒" },
   { key: "privacy", label: "隐私与数据" },
   { key: "about", label: "关于" },
-  { key: "local", label: "本地与密钥" },
 ] as const;
 
 export function SettingsPane({
@@ -53,12 +40,11 @@ export function SettingsPane({
   navigate: (r: Route) => void;
 }) {
   const { settings, updateSettings, showToast } = useApp();
-  const local = isLocalMode();
-  const sections = local
-    ? SECTIONS.filter((s) => s.key === "local" || s.key === "notify" || s.key === "privacy" || s.key === "about")
-    : SECTIONS;
-  const [active, setActive] = useState<string>(section ?? (local ? "local" : "llm"));
-  const [playing, setPlaying] = useState(false);
+  const sections = SECTIONS;
+  const initialSection = section && SECTIONS.some((s) => s.key === section)
+    ? section
+    : "notify";
+  const [active, setActive] = useState<string>(initialSection);
 
   return (
     <div className="w4-main">
@@ -93,12 +79,6 @@ export function SettingsPane({
               </select>
             </div>
 
-            {active === "llm" ? <LlmSection settings={settings} update={updateSettings} toast={showToast} /> : null}
-            {active === "local" ? <LocalKeysSection toast={showToast} /> : null}
-            {active === "voice" ? (
-              <VoiceSection settings={settings} update={updateSettings} toast={showToast} playing={playing} setPlaying={setPlaying} />
-            ) : null}
-            {active === "stt" ? <SttSection settings={settings} update={updateSettings} toast={showToast} /> : null}
             {active === "notify" ? <NotifySection settings={settings} update={updateSettings} /> : null}
             {active === "privacy" ? <PrivacySection toast={showToast} /> : null}
             {active === "about" ? <AboutSection /> : null}
@@ -106,410 +86,6 @@ export function SettingsPane({
         </div>
       </div>
     </div>
-  );
-}
-
-/* ---------------------------------------------------------------- 对话模型 */
-
-const PRESETS = [
-  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", note: "便宜、中文好" },
-  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", note: "最稳，略贵" },
-  { id: "siliconflow", name: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-72B-Instruct", note: "国内直连" },
-  { id: "custom", name: "自定义", baseUrl: "", model: "", note: "任何 OpenAI 兼容接口" },
-];
-
-function LlmSection({
-  settings,
-  update,
-  toast,
-}: {
-  settings: Settings;
-  update: (p: Partial<Settings>) => void;
-  toast: (t: string, tone?: "success" | "error") => void;
-}) {
-  const [preset, setPreset] = useState(settings.llm.preset);
-  const [baseUrl, setBaseUrl] = useState(settings.llm.baseUrl);
-  const [model, setModel] = useState(settings.llm.model);
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  /* store 里的设置是异步从后端拉回来的：到了要同步进输入框，
-     否则页面永远停在 mock 的 deepseek-flash */
-  useEffect(() => {
-    setBaseUrl(settings.llm.baseUrl);
-    setModel(settings.llm.model);
-  }, [settings.llm.baseUrl, settings.llm.model]);
-
-  const applyPreset = (id: string) => {
-    setPreset(id);
-    const p = PRESETS.find((x) => x.id === id);
-    if (p && id !== "custom") {
-      setBaseUrl(p.baseUrl);
-      setModel(p.model);
-    }
-  };
-
-  const save = async () => {
-    setBusy(true);
-    const res = await saveLlm({
-      base_url: baseUrl.trim(),
-      model: model.trim(),
-      api_key: key.trim() || undefined,
-    });
-    setBusy(false);
-    if (!res) {
-      toast("保存失败：请检查地址和 Key", "error");
-      return;
-    }
-    const cfg = (res as Record<string, any>).config ?? {};
-    update({
-      llm: {
-        preset,
-        baseUrl: String(cfg.base_url ?? baseUrl),
-        model: String(cfg.model ?? model),
-        keyMasked: String(cfg.api_key_masked ?? settings.llm.keyMasked),
-        hasKey: Boolean(cfg.api_key_set ?? settings.llm.hasKey),
-      },
-    });
-    setKey("");
-    toast("已保存，下一条消息就会用新的模型", "success");
-  };
-
-  return (
-    <section>
-      <SectionTitle title="对话模型" desc="好友的性格、记忆和回复都由它生成。" />
-
-      <div className="w4-field">
-        <div className="w4-field-label">用哪家</div>
-        <div className="w4-provider-grid">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              className={`w4-provider ${preset === p.id ? "on" : ""}`}
-              onClick={() => applyPreset(p.id)}
-            >
-              <span className="w4-provider-name">{p.name}</span>
-              <span className="w4-provider-note">{p.note}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="w4-field">
-        <div className="w4-field-label">服务地址</div>
-        <input className="w4-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://…/v1" />
-      </div>
-      <div className="w4-field">
-        <div className="w4-field-label">模型名</div>
-        <input className="w4-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-flash" />
-      </div>
-      <div className="w4-field">
-        <div className="w4-field-label">API Key</div>
-        <input
-          className="w4-input"
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder={settings.llm.hasKey ? settings.llm.keyMasked : "粘贴你的 Key"}
-          autoComplete="off"
-        />
-        <div className="w4-field-hint">
-          <KeyRound size={11} style={{ verticalAlign: -1 }} /> Key 只存在这台设备上，不会上传到任何服务器。
-        </div>
-      </div>
-
-      <div className="w4-save-row">
-        <button className="w4-btn is-primary" onClick={save} disabled={busy}>
-          {busy ? "正在验证…" : "保存并验证"}
-        </button>
-        <span className={`w4-status ${settings.llm.hasKey ? "ok" : "warn"}`}>
-          {settings.llm.hasKey ? (
-            <>
-              <CheckCircle2 size={12} /> 已配置
-            </>
-          ) : (
-            <>
-              <CircleAlert size={12} /> 未配置
-            </>
-          )}
-        </span>
-      </div>
-    </section>
-  );
-}
-
-
-let _waCtx: AudioContext | null = null;
-async function playPreviewAudio(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return false;
-    const buf = await res.arrayBuffer();
-    _waCtx = _waCtx ?? new AudioContext();
-    if (_waCtx.state === "suspended") await _waCtx.resume();
-    const audio = await _waCtx.decodeAudioData(buf);
-    const src = _waCtx.createBufferSource();
-    src.buffer = audio;
-    src.connect(_waCtx.destination);
-    src.start();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const PREVIEW_TEXT = "Morning! Right — the flat white guy. I remember you.";
-
-/* ---------------------------------------------------------------- 声音 */
-
-function VoiceSection({
-  settings,
-  update,
-  toast,
-  playing,
-  setPlaying,
-}: {
-  settings: Settings;
-  update: (p: Partial<Settings>) => void;
-  toast: (t: string, tone?: "success" | "error") => void;
-  playing: boolean;
-  setPlaying: (v: boolean) => void;
-}) {
-  const [fishKey, setFishKey] = useState("");
-  const [savingKey, setSavingKey] = useState(false);
-
-  const saveKey = async () => {
-    if (!fishKey.trim()) {
-      toast("先把 Fish Audio 的 Key 粘进来", "error");
-      return;
-    }
-    setSavingKey(true);
-    const res = await saveTts({ api_key: fishKey.trim() });
-    setSavingKey(false);
-    if (!res) {
-      toast("保存失败，Key 可能不对", "error");
-      return;
-    }
-    update({ tts: { ...settings.tts, hasKey: true, keyMasked: "已保存" } });
-    setFishKey("");
-    toast("密钥已保存", "success");
-  };
-
-  return (
-    <section>
-      <SectionTitle title="声音" desc="好友说话用哪种合成方式，以及要不要带情绪。" />
-
-      <div className="w4-field">
-        <div className="w4-field-label">合成方式</div>
-        <Segmented
-          value={settings.tts.provider}
-          options={[
-            { value: "fish", label: "Fish Audio（自然）" },
-            { value: "system", label: "系统朗读（免费）" },
-          ]}
-          onChange={(v) => update({ tts: { ...settings.tts, provider: v } })}
-        />
-        <div className="w4-field-hint">
-          Fish Audio 会带语气和停顿，听起来像真人；系统朗读稳定但偏机械。
-        </div>
-      </div>
-
-      {settings.tts.provider === "fish" ? (
-        <>
-          <div className="w4-field">
-            <div className="w4-field-label">服务密钥</div>
-            <input
-              className="w4-input"
-              type="password"
-              value={fishKey}
-              onChange={(e) => setFishKey(e.target.value)}
-              placeholder={settings.tts.hasKey ? settings.tts.keyMasked : "服务器已托管，如需替换可粘贴新 Key"}
-            />
-            <div className="w4-field-hint" style={{ marginTop: 8 }}>
-              <button className="w4-btn" onClick={() => void saveKey()} disabled={savingKey}>
-                {savingKey ? "保存中…" : "保存密钥"}
-              </button>
-            </div>
-          </div>
-          <div className="w4-settings-row">
-            <div>
-              <div className="w4-settings-row-title">带情绪</div>
-              <div className="w4-settings-row-desc">好友会根据聊天内容调整语气，偶尔叹气、笑一下。</div>
-            </div>
-            <Switch
-              on={settings.tts.emotion}
-              onChange={(v) => update({ tts: { ...settings.tts, emotion: v } })}
-            />
-          </div>
-        </>
-      ) : null}
-
-      <div className="w4-field" style={{ marginTop: 18 }}>
-        <div className="w4-field-label">试听</div>
-        <div className="w4-try-card">
-          <button
-            className="w4-try-play"
-            aria-label="试听"
-            onClick={async () => {
-              if (playing) {
-                setPlaying(false);
-                return;
-              }
-              setPlaying(true);
-              const ok = await playPreviewAudio(ttsSampleUrl(PREVIEW_TEXT, "en-GB-RyanNeural"));
-              if (!ok) toast("试听失败，请检查网络或声音配置", "error");
-              setPlaying(false);
-            }}
-          >
-            <Play size={14} fill="currentColor" strokeWidth={0} />
-          </button>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="w4-try-text">“Morning! Right — the flat white guy. I remember you.”</div>
-            <div className="w4-try-meta">{playing ? "正在播放 · Callum · 布里斯托" : "Callum · 布里斯托口音 · 0:04"}</div>
-          </div>
-          <Volume2 size={15} style={{ color: "var(--w-text-3)" }} />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ---------------------------------------------------------------- 语音识别 */
-
-function SttSection({
-  settings,
-  update,
-  toast,
-}: {
-  settings: Settings;
-  update: (p: Partial<Settings>) => void;
-  toast: (t: string, tone?: "success" | "error") => void;
-}) {
-  const [sttKey, setSttKey] = useState("");
-  const [savingKey, setSavingKey] = useState(false);
-  const [dgKey, setDgKey] = useState("");
-  const [savingDg, setSavingDg] = useState(false);
-  const [dg, setDg] = useState<DeepgramSettings | null>(null);
-
-  useEffect(() => {
-    void loadDeepgramSettings().then((v) => setDg(v));
-  }, []);
-
-  const saveDeepgram = async () => {
-    if (!dgKey.trim()) {
-      toast("先粘贴 Deepgram Key", "error");
-      return;
-    }
-    setSavingDg(true);
-    const res = await saveDeepgramKey(dgKey.trim());
-    setSavingDg(false);
-    if (!res) {
-      toast("保存失败，请检查 Key", "error");
-      return;
-    }
-    setDg(res);
-    setDgKey("");
-    toast("流式识别密钥已保存", "success");
-  };
-
-  const saveKey = async () => {
-    if (!sttKey.trim()) {
-      toast("先粘贴云端识别的 Key", "error");
-      return;
-    }
-    setSavingKey(true);
-    const res = await saveStt({ api_key: sttKey.trim() });
-    setSavingKey(false);
-    if (!res) {
-      toast("保存失败，Key 可能不对", "error");
-      return;
-    }
-    update({ stt: { ...settings.stt, hasKey: true, keyMasked: "已保存" } });
-    setSttKey("");
-    toast("密钥已保存", "success");
-  };
-
-  return (
-    <section>
-      <SectionTitle title="语音识别" desc="你按住说话时，把声音转成文字用哪套服务。" />
-      <div className="w4-field">
-        <div className="w4-field-label">识别方式</div>
-        <Segmented
-          value={settings.stt.provider}
-          options={[
-            { value: "auto", label: "自动" },
-            { value: "local", label: "本地" },
-            { value: "siliconflow", label: "云端" },
-          ]}
-          onChange={(v) => update({ stt: { ...settings.stt, provider: v } })}
-        />
-        <div className="w4-field-hint">
-          自动：能用云端就用云端（更快），失败时回退到本地。本地模式不联网，稍慢一点。
-        </div>
-      </div>
-
-      {settings.stt.provider !== "local" ? (
-        <div className="w4-field">
-          <div className="w4-field-label">云端密钥</div>
-          <input
-            className="w4-input"
-            type="password"
-            value={sttKey}
-            onChange={(e) => setSttKey(e.target.value)}
-            placeholder={settings.stt.hasKey ? settings.stt.keyMasked : "硅基流动的 API Key"}
-          />
-          <div className="w4-field-hint">用 SenseVoiceSmall，中文和几种小语种都识别得不错。</div>
-          <div className="w4-field-hint" style={{ marginTop: 8 }}>
-            <button className="w4-btn" onClick={() => void saveKey()} disabled={savingKey}>
-              {savingKey ? "保存中…" : "保存密钥"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="w4-field">
-        <div className="w4-field-label">流式识别（通话用）</div>
-        <input
-          className="w4-input"
-          type="password"
-          value={dgKey}
-          onChange={(e) => setDgKey(e.target.value)}
-          placeholder={dg?.configured ? dg.keyMasked : "Deepgram API Key"}
-        />
-        <div className="w4-field-hint">
-          通话时边说边识别，响应更快。不填写则自动回退到上面的云端识别。
-          {dg?.configured
-            ? `（当前：${dg.source === "app" ? "已在 App 里配置" : "服务器环境变量"}）`
-            : ""}
-        </div>
-        <div className="w4-field-hint" style={{ marginTop: 8 }}>
-          <button className="w4-btn" onClick={() => void saveDeepgram()} disabled={savingDg}>
-            {savingDg ? "保存中…" : "保存 Key"}
-          </button>
-        </div>
-      </div>
-
-      <div className="w4-field">
-        <div className="w4-field-label">识别语言</div>
-        <select className="w4-select">
-          <option>自动判断</option>
-          <option>英语</option>
-          <option>日语</option>
-          <option>韩语</option>
-          <option>西班牙语</option>
-        </select>
-      </div>
-
-      <div className="w4-save-row">
-        <button className="w4-btn is-primary" onClick={() => toast("设置已保存", "success")}>
-          保存
-        </button>
-        <button className="w4-btn" onClick={() => toast("开始录音后说一句话，就能看到识别结果", "success")}>
-          <Mic size={14} />
-          录一句试试
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -638,105 +214,3 @@ function SectionTitle({ title, desc }: { title: string; desc: string }) {
 }
 
 /** 本地模式：所有云端 key 只保存在本机，不经过任何服务器 */
-function LocalKeysSection({ toast }: { toast: (m: string, tone?: "success" | "error" | "default") => void }) {
-  const [keys, setKeys] = useState(() => loadKeys());
-  const bind = (field: keyof typeof keys) => ({
-    value: keys[field],
-    onChange: (e: { target: { value: string } }) => setKeys({ ...keys, [field]: e.target.value }),
-  });
-  return (
-    <div className="w4-settings-section">
-      <div className="w4-field-label">DeepSeek Key（对话）</div>
-      <input className="w4-input" {...bind("llmKey")} placeholder="sk-..." />
-      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish Audio Key（在线音色库，App 内可用）</div>
-      <input className="w4-input" {...bind("fishKey")} placeholder="sk-fish-..." />
-      <div className="w4-field-label" style={{ marginTop: 12 }}>Fish 音色 Reference ID（可选）</div>
-      <input className="w4-input" {...bind("fishRef")} placeholder="留空则用默认音色" />
-      <div className="w4-field-label" style={{ marginTop: 12 }}>SiliconFlow Key（语音识别 + 语音合成）</div>
-      <input className="w4-input" {...bind("sttKey")} placeholder="sk-..." />
-      <button
-        className="w4-btn is-primary"
-        style={{ marginTop: 16 }}
-        onClick={() => {
-          saveKeys(keys);
-          toast("已保存到本机");
-        }}
-      >
-        保存到本机
-      </button>
-      <button
-        className="w4-btn"
-        style={{ marginTop: 10, marginLeft: 8 }}
-        onClick={() =>
-          void (async () => {
-            toast("正在合成测试语音…");
-            const url = await synthesizeVoice("Hello! This is a voice test. Can you hear me clearly?");
-            if (!url) {
-              toast("合成失败：检查 SiliconFlow Key 和网络", "error");
-              return;
-            }
-            const ok = await playVoiceUrl(url);
-            toast(ok ? "开始播放测试语音" : "播放失败：手机音频权限/静音检查", ok ? "success" : "error");
-          })()
-        }
-      >
-        测试声音
-      </button>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-        <button
-          className="w4-btn"
-          onClick={() =>
-            void (async () => {
-              const data = await exportLocalData();
-              if (!data) return toast("导出失败", "error");
-              const blob = new Blob([data], { type: "application/json" });
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(blob);
-              a.download = `speakeasy-backup-${new Date().toISOString().slice(0, 10)}.json`;
-              a.click();
-              URL.revokeObjectURL(a.href);
-              toast("备份已导出");
-            })()
-          }
-        >
-          导出数据
-        </button>
-        <label className="w4-btn" style={{ cursor: "pointer" }}>
-          导入数据
-          <input
-            type="file"
-            accept="application/json,.json"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const file = e.target.files && e.target.files[0];
-              if (!file) return;
-              void (async () => {
-                const text = await file.text();
-                const ok = await importLocalData(text);
-                toast(ok ? "导入成功，正在刷新…" : "导入失败：不是有效的备份文件", ok ? "success" : "error");
-                if (ok) window.setTimeout(() => window.location.reload(), 800);
-              })();
-            }}
-          />
-        </label>
-        <button
-          className="w4-btn"
-          onClick={() =>
-            void (async () => {
-              if (!window.confirm("清空本机所有好友、聊天、动态？此操作不可撤销。")) return;
-              await wipeLocalData();
-              toast("已清空，正在刷新…");
-              window.setTimeout(() => window.location.reload(), 800);
-            })()
-          }
-        >
-          清空数据
-        </button>
-      </div>
-      <p className="w4-hint" style={{ marginTop: 10 }}>
-        Key 只存在这台手机上，用于直接调用云端服务；不会上传到任何服务器。
-        数据也只在本机，换手机时用「导出数据」备份、新手机「导入数据」。
-      </p>
-    </div>
-  );
-}

@@ -147,53 +147,6 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
   const [suggestionPending, setSuggestionPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  /** 好友资料里换口音：可选声线 + 正在切换的 id */
-  const [accentOptions, setAccentOptions] = useState<
-    Array<{ archetype_id: string; accent_label: string; voice_id: string }>
-  >([]);
-  const [accentBusy, setAccentBusy] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (infoOpen) void loadAccents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [infoOpen]);
-
-  const loadAccents = useCallback(async () => {
-    try {
-      const r = await fetch("/api/v2/archetypes", { cache: "no-store" });
-      const j = (await r.json()) as { archetypes?: Array<Record<string, unknown>> };
-      const lang = friend.reply_language || "en";
-      const opts = (j.archetypes ?? [])
-        .filter((a) => String((a.locale_info as Record<string, unknown> | undefined)?.native_lang ?? "") === lang)
-        .map((a) => ({
-          archetype_id: String(a.archetype_id ?? ""),
-          accent_label: String(a.accent_label ?? a.archetype_id ?? ""),
-          voice_id: String(a.voice_id ?? ""),
-        }))
-        .filter((o) => o.archetype_id);
-      setAccentOptions(opts);
-    } catch {
-      setAccentOptions([]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [friend.reply_language]);
-
-  const pickAccent = useCallback(
-    async (archetypeId: string) => {
-      setAccentBusy(archetypeId);
-      try {
-        await api.changeFriendVoice(friend.id, archetypeId);
-        showToast("口音已换，新消息会用新声音", "success");
-        onFriendRefresh?.({ ...friend });
-      } catch (e) {
-        showToast(`换口音失败：${errorText(e)}`, "error");
-      } finally {
-        setAccentBusy(null);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [friend.id],
-  );
   const [callOpen, setCallOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -910,31 +863,6 @@ export function ChatView({ friend, onBack, onFriendRefresh, onDeleted }: ChatVie
                     </span>
                     回复语言 · {friend.nationality}
                   </p>
-                  {/* 换口音：只列当前回复语言的声线，换完立刻生效 */}
-                  <div className="mt-2.5">
-                    <p className="se-sheet-label">口音</p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {accentOptions.map((opt) => {
-                        const on = opt.voice_id === friend.voice_id;
-                        return (
-                          <button
-                            key={opt.archetype_id}
-                            type="button"
-                            disabled={accentBusy === opt.archetype_id}
-                            onClick={() => void pickAccent(opt.archetype_id)}
-                            aria-pressed={on}
-                            className={`rounded-full border px-2 py-0.5 text-[11px] disabled:opacity-50 ${
-                              on
-                                ? "border-[color:var(--se-accent)] bg-[color:var(--se-accent)]/12 font-medium text-[color:var(--se-accent)]"
-                                : "border-[color:var(--se-line)] text-[color:var(--se-dim)]"
-                            }`}
-                          >
-                            {accentBusy === opt.archetype_id ? "切换中…" : opt.accent_label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </div>
               {friend.bio ? <p className="mt-3 text-[12.5px] leading-relaxed text-[color:var(--se-dim)]">{friend.bio}</p> : null}

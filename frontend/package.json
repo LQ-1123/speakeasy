@@ -8,15 +8,20 @@
     "build": "next build",
     "build:backend": "next build && node scripts/copy-out.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});require('fs').rmSync('out',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@dicebear/collection": "^9.4.2",
     "@dicebear/core": "^9.4.3",
+    "@material/material-color-utilities": "^0.4.0",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-virtual": "^3.14.26",
     "lucide-react": "^0.577.0",
     "next": "15.5.28",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
@@ -24,6 +29,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

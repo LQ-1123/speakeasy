@@ -1,36 +1,46 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * V3 · 发现信息流（以 AI Persona 为中心的社交世界）。
  *
  * - 信息流 = 平台 Persona 的公共动态 + 用户自己的动态（公开动态也会互相可见）
  * - 点作者头像/昵称 → Persona 主页；未加好友的人也会出现在信息流里
  * - 支持点赞 / 评论 / 发动态（可见性三档）/ 通知中心（社交事件）
+ *
+ * 视觉：编辑式信息流（无卡片套卡片）——作者行 + 正文 + 大图 + 药丸操作组 +
+ * 扁平内嵌评论区。样式全部在 ../styles/discover.css。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Bell,
   ChevronLeft,
   Compass,
+  Globe,
   Heart,
   ImagePlus,
   Languages,
+  Lock,
   MessageSquare,
   Pause,
   PenSquare,
   RefreshCw,
-  Send,
   Trash2,
+  Users,
   Volume2,
 } from "lucide-react";
 
 import { playVoiceUrl } from "../apiFacade";
+import { useScrollMemory } from "../useScrollMemory";
 import { personaAvatarSrc } from "../avatar";
-import { isLocalMode } from "../local/keys";
+import { haptic } from "../../theme/haptics";
+
 import type { Route } from "../model";
 import { useApp } from "../store";
-import { Avatar, Dialog, Icon, Lightbox } from "../ui";
+import { Avatar, Dialog, Lightbox } from "../ui";
 import {
   createPost,
   deletePost,
@@ -48,7 +58,7 @@ import {
   type FeedItem,
   type FeedSummary,
 } from "./api";
-import "./v3.css";
+import "../styles/discover.css";
 
 /* 演示版：用户动态只能选内置图片（不支持上传自己的照片） */
 const STOCK = [
@@ -87,7 +97,9 @@ export function FeedView({
   navigate: (r: Route) => void;
   onBack?: () => void;
 }) {
-  const { reloadAll, showToast, profile } = useApp();
+  const { showToast, profile } = useApp(
+    useShallow((state) => ({ showToast: state.showToast, profile: state.profile })),
+  );
   const [items, setItems] = useState<FeedItem[]>([]);
   const [cursor, setCursor] = useState("");
   const [loading, setLoading] = useState(true);
@@ -99,9 +111,10 @@ export function FeedView({
   const [commentFor, setCommentFor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const seq = useRef(0);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useScrollMemory<HTMLDivElement>("discover");
+  const virtualizer = useVirtualizer({ count: items.length, getScrollElement: () => scrollRef.current, estimateSize: () => 620, overscan: 3, getItemKey: (index) => items[index].id });
 
-  const localMode = isLocalMode();
+  const localMode = false;
 
   const load = useCallback(
     async (reset: boolean, nextCursor = ""): Promise<{
@@ -146,23 +159,6 @@ export function FeedView({
 
   /* 毫秒级朗读：首屏几条人物动态的音频先在后台取到浏览器缓存，
      用户点「朗读」时几乎无网络等待（后端也已提前合成 + 内容寻址 URL）。 */
-  useEffect(() => {
-    if (!items.length) return;
-    const prefetch = items
-      .filter((it) => it.kind === "persona_post")
-      .slice(0, 4)
-      .map((it) => {
-        const audio = new Audio();
-        audio.preload = "auto";
-        audio.src = personaSpeechUrl(it.id, it.content_hash, it.speech_version);
-        return audio;
-      });
-    return () => {
-      for (const audio of prefetch) audio.src = "";
-    };
-  }, [items]);
-
-  /* 社交事件轮询：更新未读数，并在有新事件时提示 */
   const lastEventCount = useRef(-1);
   useEffect(() => {
     if (localMode) return;
@@ -183,10 +179,11 @@ export function FeedView({
       }
     };
     void tick();
-    const timer = window.setInterval(tick, 20000);
+    const onEvent = () => void tick();
+    window.addEventListener("speakeasy:client-event", onEvent);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      window.removeEventListener("speakeasy:client-event", onEvent);
     };
   }, [localMode, showToast]);
 
@@ -255,6 +252,7 @@ export function FeedView({
       scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       const same = Boolean(prevFirst) && page.items[0]?.id === prevFirst;
       showToast(same ? "已是最新" : "已刷新", same ? undefined : "success");
+      if (!same) haptic("success");
     } finally {
       setRefreshing(false);
     }
@@ -283,6 +281,7 @@ export function FeedView({
       setItems((prev) =>
         prev.map((x) => (x.id === item.id ? { ...x, liked_by_me: res.liked, like_count: res.like_count } : x)),
       );
+      haptic("save");
     } catch {
       setItems((prev) =>
         prev.map((x) => (x.id === item.id ? { ...x, liked_by_me: before.liked, like_count: before.count } : x)),
@@ -303,6 +302,7 @@ export function FeedView({
               : x,
           ),
         );
+        haptic("send");
       } catch {
         showToast("评论失败，请稍后重试");
       }
@@ -326,64 +326,56 @@ export function FeedView({
   const unread = summary?.unread_events ?? 0;
 
   return (
-    <div className="w4-main">
-      <div className="w4-head v3-feed-head">
+    <div className="w4-main disc-main">
+      <div className="w4-head disc-head">
         {onBack ? (
           <button className="w4-icon-btn" onClick={onBack} aria-label="返回">
-            <ChevronLeft size={18} strokeWidth={2} />
+            <ChevronLeft size={20} strokeWidth={2} />
           </button>
         ) : null}
         <div className="w4-head-main">
-          <div className="w4-head-title">动态</div>
+          <div className="w4-head-title disc-head-title">动态</div>
           <div className="w4-head-sub">
             {summary ? `${summary.persona_posts} 条人物动态 · ${summary.friends} 位好友` : "TA 们的生活动态"}
           </div>
         </div>
-        <div className="w4-head-actions">
+        <div className="w4-head-actions disc-head-actions">
           <button
-            className="w4-icon-btn v3-bell"
+            className="w4-icon-btn disc-bell"
             onClick={() => navigate({ name: "events" })}
             title="通知"
             aria-label="通知"
           >
-            <Bell size={17} strokeWidth={1.7} />
-            {unread > 0 ? <span className="v3-badge">{unread > 99 ? "99+" : unread}</span> : null}
+            <Bell size={19} strokeWidth={1.8} />
+            {unread > 0 ? <span className="disc-badge">{unread > 99 ? "99+" : unread}</span> : null}
           </button>
           <button
-            className="w4-icon-btn v3-secondary v3-refresh-btn"
+            className="w4-icon-btn disc-hide-narrow"
             onClick={() => void refresh()}
             disabled={refreshing}
             title="刷新"
             aria-label="刷新"
             aria-busy={refreshing}
           >
-            <RefreshCw
-              size={16}
-              strokeWidth={1.7}
-              className={refreshing ? "v3-spin" : undefined}
-            />
+            <RefreshCw size={18} strokeWidth={1.8} className={refreshing ? "disc-spin" : undefined} />
           </button>
           <button
-            className="w4-icon-btn v3-secondary"
+            className="w4-icon-btn"
             onClick={() => navigate({ name: "discoverPeople" })}
             title="偶遇一个人"
             aria-label="偶遇一个人"
           >
-            <Compass size={16} strokeWidth={1.7} />
+            <Compass size={18} strokeWidth={1.8} />
           </button>
-          <button
-            className="w4-btn is-primary v3-publish-btn"
-            style={{ height: 30, padding: "0 11px", fontSize: 12.5, gap: 5 }}
-            onClick={() => setPublishOpen(true)}
-          >
-            <PenSquare size={13} />
+          <button className="w4-btn is-primary disc-publish-btn" onClick={() => setPublishOpen(true)}>
+            <PenSquare size={15} />
             发动态
           </button>
         </div>
       </div>
 
       {pull > 0 ? (
-        <div className="v3-pull-pill">{pull >= 45 ? "松手刷新" : "下拉刷新"}</div>
+        <div className="disc-pull">{pull >= 45 ? "松手刷新" : "下拉刷新"}</div>
       ) : null}
       <div
         className="w4-scroll"
@@ -393,22 +385,19 @@ export function FeedView({
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-
         <div className="w4-feed">
           {localMode ? (
-            <div className="v3-notice">
+            <div className="disc-notice">
               当前处于离线模式，动态暂不可用；可在设置 → 本地与密钥 切回在线模式。
             </div>
           ) : null}
 
-          {!localMode && loading && items.length === 0 ? (
-            <FeedSkeleton />
-          ) : null}
+          {!localMode && loading && items.length === 0 ? <FeedSkeleton /> : null}
 
           {!localMode && error && items.length === 0 ? (
-            <div className="v3-error">
-              <div className="v3-error-title">动态加载失败</div>
-              <div className="v3-error-text">{error}</div>
+            <div className="disc-state">
+              <div className="disc-state-title">动态加载失败</div>
+              <div className="disc-state-text">{error}</div>
               <button className="w4-btn is-primary" onClick={() => void load(true)}>
                 重试
               </button>
@@ -416,43 +405,52 @@ export function FeedView({
           ) : null}
 
           {!loading && !error && items.length === 0 && !localMode ? (
-            <div className="v3-empty">
-              <div className="v3-empty-title">还没有动态</div>
-              <div className="v3-empty-text">发一条，看看 AI 人物会怎么回应。</div>
+            <div className="disc-state">
+              <div className="disc-state-title">还没有动态</div>
+              <div className="disc-state-text">发一条，看看 AI 人物会怎么回应。</div>
               <button className="w4-btn is-primary" onClick={() => setPublishOpen(true)}>
                 发第一条动态
               </button>
             </div>
           ) : null}
 
-          {items.map((item) => (
-            <FeedCard
-              key={item.id}
-              item={item}
-              onOpenPersona={() =>
-                item.kind === "persona_post"
-                  ? navigate({ name: "persona", personaId: item.author.id })
-                  : navigate({ name: "me" })
-              }
-              onLike={() => void toggleLike(item)}
-              onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
-              onDelete={() => void removePost(item)}
-              onZoom={setZoom}
-              onNotify={showToast}
-              commentOpen={commentFor === item.id}
-              draft={draft}
-              setDraft={setDraft}
-              onSubmitComment={(text) => void submitComment(item, text)}
-              myName={profile.name}
-              myAvatar={profile.avatar}
-            />
-          ))}
+          <div style={{ position: "relative", height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((row) => {
+              const item = items[row.index];
+              return (
+                <div
+                  key={item.id}
+                  data-index={row.index}
+                  ref={virtualizer.measureElement}
+                  style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${row.start}px)` }}
+                >
+                  <FeedCard
+                    key={item.id}
+                    item={item}
+                    onOpenPersona={() =>
+                      item.kind === "persona_post"
+                        ? navigate({ name: "persona", personaId: item.author.id })
+                        : navigate({ name: "me" })
+                    }
+                    onLike={() => void toggleLike(item)}
+                    onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
+                    onDelete={() => void removePost(item)}
+                    onZoom={setZoom}
+                    onNotify={showToast}
+                    commentOpen={commentFor === item.id}
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSubmitComment={(text) => void submitComment(item, text)}
+                    myName={profile.name}
+                    myAvatar={profile.avatar}
+                  />
+                </div>
+              );
+            })}
+          </div>
 
-          {loadingMore ? <div className="v3-more">加载更多…</div> : null}
-          {!loadingMore && !cursor && items.length > 0 ? (
-            <div className="v3-more">已经到底了</div>
-          ) : null}
-          <div style={{ height: 24 }} />
+          {loadingMore ? <div className="disc-end">加载更多…</div> : null}
+          {!loadingMore && !cursor && items.length > 0 ? <div className="disc-end">已经到底了</div> : null}
         </div>
       </div>
 
@@ -460,6 +458,8 @@ export function FeedView({
 
       {publishOpen ? (
         <PublishDialog
+          myName={profile.name}
+          myAvatar={profile.avatar}
           onClose={() => setPublishOpen(false)}
           onPublish={async (content, visibility, media, tags) => {
             try {
@@ -467,6 +467,7 @@ export function FeedView({
               setPublishOpen(false);
               setItems((prev) => [res.post, ...prev]);
               void fetchFeedSummary().then((s) => setSummary(s)).catch(() => undefined);
+              haptic("save");
               showToast(
                 visibility === "public"
                   ? "已发布到发现，AI 人物可能会来互动"
@@ -514,6 +515,7 @@ export function FeedCard({
   myName?: string;
   myAvatar?: string;
 }) {
+  const nativeLanguage = useApp((state) => state.profile.nativeLanguage || "zh");
   const isPersona = item.kind === "persona_post";
   const author = item.author;
   // 用户动态跟随「我」的资料；AI 人物统一用客户端 Avataaars 渲染（与服务端头像二选一）
@@ -527,9 +529,7 @@ export function FeedCard({
         author.avatar,
       )
     : "";
-  const displayAvatar = isUserPost
-    ? myAvatar || author.avatar
-    : personaAvatar || author.avatar;
+  const displayAvatar = isUserPost ? myAvatar || author.avatar : personaAvatar || author.avatar;
 
   /* 翻译 / 朗读：信息流是英语内容，翻译走 V2 的 LLM 翻译链路，
      朗读用该人物自己的声线（后端 /persona-posts/{id}/speech 合成并缓存）。 */
@@ -552,7 +552,7 @@ export function FeedCard({
       return;
     }
     setCZhBusy(c.id);
-    const out = await translateText(c.content, "zh").catch(() => "");
+    const out = await translateText(c.content, nativeLanguage).catch(() => "");
     setCZhBusy("");
     if (out) {
       setCZh((m) => ({ ...m, [c.id]: out }));
@@ -570,7 +570,7 @@ export function FeedCard({
       return;
     }
     setZhLoading(true);
-    const out = await translateText(item.content, "zh").catch(() => "");
+    const out = await translateText(item.content, nativeLanguage).catch(() => "");
     setZhLoading(false);
     if (out) {
       setZh(out);
@@ -583,202 +583,264 @@ export function FeedCard({
   const togglePlay = async () => {
     if (!isPersona || playing) return;
     setPlaying(true);
+    haptic("toggle");
     const ok = await playVoiceUrl(personaSpeechUrl(item.id, item.content_hash, item.speech_version)).catch(() => false);
     setPlaying(false);
     if (!ok) onNotify?.("朗读失败，请稍后重试");
   };
 
+  const likeLabel = item.liked_by_me ? "取消赞" : "赞";
+
   return (
-    <article className="w4-moment">
-      <button onClick={onOpenPersona} aria-label={displayName} className="v3-avatar-btn">
-        <Avatar
-                src={
-                  displayAvatar ||
-                  personaAvatarSrc(
-                    author.avatar_seed || author.id,
-                    author.avatar_style,
-                    author.avatar_options,
-                    author.avatar,
-                  )
-                }
-                name={displayName}
-                size={42}
-              />
-      </button>
-      <div className="w4-moment-body">
-        <div className={`w4-moment-name ${item.is_mine ? "is-me" : ""}`}>
-          <button className="v3-name-btn" onClick={onOpenPersona}>
-            {displayName}
-          </button>
-          {isPersona ? <span className="v3-ai-tag">AI</span> : null}
-          {isPersona ? (
-            <span className="v3-flag">{flagOf((author as unknown as { country?: string }).country ?? "")}</span>
-          ) : null}
-          {item.visibility !== "public" ? (
-            <span className="v3-vis">{VISIBILITY_LABEL[item.visibility]}</span>
-          ) : null}
+    <article className="disc-post">
+      <header className="disc-post-head">
+        <button
+          type="button"
+          onClick={onOpenPersona}
+          aria-label={`查看 ${displayName} 的主页`}
+          className="disc-avatar-btn"
+        >
+          <Avatar
+            src={
+              displayAvatar ||
+              personaAvatarSrc(author.avatar_seed || author.id, author.avatar_style, author.avatar_options, author.avatar)
+            }
+            name={displayName}
+            size={48}
+            round
+          />
+        </button>
+        <div className="disc-author">
+          <div className="disc-author-line">
+            <button type="button" className="disc-author-name disc-inline-btn" onClick={onOpenPersona}>
+              {displayName}
+            </button>
+            {isPersona ? <span className="disc-ai-tag">AI</span> : null}
+            {isPersona ? (
+              <span className="disc-flag" aria-label={author.country || "地区"}>
+                {flagOf(author.country ?? "")}
+              </span>
+            ) : null}
+          </div>
+          <div className="disc-author-meta">
+            {isPersona && author.occupation ? (
+              <>
+                <span>{author.occupation}</span>
+                <span className="disc-meta-dot" aria-hidden />
+              </>
+            ) : null}
+            <span>{relTimeOf(item.created_at)}</span>
+          </div>
         </div>
+        {item.visibility !== "public" ? (
+          <div className="disc-post-side">
+            <span className="disc-visibility">{VISIBILITY_LABEL[item.visibility]}</span>
+          </div>
+        ) : null}
+      </header>
 
-        {item.content ? <div className="w4-moment-text">{item.content}</div> : null}
-        {zhOpen && zh ? <div className="v3-post-zh">{zh}</div> : null}
+      {item.content ? <p className="disc-post-text">{item.content}</p> : null}
+      {zhOpen && zh ? <div className="disc-translation">{zh}</div> : null}
 
-        <div className="w4-moment-inline-acts">
+      {item.media.length ? (
+        <div className={`disc-media n${Math.min(4, item.media.length)}`}>
+          {item.media.map((src) => (
+            <button
+              type="button"
+              key={src}
+              className="disc-media-item"
+              onClick={() => onZoom(src)}
+              aria-label="查看大图"
+            >
+              <img src={src} alt={item.alt_text || ""} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {item.media.length && item.media_credit ? (
+        <div className="disc-credit">图：{item.media_credit}</div>
+      ) : null}
+
+      {item.tags.length ? (
+        <div className="disc-tags">
+          {item.tags.slice(0, 4).map((t) => (
+            <span key={t} className="disc-tag">
+              #{t}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="disc-actions">
+        <div className="disc-action-group">
+          {isPersona ? (
+            <button
+              type="button"
+              className={`disc-action ${item.liked_by_me ? "is-on" : ""}`}
+              onClick={onLike}
+              aria-pressed={item.liked_by_me}
+              aria-label={likeLabel}
+            >
+              <Heart size={16} strokeWidth={1.9} fill={item.liked_by_me ? "currentColor" : "none"} />
+              <span>{item.liked_by_me ? "已赞" : "赞"}</span>
+              {item.like_count > 0 ? <span className="disc-count">{item.like_count}</span> : null}
+            </button>
+          ) : (
+            <span className="disc-stat">
+              <Heart size={15} strokeWidth={1.9} />
+              <span className="disc-count">{item.like_count}</span>
+            </span>
+          )}
+          {isPersona ? (
+            <button type="button" className="disc-action" onClick={onComment}>
+              <MessageSquare size={16} strokeWidth={1.9} />
+              <span>评论</span>
+              {item.comment_count > 0 ? <span className="disc-count">{item.comment_count}</span> : null}
+            </button>
+          ) : (
+            <span className="disc-stat">
+              <MessageSquare size={15} strokeWidth={1.9} />
+              <span className="disc-count">{item.comment_count}</span>
+            </span>
+          )}
           <button
-            className="w4-moment-act"
+            type="button"
+            className={`disc-action ${zhOpen ? "is-on" : ""}`}
             onClick={() => void toggleZh()}
             disabled={zhLoading}
+            aria-pressed={zhOpen}
           >
-            <Languages size={13} strokeWidth={1.8} />
-            {zhLoading ? "翻译中…" : zhOpen ? "收起" : "翻译"}
+            <Languages size={16} strokeWidth={1.9} />
+            <span>{zhLoading ? "翻译中…" : zhOpen ? "收起" : "翻译"}</span>
           </button>
           {isPersona ? (
             <button
-              className={`w4-moment-act ${playing ? "is-on" : ""}`}
+              type="button"
+              className={`disc-action ${playing ? "is-on" : ""}`}
               onClick={() => void togglePlay()}
+              aria-pressed={playing}
             >
-              {playing ? <Pause size={13} strokeWidth={1.8} /> : <Volume2 size={13} strokeWidth={1.8} />}
-              {playing ? "播放中" : "朗读"}
+              {playing ? <Pause size={16} strokeWidth={1.9} /> : <Volume2 size={16} strokeWidth={1.9} />}
+              <span>{playing ? "播放中" : "朗读"}</span>
             </button>
           ) : null}
         </div>
-
-        {item.media.length ? (
-          <div className={`w4-moment-imgs n${Math.min(4, item.media.length)}`}>
-            {item.media.map((src) => (
-              <img
-                key={src}
-                src={src}
-                alt={item.alt_text || ""}
-                loading="lazy"
-                onClick={() => onZoom(src)}
-              />
-            ))}
-          </div>
+        {item.is_mine ? (
+          <button
+            type="button"
+            className="disc-action disc-action-standalone is-danger"
+            onClick={onDelete}
+            aria-label="删除动态"
+          >
+            <Trash2 size={16} strokeWidth={1.9} />
+            <span>删除</span>
+          </button>
         ) : null}
+      </div>
 
-        {item.media.length && item.media_credit ? (
-          <div className="v3-media-credit">图：{item.media_credit}</div>
-        ) : null}
-
-        {item.tags.length ? (
-          <div className="v3-tags">
-            {item.tags.slice(0, 4).map((t) => (
-              <span key={t} className="v3-tag">
-                #{t}
+      {item.comments.length || (item.liked_by?.length ?? 0) > 0 ? (
+        <section className="disc-engagement" aria-label="互动">
+          {(item.liked_by?.length ?? 0) > 0 ? (
+            <div className="disc-likes">
+              <span className="disc-likes-icon" aria-hidden>
+                <Heart size={11} strokeWidth={0} fill="currentColor" />
               </span>
-            ))}
-          </div>
-        ) : null}
-
-        <div className="w4-moment-foot">
-          <span className="w4-moment-time">{relTimeOf(item.created_at)}</span>
-          <span style={{ flex: 1 }} />
-          {isPersona ? (
-            <>
-              <button className={`w4-moment-act ${item.liked_by_me ? "is-on" : ""}`} onClick={onLike}>
-                <Heart size={13} strokeWidth={1.8} fill={item.liked_by_me ? "currentColor" : "none"} />
-                赞
-              </button>
-              <button className="w4-moment-act" onClick={onComment}>
-                <MessageSquare size={13} strokeWidth={1.8} />
-                评论
-              </button>
-            </>
-          ) : (
-            <span className="v3-stat">
-              <Heart size={12} strokeWidth={1.8} /> {item.like_count}
-              <MessageSquare size={12} strokeWidth={1.8} style={{ marginLeft: 8 }} /> {item.comment_count}
-            </span>
-          )}
-          {item.is_mine ? (
-            <button className="w4-moment-act is-danger" onClick={onDelete}>
-              <Trash2 size={13} strokeWidth={1.8} />
-              删除
-            </button>
+              <span className="disc-likes-names">
+                {item.liked_by!.map((x) => (
+                  <span key={x.persona_id} className="disc-likes-name">
+                    {x.nickname}
+                  </span>
+                ))}
+              </span>
+            </div>
           ) : null}
-        </div>
-
-        {item.comments.length || (item.liked_by?.length ?? 0) > 0 ? (
-          <div className="w4-moment-interact">
-            {(item.liked_by?.length ?? 0) > 0 ? (
-              <div className="w4-likes">
-                <span className="w4-likes-icon">
-                  <Heart size={9} strokeWidth={0} fill="currentColor" />
-                </span>
-                <span className="w4-like-row">
-                  {item.liked_by!.map((x) => (
-                    <span key={x.persona_id} className="w4-like-name">
-                      {x.nickname}
-                    </span>
-                  ))}
-                </span>
-              </div>
-            ) : null}
-            {item.comments.length ? (
-              <div className="w4-moment-comments">
-                {item.comments.map((c) => (
-                  <div key={c.id} className="w4-moment-comment">
-                    <b>{c.author.nickname}</b>
-                    {isPersona ? "" : "："}
-                    {c.content}
-                    {c.author.is_ai ? <span className="v3-ai-tag sm">AI</span> : null}
+          {item.comments.length ? (
+            <div className="disc-comments">
+              {item.comments.map((c) => (
+                <div key={c.id} className="disc-comment">
+                  <div className="disc-comment-line">
+                    <span className="disc-comment-name">{c.author.nickname}</span>
+                    {c.author.is_ai ? <span className="disc-ai-tag sm">AI</span> : null}
+                    <span className="disc-comment-text">{c.content}</span>
                     {c.author.is_ai ? (
-                      <button
-                        className="v3-link-btn"
-                        onClick={() => void trComment(c)}
-                        style={{ marginLeft: 6 }}
-                      >
+                      <button type="button" className="disc-link" onClick={() => void trComment(c)}>
                         {cZhBusy === c.id ? "翻译中…" : cZhOpen[c.id] ? "收起翻译" : "翻译"}
                       </button>
                     ) : null}
-                    {cZhOpen[c.id] && cZh[c.id] ? (
-                      <div className="v3-comment-zh">{cZh[c.id]}</div>
-                    ) : null}
                   </div>
-                ))}
-                {item.comment_count > item.comments.length ? (
-                  <div className="v3-more-comments">还有 {item.comment_count - item.comments.length} 条评论</div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                  {cZhOpen[c.id] && cZh[c.id] ? <div className="disc-comment-zh">{cZh[c.id]}</div> : null}
+                </div>
+              ))}
+              {item.comment_count > item.comments.length ? (
+                <div className="disc-more-comments">还有 {item.comment_count - item.comments.length} 条评论</div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-        {commentOpen ? (
-          <div className="w4-comment-input">
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing && draft.trim()) {
-                  onSubmitComment(draft.trim());
-                }
-              }}
-              placeholder={`回应 ${author.nickname}…`}
-            />
-            <button
-              className="w4-btn is-primary"
-              style={{ height: 28, padding: "0 10px", fontSize: 12 }}
-              disabled={!draft.trim()}
-              onClick={() => onSubmitComment(draft.trim())}
-            >
-              发送
-            </button>
-          </div>
-        ) : null}
-      </div>
+      {commentOpen ? (
+        <div className="disc-comment-form">
+          <input
+            autoFocus
+            className="disc-comment-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing && draft.trim()) {
+                onSubmitComment(draft.trim());
+              }
+            }}
+            placeholder={`回应 ${author.nickname}…`}
+            aria-label={`回应 ${author.nickname}`}
+          />
+          <button
+            type="button"
+            className="w4-btn is-primary disc-send"
+            disabled={!draft.trim()}
+            onClick={() => onSubmitComment(draft.trim())}
+          >
+            发送
+          </button>
+        </div>
+      ) : null}
     </article>
   );
 }
 
 /* ------------------------------------------------------------------ 发布 */
 
+const VISIBILITY_OPTIONS = [
+  {
+    value: "public" as const,
+    label: "公开",
+    desc: "出现在发现信息流，AI 人物可能点赞/评论/加你",
+    icon: Globe,
+  },
+  {
+    value: "friends" as const,
+    label: "好友可见",
+    desc: "只有你的 AI 好友能看到",
+    icon: Users,
+  },
+  {
+    value: "private" as const,
+    label: "仅自己可见",
+    desc: "只有你自己记录，不进入任何信息流",
+    icon: Lock,
+  },
+];
+
 function PublishDialog({
   onClose,
   onPublish,
+  myName,
+  myAvatar,
 }: {
   onClose: () => void;
+  myName?: string;
+  myAvatar?: string;
   onPublish: (
     content: string,
     visibility: "public" | "friends" | "private",
@@ -804,14 +866,15 @@ function PublishDialog({
     setTagInput("");
   };
 
-  const visibleOptions = useMemo(
-    () => [
-      { value: "public" as const, label: "公开", desc: "出现在发现信息流，AI 人物可能点赞/评论/加你" },
-      { value: "friends" as const, label: "好友可见", desc: "只有你的 AI 好友能看到" },
-      { value: "private" as const, label: "仅自己可见", desc: "只有你自己记录，不进入任何信息流" },
-    ],
-    [],
-  );
+  const visibleOptions = useMemo(() => VISIBILITY_OPTIONS, []);
+
+  const togglePick = (p: string) => {
+    if (!picked.includes(p) && picked.length >= 4) return;
+    haptic("selection");
+    setPicked((list) =>
+      list.includes(p) ? list.filter((x) => x !== p) : [...list, p],
+    );
+  };
 
   return (
     <Dialog
@@ -819,11 +882,11 @@ function PublishDialog({
       onClose={onClose}
       footer={
         <>
-          <button className="w4-btn" onClick={onClose}>
+          <button className="w4-btn disc-dialog-btn" onClick={onClose}>
             取消
           </button>
           <button
-            className="w4-btn is-primary"
+            className="w4-btn is-primary disc-dialog-btn"
             disabled={busy || (!text.trim() && picked.length === 0)}
             onClick={async () => {
               setBusy(true);
@@ -839,183 +902,188 @@ function PublishDialog({
         </>
       }
     >
-      <textarea
-        className="w4-textarea"
-        style={{ border: 0, padding: 0, fontSize: 14.5, minHeight: 96, background: "transparent" }}
-        placeholder="这一刻的想法…（公开动态会被 AI 人物看到）"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        autoFocus
-      />
-
-      <div className="w4-field-hint" style={{ marginTop: 2 }}>
-        可选内置图片，或上传自己的照片（JPG/PNG/WebP，≤8MB，最多 4 张）
-      </div>
-
-      {picked.length ? (
-        <div className="w4-publish-pics" style={{ marginTop: 8 }}>
-          {picked.map((p, i) => (
-            <button
-              key={p}
-              className="w4-publish-pic on"
-              title="点击移除"
-              onClick={() => setPicked((list) => list.filter((x) => x !== p))}
-            >
-              <img src={p} alt="" />
-              <span className="w4-pick-order">{i + 1}</span>
-            </button>
-          ))}
+      <div className="disc-publish">
+        <div className="disc-publish-author">
+          <Avatar src={myAvatar} name={myName || "我"} size={40} round />
+          <div>
+            <div className="disc-publish-author-name">{myName || "我"}</div>
+            <div className="disc-publish-author-hint">公开动态会出现在发现信息流</div>
+          </div>
         </div>
-      ) : null}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button
-          className="w4-btn"
-          type="button"
-          disabled={uploading || picked.length >= 4}
-          onClick={() => fileRef.current?.click()}
-        >
-          {uploading ? "上传中…" : "上传照片"}
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          multiple
-          hidden
-          onChange={async (e) => {
-            const files = Array.from(e.target.files || []);
-            e.target.value = "";
-            if (!files.length) return;
-            setUploading(true);
-            setUploadError("");
-            try {
-              for (const file of files) {
-                if (picked.length >= 4) break;
-                const data = await uploadImage(file);
-                setPicked((list) => (list.length >= 4 || list.includes(data.url) ? list : [...list, data.url]));
-              }
-            } catch (exc) {
-              setUploadError(exc instanceof Error ? exc.message : "上传失败");
-            } finally {
-              setUploading(false);
-            }
-          }}
+        <textarea
+          className="disc-publish-text"
+          placeholder="这一刻的想法…（公开动态会被 AI 人物看到）"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          autoFocus
         />
-        <span className="w4-field-hint" style={{ alignSelf: "center" }}>
-          {uploadError ? <span style={{ color: "#c0392b" }}>{uploadError}</span> : "最多 4 张"}
-        </span>
-      </div>
 
-      <div className="w4-publish-pics">
-        {STOCK.map((p) => {
-          const on = picked.includes(p);
-          return (
-            <button
-              key={p}
-              className={`w4-publish-pic ${on ? "on" : ""}`}
-              onClick={() => setPicked((list) => (on ? list.filter((x) => x !== p) : [...list, p].slice(0, 4)))}
-            >
-              <img src={p} alt="" />
-              {on ? <span className="w4-pick-order">{picked.indexOf(p) + 1}</span> : null}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="w4-field" style={{ marginTop: 14 }}>
-        <div className="w4-field-label">可见范围</div>
-        <div className="v3-vis-options">
-          {visibleOptions.map((o) => (
-            <button
-              key={o.value}
-              className={`v3-vis-option ${visibility === o.value ? "on" : ""}`}
-              onClick={() => setVisibility(o.value)}
-            >
-              <span className="v3-vis-title">
-                <Icon size={13} strokeWidth={2}>
-                  {o.value === "public" ? (
-                    <>
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M3 12h18M12 3a15 15 0 010 18a15 15 0 010-18" />
-                    </>
-                  ) : o.value === "friends" ? (
-                    <>
-                      <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
-                      <circle cx="9" cy="7" r="4" />
-                      <path d="M22 21v-2a4 4 0 00-3-3.87" />
-                    </>
-                  ) : (
-                    <>
-                      <rect x="4" y="10" width="16" height="10" rx="2" />
-                      <path d="M8 10V7a4 4 0 018 0v3" />
-                    </>
-                  )}
-                </Icon>
-                {o.label}
-              </span>
-              <span className="v3-vis-desc">{o.desc}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="w4-field" style={{ marginTop: 12 }}>
-        <div className="w4-field-label">兴趣标签（帮 AI 人物找到你）</div>
-        <div className="w4-chips">
-          {TAGS.map((t) => (
-            <button
-              key={t}
-              className={`w4-chip ${tags.includes(t) ? "is-green" : ""}`}
-              style={{ cursor: "pointer" }}
-              onClick={() =>
-                setTags((list) =>
-                  list.includes(t)
-                    ? list.filter((x) => x !== t)
-                    : list.length >= TAG_MAX
-                      ? list
-                      : [...list, t],
-                )
-              }
-            >
-              {t}
-            </button>
-          ))}
-          {customTags.map((t) => (
-            <button
-              key={`custom-${t}`}
-              className="w4-chip is-green"
-              style={{ cursor: "pointer" }}
-              title="点击删除自定义标签"
-              onClick={() => setTags((list) => list.filter((x) => x !== t))}
-            >
-              {t} ×
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <div className="disc-publish-section">
+          <div className="disc-publish-label">照片</div>
+          <div className="disc-publish-grid">
+            {picked.map((p, i) => (
+              <button
+                type="button"
+                key={p}
+                className="disc-publish-tile is-on"
+                title="点击移除"
+                aria-label={`移除第 ${i + 1} 张照片`}
+                onClick={() => togglePick(p)}
+              >
+                <img src={p} alt="" />
+                <span className="disc-publish-order">{i + 1}</span>
+              </button>
+            ))}
+            {picked.length < 4 ? (
+              <button
+                type="button"
+                className="disc-publish-tile disc-publish-add"
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+              >
+                <ImagePlus size={18} strokeWidth={1.8} />
+                <span>{uploading ? "上传中…" : "上传"}</span>
+              </button>
+            ) : null}
+          </div>
           <input
-            className="w4-input"
-            style={{ flex: 1 }}
-            placeholder={`自定义标签（最多 ${TAG_MAX} 个，回车添加）`}
-            value={tagInput}
-            maxLength={TAG_MAX_LEN}
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addTag(tagInput);
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            hidden
+            onChange={async (e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = "";
+              if (!files.length) return;
+              setUploading(true);
+              setUploadError("");
+              try {
+                for (const file of files) {
+                  if (picked.length >= 4) break;
+                  const data = await uploadImage(file);
+                  setPicked((list) => (list.length >= 4 || list.includes(data.url) ? list : [...list, data.url]));
+                }
+              } catch (exc) {
+                setUploadError(exc instanceof Error ? exc.message : "上传失败");
+              } finally {
+                setUploading(false);
               }
             }}
           />
-          <button className="w4-btn" type="button" onClick={() => addTag(tagInput)}>
-            添加
-          </button>
+          <div className="w4-field-hint">
+            {uploadError ? <span style={{ color: "var(--md-error)" }}>{uploadError}</span> : "可选内置图片，或上传自己的照片（JPG/PNG/WebP，≤8MB，最多 4 张）"}
+          </div>
         </div>
-      </div>
 
-      <div className="w4-field-hint">
-        公开动态会进入所有人的发现信息流；AI 人物可能点赞、评论或申请加你，也可能什么都不发生。
+        <div className="disc-publish-section">
+          <div className="disc-publish-label">内置图片</div>
+          <div className="disc-publish-grid">
+            {STOCK.map((p) => {
+              const on = picked.includes(p);
+              return (
+                <button
+                  type="button"
+                  key={p}
+                  className={`disc-publish-tile ${on ? "is-on" : ""}`}
+                  aria-pressed={on}
+                  aria-label={on ? "取消这张图片" : "选择这张图片"}
+                  onClick={() => togglePick(p)}
+                >
+                  <img src={p} alt="" />
+                  {on ? <span className="disc-publish-order">{picked.indexOf(p) + 1}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="disc-publish-section">
+          <div className="disc-publish-label">可见范围</div>
+          <div className="disc-vis-options">
+            {visibleOptions.map((o) => {
+              const OptionIcon = o.icon;
+              return (
+                <button
+                  type="button"
+                  key={o.value}
+                  className={`disc-vis-option ${visibility === o.value ? "is-on" : ""}`}
+                  aria-pressed={visibility === o.value}
+                  onClick={() => {
+                    haptic("selection");
+                    setVisibility(o.value);
+                  }}
+                >
+                  <span className="disc-vis-icon" aria-hidden>
+                    <OptionIcon size={16} strokeWidth={1.9} />
+                  </span>
+                  <span className="disc-vis-copy">
+                    <span className="disc-vis-title">{o.label}</span>
+                    <span className="disc-vis-desc">{o.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="disc-publish-section">
+          <div className="disc-publish-label">兴趣标签（帮 AI 人物找到你）</div>
+          <div className="w4-chips">
+            {TAGS.map((t) => (
+              <button
+                type="button"
+                key={t}
+                className={`w4-chip ${tags.includes(t) ? "is-green" : ""}`}
+                aria-pressed={tags.includes(t)}
+                onClick={() =>
+                  setTags((list) =>
+                    list.includes(t)
+                      ? list.filter((x) => x !== t)
+                      : list.length >= TAG_MAX
+                        ? list
+                        : [...list, t],
+                  )
+                }
+              >
+                {t}
+              </button>
+            ))}
+            {customTags.map((t) => (
+              <button
+                type="button"
+                key={`custom-${t}`}
+                className="w4-chip is-green"
+                title="点击删除自定义标签"
+                onClick={() => setTags((list) => list.filter((x) => x !== t))}
+              >
+                {t} ×
+              </button>
+            ))}
+          </div>
+          <div className="disc-tag-row">
+            <input
+              className="w4-input"
+              placeholder={`自定义标签（最多 ${TAG_MAX} 个，回车添加）`}
+              value={tagInput}
+              maxLength={TAG_MAX_LEN}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addTag(tagInput);
+                }
+              }}
+            />
+            <button className="w4-btn" type="button" onClick={() => addTag(tagInput)}>
+              添加
+            </button>
+          </div>
+          <div className="w4-field-hint">
+            公开动态会进入所有人的发现信息流；AI 人物可能点赞、评论或申请加你，也可能什么都不发生。
+          </div>
+        </div>
       </div>
     </Dialog>
   );
@@ -1027,17 +1095,22 @@ function FeedSkeleton() {
   return (
     <>
       {[0, 1, 2].map((i) => (
-        <div className="v3-skeleton" key={i}>
-          <div className="v3-skeleton-avatar" />
-          <div className="v3-skeleton-body">
-            <div className="v3-skeleton-line w60" />
-            <div className="v3-skeleton-line w90" />
-            <div className="v3-skeleton-line w40" />
+        <div className="disc-skeleton" key={i} aria-hidden>
+          <div className="disc-skeleton-head">
+            <div className="disc-skeleton-avatar" />
+            <div className="disc-skeleton-meta">
+              <div className="disc-skeleton-line w40" />
+              <div className="disc-skeleton-line w60" />
+            </div>
           </div>
+          <div className="disc-skeleton-body">
+            <div className="disc-skeleton-line w100" />
+            <div className="disc-skeleton-line w90" />
+            <div className="disc-skeleton-line w60" />
+          </div>
+          <div className="disc-skeleton-media" />
         </div>
       ))}
     </>
   );
 }
-
-export { ImagePlus, Languages, Send };

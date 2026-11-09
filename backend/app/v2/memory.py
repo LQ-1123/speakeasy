@@ -921,7 +921,7 @@ class MemoryManager:
     # ------------------------------------------------------------------ #
     # 后台提炼
     # ------------------------------------------------------------------ #
-    async def after_turn(self, friend: dict) -> dict:
+    async def after_turn(self, friend: dict, *, recent_messages: list[dict] | None = None) -> dict:
         """从最近对话里提炼记忆并写回 DB。**永不抛异常**（CancelledError 除外）。"""
         result: dict[str, Any] = {"updated": False}
         try:
@@ -930,7 +930,7 @@ class MemoryManager:
             if not friend_id:
                 return result
 
-            recent = self.db.recent_messages(friend_id, MAX_RECENT_MESSAGES) or []
+            recent = recent_messages if recent_messages is not None else (self.db.recent_messages(friend_id, MAX_RECENT_MESSAGES) or [])
             # 重读好友：after_turn 在后台跑，避免用调用方的旧快照覆盖期间的手工修正
             current = self.db.get_friend(friend_id) or friend
             profile = self._profile() or {}

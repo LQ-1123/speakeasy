@@ -9,11 +9,12 @@
 #
 # Output: deliverables/SpeakEasy-v<version>-<mode>.apk
 param(
-    [string]$ApiBase = "http://47.104.24.236:8000",
+    [string]$ApiBase = "https://47-104-24-236.sslip.io",
     [ValidateSet("debug", "release")][string]$Mode = "release",
     [switch]$AllowLocalhost,
     [int]$VersionCode = 0,
-    [string]$VersionName = ""
+    [string]$VersionName = "",
+    [string]$BuildRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,7 @@ if ($isLocal -and (-not $AllowLocalhost)) {
     Fail "APK API base must not be localhost/127.0.0.1. Pass -AllowLocalhost only for local dev."
 }
 if ($ApiBase -notmatch "^https?://") { Fail "ApiBase must start with http(s)://, got: $ApiBase" }
+if ($Mode -eq "release" -and $ApiBase -notmatch "^https://") { Fail "Release API base must use HTTPS." }
 
 Write-Host "==> 1/6 build frontend (NEXT_PUBLIC_API_BASE=$ApiBase)"
 Set-Location "$Root/frontend"
@@ -38,20 +40,18 @@ if (-not (Test-Path "$Root/frontend/out/index.html")) { Fail "missing frontend/o
 
 Write-Host "==> 2/6 copy static assets to mobile/www"
 Set-Location $Root
-if (Test-Path "$Root/mobile/www") { Remove-Item -Recurse -Force "$Root/mobile/www" }
+$wwwTarget = [IO.Path]::GetFullPath((Join-Path $Root 'mobile\www'))
+$mobileRoot = [IO.Path]::GetFullPath((Join-Path $Root 'mobile'))
+if ([IO.Path]::GetDirectoryName($wwwTarget) -ne $mobileRoot) { Fail "Refusing unsafe asset destination" }
+if (Test-Path -LiteralPath $wwwTarget) {
+    if ((Get-Item -LiteralPath $wwwTarget).Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail "Asset destination must not be a link" }
+    Remove-Item -LiteralPath $wwwTarget -Recurse -Force
+}
 New-Item -ItemType Directory -Path "$Root/mobile/www" | Out-Null
 Copy-Item -Recurse -Force "$Root/frontend/out/*" "$Root/mobile/www/"
+Copy-Item -LiteralPath "$Root/mobile/assets/offline.html" -Destination "$Root/mobile/www/offline.html" -Force
 
-Write-Host "==> 2.5/6 inject remote-bootstrap shell"
 $shellBase = $ApiBase.TrimEnd("/")
-$bootstrap = Get-Content "$Root/mobile/bootstrap/index.html" -Raw -Encoding UTF8
-$bootstrap = $bootstrap.Replace("__API_BASE__", $shellBase)
-[IO.File]::WriteAllText("$Root/mobile/www/index.html", $bootstrap, (New-Object System.Text.UTF8Encoding($false)))
-$offline = Get-Content "$Root/mobile/bootstrap/offline.html" -Raw -Encoding UTF8
-$offline = $offline.Replace("__API_BASE__", $shellBase)
-[IO.File]::WriteAllText("$Root/mobile/www/offline.html", $offline, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "    shell -> $shellBase"
-
 $updaterFile = "$Root/mobile/android/app/src/main/java/com/speakeasy/app/UpdateChecker.java"
 if (Test-Path $updaterFile) {
     $updaterText = [IO.File]::ReadAllText($updaterFile)
@@ -102,13 +102,24 @@ if ($VersionCode -gt 0 -or $VersionName -ne "") {
 Write-Host "==> 4/6 gradle assemble ($Mode)"
 Set-Location "$Root/mobile/android"
 $task = if ($Mode -eq "release") { "assembleRelease" } else { "assembleDebug" }
-# NOTE: 2>&1 is required - javac/gradle write warnings to stderr, and with
-# $ErrorActionPreference=Stop Windows PowerShell would abort on them.
-& .\gradlew.bat $task --console=plain 2>&1 | ForEach-Object { "$_" } | Select-Object -Last 40
-if ($LASTEXITCODE -ne 0) { Fail "gradle build failed" }
+# NOTE: 2>&1 is required - javac/gradle write warnings to stderr. Temporarily
+# relax ErrorActionPreference because Windows PowerShell 5.1 turns native stderr
+# into a terminating error when it is Stop (even when the build succeeds).
+$buildArguments = @($task, "-PapiBase=$ApiBase", "--console=plain")
+if ($BuildRoot) { $buildArguments += "-PbuildRoot=$BuildRoot" }
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & .\gradlew.bat @buildArguments 2>&1 | ForEach-Object { "$_" } | Select-Object -Last 40
+    $gradleExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousEap
+}
+if ($gradleExit -ne 0) { Fail "gradle build failed" }
 
 Write-Host "==> 5/6 collect apk"
-$apkDir = if ($Mode -eq "release") { "app/build/outputs/apk/release" } else { "app/build/outputs/apk/debug" }
+$apkRoot = if ($BuildRoot) { Join-Path $BuildRoot "app" } else { "app/build" }
+$apkDir = Join-Path $apkRoot "outputs/apk/$Mode"
 $apk = Get-ChildItem "$apkDir/*.apk" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $apk) { Fail "apk not found in $apkDir" }
 New-Item -ItemType Directory -Force -Path "$Root/deliverables" | Out-Null

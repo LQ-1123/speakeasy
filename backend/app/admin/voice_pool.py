@@ -230,11 +230,6 @@ def pick_from_pool(
         candidates = [rid for rid in match(need_lang, need_g) if rid not in used]
         if candidates:
             return random.choice(candidates) if randomize else candidates[0]
-    # 全被占用也允许复用（池子小的时候总比没有 Fish 声音好）
-    for need_lang, need_g in ((True, True), (False, True), (False, False)):
-        candidates = match(need_lang, need_g)
-        if candidates:
-            return candidates[0]
     return ""
 
 
@@ -331,6 +326,11 @@ def status(db: Any = None) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     assigned = _assigned_counts(db) if db is not None else {}
+    gaps = {"waiting_voice": 0, "gaps": []}
+    if db is not None:
+        from app.voice.catalog import voice_gaps
+
+        gaps = voice_gaps(db)
     pool = []
     for item in load_pool():
         row = dict(item)
@@ -344,6 +344,7 @@ def status(db: Any = None) -> dict[str, Any]:
         },
         "voices": pool,
         "assigned": assigned,
+        "voice_gaps": gaps,
     }
 
 

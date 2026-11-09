@@ -9,6 +9,8 @@
 
 import type { Expression, Friend, Message, Moment, Profile } from "./model";
 import { avatarRegionOf, diceAvatar, profileAvatar, renderAvataaars } from "./avatar";
+import { clientApi } from "./v3/clientApi";
+import { queryClient } from "./queryClient";
 
 /* ------------------------------------------------------------ 常量与工具 */
 
@@ -253,6 +255,7 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
 export interface LiveSnapshot {
   friends: Friend[];
   messages: Message[];
+  expressions: Expression[];
   /** 待处理的好友申请（bootstrap.requests） */
   requests: Friend[];
   /** 只覆盖后端确实提供的字段 */
@@ -261,32 +264,24 @@ export interface LiveSnapshot {
 
 /** 拉一次全量：好友 + 每位好友最近消息 + 我的资料 */
 export async function loadAll(): Promise<LiveSnapshot | null> {
-  const boot = await getJson<Record<string, unknown>>(`${BASE}/bootstrap`);
+  const boot = await queryClient.fetchQuery({ queryKey: ["client", "bootstrap"], queryFn: clientApi.bootstrap, staleTime: 0 });
+  return mapClientBootstrap(boot);
+}
+
+export function mapClientBootstrap(boot: import("./v3/clientApi").ClientBootstrap): LiveSnapshot {
   /* 只有“请求失败”才算掉线；好友为空是合法状态（新手引导/清空后），
      否则前端会误判成离线并回退到 mock 名单 —— 删都删不掉。 */
-  if (!boot) return null;
   const rawFriends = (boot.friends as RawFriend[]) ?? [];
 
   const friends = rawFriends.map(mapFriend);
   assignAvatars(friends); // 头像整批分配（两阶段，避免抢照片）
 
   // 每位好友取最近 20 条；并发但限制在 4 个一组，避免瞬间打满
-  const messages: Message[] = [];
-  for (let i = 0; i < friends.length; i += 4) {
-    const batch = friends.slice(i, i + 4);
-    const results = await Promise.all(
-      batch.map(async (f) => {
-        const r = await getJson<{ messages?: RawMessage[] }>(
-          `${BASE}/friends/${f.id}/messages?limit=20`,
-        );
-        return (r?.messages ?? [])
-          .map((m) => mapMessage(m, f.id))
-          .filter((m): m is Message => m !== null);
-      }),
-    );
-    results.forEach((list) => messages.push(...list));
-  }
-  messages.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  const messages: Message[] = (boot.conversations ?? []).flatMap((conversation) => {
+    if (!conversation.last_message) return [];
+    const message = mapMessage(conversation.last_message, conversation.friend_id);
+    return message ? [message] : [];
+  });
 
   const rawProfile = (boot.profile as Record<string, unknown>) ?? {};
   const fact = (rawProfile.fact_sheet ?? {}) as Record<string, any>;
@@ -323,7 +318,7 @@ export async function loadAll(): Promise<LiveSnapshot | null> {
     requestNote: String((r as Record<string, unknown>).request_message ?? ""),
   }));
 
-  return { friends, messages, profile, requests };
+  return { friends, messages, profile, requests, expressions: (boot.expressions ?? []).map(mapExpression) };
 }
 
 /** 发一条文字；返回该好友的最新消息（用于替换本地状态） */
@@ -346,9 +341,9 @@ export async function sendText(
 }
 
 /** 拉某位好友的最新消息（轮询用） */
-export async function fetchMessages(friendId: string): Promise<Message[] | null> {
+export async function fetchMessages(friendId: string, before?: string): Promise<Message[] | null> {
   const r = await getJson<{ messages?: RawMessage[] }>(
-    `${BASE}/friends/${friendId}/messages?limit=30`,
+    `${BASE}/friends/${friendId}/messages?limit=30${before ? `&before=${encodeURIComponent(before)}` : ""}`,
   );
   if (!r) return null;
   return (r.messages ?? [])
@@ -360,11 +355,12 @@ export async function fetchMessages(friendId: string): Promise<Message[] | null>
 export async function translate(
   text: string,
   friendId: string,
+  target = "zh",
 ): Promise<string | null> {
   const r = await getJson<Record<string, unknown>>(`${BASE}/translate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, friend_id: friendId }),
+    body: JSON.stringify({ text, friend_id: friendId, target }),
   });
   if (!r) return null;
   const out = r.translation ?? r.text ?? r.result;

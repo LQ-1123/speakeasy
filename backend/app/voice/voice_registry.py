@@ -168,6 +168,7 @@ class VoiceBinding:
     ref: str  # provider=fish 时的 Fish 音色 id
     edge_voice: str  # provider=edge 时（或 Fish 失败时）的 Edge 声线
     token: str  # 稳定身份：fish-<hash8> / edge-<voice>
+    strict: bool = False
 
     @property
     def fish_enabled(self) -> bool:
@@ -183,6 +184,17 @@ def edge_voice_valid(name: str) -> bool:
     return bool(_EDGE_RE.match(str(name or "").strip()))
 
 
+def render_revision(persona: dict, cfg: Any = None) -> str:
+    """Version public URLs and on-disk artifacts with the same synthesis inputs."""
+    cfg = cfg if cfg is not None else load_cfg()
+    parameters = "|".join((
+        "binding-v2", str(getattr(cfg, "fish_model", "") or ""),
+        str(getattr(cfg, "fish_format", "") or ""),
+        str(persona.get("voice_rate") or "+0%"), str(persona.get("voice_pitch") or "+0Hz"),
+    ))
+    return hashlib.sha1(parameters.encode("utf-8")).hexdigest()[:8]
+
+
 def valid_edge_voice(persona: dict) -> str:
     """角色固定下来的 Edge 声线：优先 persona.voice_id，不合法就确定性挑一个。"""
     persona = persona if isinstance(persona, dict) else {}
@@ -196,25 +208,30 @@ def valid_edge_voice(persona: dict) -> str:
     )
 
 
-def binding_for_persona(persona: dict, cfg: Any = None) -> VoiceBinding:
+def binding_for_persona(persona: dict, cfg: Any = None, *, strict: bool | None = None) -> VoiceBinding:
     """persona 行 → 声音身份。
 
     ``token`` 是稳定身份（不随 Fish 是否可达变化）；``provider`` 才是本次实际会用的后端。
     """
     persona = persona if isinstance(persona, dict) else {}
+    strict = strict if strict is not None else os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
     pid = str(persona.get("id") or "")
+    if strict and (persona.get("status") == "waiting_voice" or (
+        not str(persona.get("fish_voice_id") or "").strip() and not edge_voice_valid(str(persona.get("voice_id") or ""))
+    )):
+        raise ValueError("voice_not_ready")
     edge_voice = valid_edge_voice(persona)
     fish_id = str(persona.get("fish_voice_id") or "").strip()
     cfg = cfg if cfg is not None else load_cfg()
     if fish_id:
         digest = hashlib.sha1(fish_id.encode("utf-8")).hexdigest()[:8]
         token = f"fish-{digest}"
-        provider = "fish" if fish_usable(cfg) else "edge"
-        return VoiceBinding(pid, provider, fish_id, edge_voice, token)
-    return VoiceBinding(pid, "edge", "", edge_voice, f"edge-{edge_voice}")
+        provider = "fish" if strict or fish_usable(cfg) else "edge"
+        return VoiceBinding(pid, provider, fish_id, edge_voice, token, strict)
+    return VoiceBinding(pid, "edge", "", edge_voice, f"edge-{edge_voice}", strict)
 
 
-def binding_for_friend(db: Any, friend: dict, cfg: Any = None) -> VoiceBinding:
+def binding_for_friend(db: Any, friend: dict, cfg: Any = None, *, strict: bool | None = None) -> VoiceBinding:
     """好友行 → 声音身份。
 
     有 ``persona_id`` 时**实时读 personas 行**：好友行里的 fish_voice_id 是建好友时的快照，
@@ -231,7 +248,10 @@ def binding_for_friend(db: Any, friend: dict, cfg: Any = None) -> VoiceBinding:
         except Exception as exc:  # noqa: BLE001
             log.debug("读取 persona 音色失败，回落好友行: %s", exc)
         if persona is not None:
-            return binding_for_persona(persona, cfg)
+            return binding_for_persona(persona, cfg, strict=strict)
+    strict = strict if strict is not None else os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+    if strict:
+        return binding_for_persona({**friend, "id": str(friend.get("id") or "")}, cfg, strict=True)
     # 非 Persona 好友（老数据 / 用户自建）：用好友行自己的字段
     edge_voice = str(friend.get("voice_id") or "").strip()
     if not edge_voice_valid(edge_voice):
@@ -313,6 +333,10 @@ async def synthesize(
         except Exception as exc:  # noqa: BLE001 - Fish 不可用是常态，统一降级
             mark_fish_failure(exc)
             log.warning("Fish 不可达（%s），统一降级到该角色的 Edge 声线 %s", exc, binding.edge_voice)
+
+    if binding.strict and binding.fish_enabled:
+        # A provider outage must remain explicit rather than changing the person's voice.
+        return None
 
     # 2) Edge（角色自己的声线）
     if edge_engine is None:

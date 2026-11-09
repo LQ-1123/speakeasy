@@ -145,3 +145,25 @@ export interface Profile {
   /** 生日 YYYY-MM-DD（用来匹配年龄相仿的人） */
   birthday?: string;
 }
+
+export interface DiscoverCandidate {
+  id: string;
+  name: string;
+  avatar: string;
+  age: number;
+  city: string;
+  country: string;
+  flag: string;
+  language: string;
+  languageLabel: string;
+  occupation: string;
+  bio: string;
+  greeting: string;
+  greetingZh: string;
+  /** 真实后端返回的打招呼音频地址（mock 数据没有） */
+  greetingAudio?: string;
+  voiceLabel: string;
+  accent: string;
+  online: boolean;
+  tags: string[];
+}

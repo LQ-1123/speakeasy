@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /** 会话页右侧的资料卡。 */
 
 import { Clock, MapPin, Sparkles } from "lucide-react";
@@ -10,7 +12,7 @@ import { useApp } from "../store";
 import { Avatar } from "../ui";
 
 export function FriendInfo({ friend }: { friend: Friend }) {
-  const { expressions } = useApp();
+  const { expressions } = useApp(useShallow((state) => ({ expressions: state.expressions })));
   const fromThisFriend = expressions.filter((e) => e.sourceFriendId === friend.id).length;
 
   return (
@@ -19,12 +21,12 @@ export function FriendInfo({ friend }: { friend: Friend }) {
         <Avatar friend={friend} size={78} round online={friend.online} />
         <div className="w4-info-name">
           {friend.name}
-          <span style={{ fontSize: 13 }}>{friend.flag}</span>
+          <span className="se-info-flag">{friend.flag}</span>
         </div>
         <div className="w4-info-meta">
           {friend.age} 岁 · {friend.city} · {friend.occupation}
         </div>
-        <div className="w4-chips" style={{ justifyContent: "center", marginTop: 8 }}>
+        <div className="w4-chips se-info-chips">
           <span className="w4-chip is-green">{CLOSENESS[friend.closeness]}</span>
           <span className="w4-chip">{friend.languageLabel}</span>
           <span className="w4-chip">{friend.voiceLabel}</span>
@@ -37,7 +39,7 @@ export function FriendInfo({ friend }: { friend: Friend }) {
         <div className="w4-info-label">现在</div>
         <div className="w4-kv">
           <dt>
-            <Clock size={12} style={{ verticalAlign: -1, marginRight: 3 }} />
+            <Clock size={12} className="se-kv-icon" />
             当地
           </dt>
           <dd>
@@ -47,7 +49,7 @@ export function FriendInfo({ friend }: { friend: Friend }) {
         </div>
         <div className="w4-kv">
           <dt>
-            <MapPin size={12} style={{ verticalAlign: -1, marginRight: 3 }} />
+            <MapPin size={12} className="se-kv-icon" />
             时差
           </dt>
           <dd>{friend.timezone ? timeDiff(friend.timezone) : "未知"}</dd>
@@ -58,12 +60,12 @@ export function FriendInfo({ friend }: { friend: Friend }) {
         <div className="w4-info-label">TA 记得的</div>
         {friend.sharedEpisodes.length ? (
           friend.sharedEpisodes.map((s) => (
-            <div key={s} className="w4-kv" style={{ padding: "2px 0" }}>
-              <dd style={{ paddingLeft: 0 }}>· {s}</dd>
+            <div key={s} className="w4-kv se-kv-note">
+              <dd className="se-kv-plain">· {s}</dd>
             </div>
           ))
         ) : (
-          <div style={{ fontSize: 12.5, color: "var(--w-text-3)" }}>还没什么共同经历，多聊聊。</div>
+          <div className="se-info-empty">还没什么共同经历，多聊聊。</div>
         )}
         {friend.openLoops.length ? (
           <div className="w4-openloop">
@@ -86,7 +88,7 @@ export function FriendInfo({ friend }: { friend: Friend }) {
 
       <div className="w4-info-section">
         <div className="w4-info-label">一起练过的</div>
-        <div style={{ fontSize: 12.5, color: "var(--w-text-2)" }}>
+        <div className="se-info-turns">
           聊过 <b>{friend.turns}</b> 轮
           {fromThisFriend ? (
             <>

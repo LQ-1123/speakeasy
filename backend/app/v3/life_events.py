@@ -2553,12 +2553,19 @@ async def life_loop(db: Any, llm: Any, *, tick_s: float = 300.0) -> None:
 
 
 
+_CODE_LEXICON_DEFAULTS = {name: globals()[name] for name in (
+    "EVENT_TYPES", "RULE_EVENT_TYPES", "NARRATIVE_EVENT_TYPES",
+    "RULE_EVENTS_PER_DAY_DEFAULT", "NARRATIVE_EVENTS_PER_DAY_DEFAULT",
+)}
+
+
 def refresh_from_lexicon() -> dict[str, int]:
     """把 ``events.json`` / ``rhythm.json`` 应用到事件引擎（类型集合 + 每天规则事件数）。
 
     只改"新事件怎么产生"，不改已落库的事件；类型停用后不再生成，但历史仍在。
     """
     applied = {"event_types": 0, "rule_per_day": 0}
+    globals().update(_CODE_LEXICON_DEFAULTS)
     try:
         from app.v3 import lexicon  # noqa: PLC0415
 

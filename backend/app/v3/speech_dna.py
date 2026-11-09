@@ -1673,6 +1673,28 @@ async def ensure_persona_dna(
     return summary
 
 
+_CODE_DNA_KEYS = DNA_KEYS
+_CODE_DNA_ENUMS = dict(DNA_ENUMS)
+_CODE_DEFAULT_DNA = dict(DEFAULT_DNA)
+_CODE_TRAITS = {field: dict(values) for field, values in _TRAIT_BY_FIELD.items()}
+_CODE_SCENES = SCENES
+_CODE_BANNED = tuple(_GLOBAL_BANNED)
+
+
+def _restore_code_defaults() -> None:
+    globals()["DNA_KEYS"] = _CODE_DNA_KEYS
+    DNA_ENUMS.clear()
+    DNA_ENUMS.update(_CODE_DNA_ENUMS)
+    DEFAULT_DNA.clear()
+    DEFAULT_DNA.update(_CODE_DEFAULT_DNA)
+    for field, values in _CODE_TRAITS.items():
+        mapping = _TRAIT_BY_FIELD[field]
+        mapping.clear()
+        mapping.update(values)
+    globals()["SCENES"] = _CODE_SCENES
+    _GLOBAL_BANNED[:] = _CODE_BANNED
+
+
 def refresh_from_lexicon() -> dict[str, int]:
     """把 ``data/lexicons/*.json`` 应用到运行时（枚举 / 数值映射 / 默认值 / 场景 / 禁用词）。
 
@@ -1680,6 +1702,7 @@ def refresh_from_lexicon() -> dict[str, int]:
     所以这个方法可以放心地在启动和后台保存后调用。
     """
     applied = {"dna_fields": 0, "scenes": 0, "banned": 0}
+    _restore_code_defaults()
     try:
         from app.v3 import lexicon  # noqa: PLC0415
 
@@ -1725,12 +1748,13 @@ def refresh_from_lexicon() -> dict[str, int]:
             if new_enums:
                 ordered = [k for k in DNA_KEYS if k in new_enums]
                 ordered += [k for k in new_enums if k not in ordered]
-                globals()["DNA_ENUMS"] = {k: new_enums[k] for k in ordered}
+                DNA_ENUMS.clear()
+                DNA_ENUMS.update({k: new_enums[k] for k in ordered})
                 globals()["DNA_KEYS"] = tuple(ordered)
                 DEFAULT_DNA.update({k: v for k, v in new_defaults.items() if k in new_enums})
                 applied["dna_fields"] = len(ordered)
 
-    scenes_dir = lexicon.load("scenes") if isinstance(dna_dir, dict) else None
+    scenes_dir = lexicon.load("scenes")
     if isinstance(scenes_dir, dict):
         raw_scenes = scenes_dir.get("scenes")
         if isinstance(raw_scenes, list):

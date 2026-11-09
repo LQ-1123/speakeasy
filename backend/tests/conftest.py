@@ -12,8 +12,6 @@ from pathlib import Path
 
 import pytest
 
-import os
-
 # 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
 os.environ.setdefault("SE_TTS_FISH", "0")
 
@@ -36,13 +34,26 @@ os.environ.setdefault("TTS_PREWARM", "false")
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _clear_settings_cache():
+def _clear_settings_cache(tmp_path_factory):
     """确保 config 在环境变量设置后重新读取。"""
     from app import config
 
+    previous_data = os.environ.get("DATA_DIR")
+    os.environ["DATA_DIR"] = str(tmp_path_factory.mktemp("runtime-data"))
     config.get_settings.cache_clear()
     yield
+    if previous_data is None:
+        os.environ.pop("DATA_DIR", None)
+    else:
+        os.environ["DATA_DIR"] = previous_data
     config.get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_voice_policy(monkeypatch):
+    # Individual production-policy tests opt in; lifecycle startup must not leak
+    # a process-wide policy into unrelated legacy mock fixtures.
+    monkeypatch.setenv("SE_VOICE_STRICT", "0")
 
 
 @pytest.fixture

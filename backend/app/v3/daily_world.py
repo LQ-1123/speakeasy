@@ -405,6 +405,19 @@ def _pool_hint(pools: dict, language: str) -> str:
     )
 
 
+def _pick_edge_voice(db: Any, language: str, gender: str = "") -> str:
+    """Choose a free catalog voice; never manufacture a shared default on exhaustion."""
+    from app.voice.catalog import edge_voice_candidates, used_voice_ids
+
+    lang = str(language or "en").strip().lower()
+    candidates = list(edge_voice_candidates(lang, gender))
+    if not candidates:
+        return ""
+    with db._lock:
+        used = used_voice_ids(db, "voice_id")
+    return next((voice for voice in candidates if voice not in used), "")
+
+
 def _fallback_persona(
     index: int, day: str, language: str = "en", *, gender: str = ""
 ) -> dict:
@@ -502,6 +515,21 @@ LEVEL_GUIDE = {
 def _user_lang_prefs(db: Any) -> tuple[list[str], dict[str, str]]:
     """读取用户在练语言与各自水平。"""
     try:
+        # The world is shared. Build language coverage from registered users' own
+        # rows; never borrow a local user's private fact sheet for another user.
+        with db._lock:
+            rows = db.conn.execute("SELECT target_languages,fact_sheet FROM user_profiles ORDER BY user_id").fetchall()
+        if rows:
+            targets: list[str] = []
+            levels: dict[str, str] = {}
+            for row in rows:
+                for lang in json.loads(row["target_languages"] or "[]"):
+                    if str(lang).strip() and str(lang) not in targets:
+                        targets.append(str(lang))
+                fact = json.loads(row["fact_sheet"] or "{}")
+                for lang, level in ((fact.get("language_profile") or {}).get("levels") or {}).items():
+                    levels.setdefault(str(lang), str(level))
+            return targets, levels
         profile = db.get_profile() or {}
         targets = [str(x) for x in (profile.get("target_languages") or []) if str(x).strip()]
         fact = profile.get("fact_sheet") or {}
@@ -647,7 +675,9 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
             )
             if candidate and candidate not in used:
                 return candidate
-        return candidate or ""
+        # Exhaustion leaves this persona unassigned; reusing the last provider result
+        # would make two active roles share one Fish identity.
+        return ""
     except Exception as exc:  # noqa: BLE001
         try:
             from app.voice import voice_registry  # noqa: PLC0415
@@ -671,7 +701,27 @@ async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) 
     posts = list(persona.get("posts") or [])[:POSTS_PER_PERSONA]
     options = json.dumps(default_options({**persona, "id": pid}), ensure_ascii=False)
     fish_ref = await _pick_fish_voice(db, lang, str(persona.get("gender") or ""))
+    strict = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+    verified_edge = ""
+    if strict:
+        from app.voice.catalog import verify_voice
+
+        if fish_ref and not await verify_voice(db, "fish", fish_ref, language=lang):
+            fish_ref = ""
+        verified_edge = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
+        if verified_edge and not await verify_voice(db, "edge", verified_edge, language=lang):
+            verified_edge = ""
     with db._lock, db.conn:  # noqa: SLF001
+        if not db.conn.in_transaction:
+            db.conn.execute("BEGIN IMMEDIATE")
+        edge_voice = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
+        if strict and edge_voice != verified_edge:
+            edge_voice = ""
+        if fish_ref and db.conn.execute(
+            "SELECT 1 FROM personas WHERE status='active' AND fish_voice_id=?", (fish_ref,)
+        ).fetchone():
+            fish_ref = ""
+        voice_ready = bool(edge_voice or (strict and fish_ref))
         db.conn.execute(
             "INSERT INTO personas (id, nickname, avatar, avatar_seed, avatar_style, avatar_options,"
             " bio, personality, interests, language, country, city, timezone, occupation, age,"
@@ -695,11 +745,11 @@ async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) 
                 str(persona.get("occupation") or "")[:80],
                 int(persona.get("age") or 27),
                 str(persona.get("gender") or "female"),
-                VOICE_BY_LANG[lang][len(pid) % len(VOICE_BY_LANG[lang])],
+                edge_voice,
                 fish_ref,
                 "",
                 json.dumps({"generated": "daily", "day": day}, ensure_ascii=False),
-                "active",
+                "active" if voice_ready else "waiting_voice",
                 iso(created),
                 "guest",
                 expires_at,
@@ -721,13 +771,14 @@ async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) 
             db.conn.execute(
                 "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
                 " visibility, like_count, comment_count, created_at, expires_at)"
-                " VALUES (?,?,?, '[]', ?, ?, 'public', 0, 0, ?, ?)",
+                " VALUES (?,?,?, '[]', ?, ?, ?, 0, 0, ?, ?)",
                 (
                     f"pp_{uuid.uuid4().hex[:12]}",
                     pid,
                     content,
                     json.dumps(tags or [], ensure_ascii=False),
                     lang,
+                    "public" if voice_ready else "waiting_voice",
                     iso(post_created),
                     expires_at,
                 ),

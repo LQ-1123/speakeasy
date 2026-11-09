@@ -157,6 +157,16 @@ class DB:
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    user_id TEXT PRIMARY KEY,
+                    nickname TEXT DEFAULT 'Traveler',
+                    native_language TEXT DEFAULT 'zh-CN',
+                    target_languages JSON DEFAULT '["en"]',
+                    birthday TEXT DEFAULT '',
+                    fact_sheet JSON NOT NULL DEFAULT '{}',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS friends (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -272,6 +282,8 @@ class DB:
                     "ALTER TABLE friends ADD COLUMN owner_user_id TEXT DEFAULT 'local'"
                 )
                 log.info("migrated friends table: added owner_user_id column")
+            if "voice_pending_status" not in columns:
+                conn.execute("ALTER TABLE friends ADD COLUMN voice_pending_status TEXT NOT NULL DEFAULT 'pending_request'")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_user_id)"
             )
@@ -354,16 +366,25 @@ class DB:
     # ------------------------------------------------------------------ #
     # 用户画像
     # ------------------------------------------------------------------ #
-    def get_profile(self) -> dict:
-        data = self._fetch_one("user_profile", "id=1", ())
+    def get_profile(self, *, user_id: str | None = None) -> dict:
+        owner = user_id or current_user_id()
+        if owner == LOCAL_USER_ID:
+            data = self._fetch_one("user_profile", "id=1", ())
+        else:
+            with self._lock:
+                row = self.conn.execute("SELECT * FROM user_profiles WHERE user_id=?", (owner,)).fetchone()
+            data = self._row_to_dict(row, "user_profile")
+            if data is not None:
+                data["id"] = owner
         if data is None:
             data = dict(_DEFAULT_PROFILE)
             data["fact_sheet"] = json.loads(_json_dumps(_DEFAULT_PROFILE["fact_sheet"]))
             data["target_languages"] = list(_DEFAULT_PROFILE["target_languages"])
-            data["id"] = 1
+            data["id"] = 1 if owner == LOCAL_USER_ID else owner
         return data
 
-    def update_profile(self, **fields: Any) -> dict:
+    def update_profile(self, *, user_id: str | None = None, **fields: Any) -> dict:
+        owner = user_id or current_user_id()
         allowed = {"nickname", "native_language", "target_languages", "fact_sheet", "birthday"}
         payload = {k: v for k, v in fields.items() if k in allowed}
         if "target_languages" in payload:
@@ -373,8 +394,19 @@ class DB:
         payload["updated_at"] = _now_iso()
         sets = ", ".join(f"{k}=?" for k in payload)
         with self._lock, self.conn:
-            self.conn.execute(f"UPDATE user_profile SET {sets} WHERE id=1", tuple(payload.values()))
-        return self.get_profile()
+            if owner == LOCAL_USER_ID:
+                self.conn.execute(f"UPDATE user_profile SET {sets} WHERE id=1", tuple(payload.values()))
+            else:
+                defaults = self.get_profile(user_id=owner)
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO user_profiles "
+                    "(user_id,nickname,native_language,target_languages,birthday,fact_sheet,updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (owner, defaults["nickname"], defaults["native_language"],
+                     _json_dumps(defaults["target_languages"]), defaults.get("birthday", ""),
+                     _json_dumps(defaults["fact_sheet"]), _now_iso()),
+                )
+                self.conn.execute(f"UPDATE user_profiles SET {sets} WHERE user_id=?", (*payload.values(), owner))
+        return self.get_profile(user_id=owner)
 
     def set_fact_sheet(self, fact: dict) -> dict:
         return self.update_profile(fact_sheet=fact)
@@ -569,8 +601,13 @@ class DB:
         sql = "SELECT * FROM messages WHERE friend_id=?"
         params: list[Any] = [friend_id]
         if before:
-            sql += " AND created_at < ?"
-            params.append(before)
+            timestamp, separator, message_id = before.partition("|")
+            if separator:
+                sql += " AND (created_at < ? OR (created_at=? AND rowid < (SELECT rowid FROM messages WHERE id=? AND friend_id=?)))"
+                params.extend((timestamp, timestamp, message_id, friend_id))
+            else:
+                sql += " AND created_at < ?"
+                params.append(before)
         sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         params.append(limit)
         rows = self._fetch_all("messages", sql, params)

@@ -6,7 +6,9 @@
  * 播放新音频前先暂停旧的，并广播「开始播放」事件让各组件重置按钮状态。
  */
 
-import { isWebAudioPlaying, stopWebAudio, webAudioStats } from "./local/tts";
+const isWebAudioPlaying = () => false;
+const stopWebAudio = () => undefined;
+const webAudioStats = () => ({ playing: false, duration: 0, currentTime: 0 });
 
 type StartListener = (src: string) => void;
 

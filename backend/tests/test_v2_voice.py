@@ -59,7 +59,7 @@ _REQUIRED_COUNTRIES = {
 _MULTILINGUAL_ARCHETYPES: dict[str, tuple[str, str, str, str]] = {
     "jp_male_01": ("ja-JP-KeitaNeural", "Japan", "ja", "Asia/Tokyo"),
     "jp_female_01": ("ja-JP-NanamiNeural", "Japan", "ja", "Asia/Tokyo"),
-    "kr_male_01": ("ko-KR-HyunsuMultilingualNeural", "Korea", "ko", "Asia/Seoul"),
+    "kr_male_01": ("ko-KR-InJoonNeural", "Korea", "ko", "Asia/Seoul"),
     "kr_female_01": ("ko-KR-SunHiNeural", "Korea", "ko", "Asia/Seoul"),
     "br_male_01": ("pt-BR-AntonioNeural", "Brazil", "pt", "America/Sao_Paulo"),
     "br_female_01": ("pt-BR-ThalitaMultilingualNeural", "Brazil", "pt", "America/Sao_Paulo"),

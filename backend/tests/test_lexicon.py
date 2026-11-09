@@ -127,6 +127,20 @@ def test_reset_restores_previous_version(lib_dir):
     assert speech_dna.dna_traits({"verbosity": "long"})["verbosity"] != pytest.approx(0.5)
 
 
+def test_reset_without_backup_restores_code_defaults_in_place(lib_dir):
+    enums = speech_dna.DNA_ENUMS
+    trait_map = speech_dna._TRAIT_BY_FIELD["verbosity"]
+    payload = _dna_payload()
+    payload["fields"]["verbosity"]["values"]["long"]["enabled"] = False
+    lexicon.save("dna", payload)
+    assert "long" not in speech_dna.DNA_ENUMS["verbosity"]
+    assert lexicon.reset_to_default("dna")["restored"] == "code-default"
+    assert "long" in speech_dna.DNA_ENUMS["verbosity"]
+    assert speech_dna.DNA_ENUMS is enums
+    assert speech_dna._TRAIT_BY_FIELD["verbosity"] is trait_map
+    assert trait_map["long"] == pytest.approx(0.92)
+
+
 def test_global_banned_phrases_reach_prompt(lib_dir):
     lexicon.save(
         "phrases",

@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import zlib
 from typing import Any
@@ -727,6 +728,7 @@ class PersonaSpawner:
             _cfg = _TCS(str(_gs().data_path)).load()
             # Fish 不可达时不要等网络：新好友先用 Edge 声线兜底（聊天/朗读仍然一致）
             if _cfg.provider == "fish" and _cfg.fish_api_key.strip() and _vr.fish_usable(_cfg):
+                from app.voice.catalog import used_voice_ids
                 # 用与头像一致的那份性别去挑音色
                 _gender = _persona_gender
                 data["fish_voice_id"] = await _ft.pick_voice_for(
@@ -736,11 +738,54 @@ class PersonaSpawner:
                     base_url=_cfg.fish_base_url,
                     timeout=5.0,
                     pages=1,
+                    used=used_voice_ids(self.db, "fish_voice_id") | {str(_cfg.fish_reference_id or "")},
                 )
         except Exception as _exc:  # noqa: BLE001
             log.debug("分配 Fish 音色失败（用默认）: %s", _exc)
 
-        friend = self.db.create_friend(data)
+        strict_voices = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+        ready_provider = ""
+        if strict_voices:
+            from app.voice.catalog import verify_voice
+
+            fish_id = str(data.get("fish_voice_id") or "")
+            if fish_id and await verify_voice(self.db, "fish", fish_id):
+                ready_provider = "fish"
+            else:
+                data["fish_voice_id"] = ""
+                if await verify_voice(self.db, "edge", str(data.get("voice_id") or "")):
+                    ready_provider = "edge"
+            if not ready_provider:
+                data["status"] = "waiting_voice"
+        with self.db._lock:
+            from app.voice.catalog import used_voice_ids
+
+            if not self.db.conn.in_transaction:
+                self.db.conn.execute("BEGIN IMMEDIATE")
+            # Provider selection awaits network I/O, so recheck ownership at insertion.
+            fish_id = str(data.get("fish_voice_id") or "")
+            if fish_id and fish_id in used_voice_ids(self.db, "fish_voice_id"):
+                data["fish_voice_id"] = ""
+                if strict_voices and ready_provider == "fish":
+                    data["status"] = "waiting_voice"
+            edge_id = str(data.get("voice_id") or "")
+            if edge_id in used_voice_ids(self.db, "voice_id"):
+                from app.voice.catalog import edge_voice_candidates
+
+                used_edges = used_voice_ids(self.db, "voice_id")
+                data["voice_id"] = next((v for v in edge_voice_candidates(
+                    str(data.get("reply_language") or "en"), str(data.get("gender") or "")
+                ) if v not in used_edges), "")
+                if strict_voices:
+                    from app.voice.catalog import verified_voice
+
+                    if not verified_voice(self.db, "edge", data["voice_id"]):
+                        data["status"] = "waiting_voice"
+                if not data["voice_id"]:
+                    data["status"] = "waiting_voice"
+            if data["status"] == "waiting_voice":
+                data["voice_pending_status"] = effective_status
+            friend = self.db.create_friend(data)
         friend["initial_context"] = persona["initial_context"]
         friend["personality_traits"] = list(persona["personality_traits"])
         log.info(

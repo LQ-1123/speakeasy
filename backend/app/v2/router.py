@@ -651,6 +651,8 @@ async def _send_followup(services: Any, friend: dict, loop: dict) -> None:
 
 
 async def _check_followups(services: Any, active: list[dict]) -> None:
+    if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+        return  # Production durable maintenance owns proactive messages.
     for friend in active:
         fid = friend["id"]
         if fid in services.followup_inflight:
@@ -751,7 +753,7 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
     if body.language and supported_langs and body.language not in supported_langs:
         raise HTTPException(
             status_code=422,
-            detail="这个语言暂时没有可用的真人声线，换一个试试",
+            detail=f"暂不支持语言 {body.language}：没有可用的独立声线，请换一种语言",
         )
     if not has_filters:
         pick_language = _weighted_target_language(services)
@@ -778,6 +780,8 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
             ) from exc
         log.exception("discover 失败")
         raise HTTPException(status_code=502, detail=f"捏人失败: {exc}") from exc
+    if friend.get("status") == "waiting_voice":
+        raise HTTPException(status_code=409, detail="人物声音尚未就绪，请稍后再试")
     message = await _send_icebreaker(services, friend)
     # 把招呼语写进 request_message：好友申请列表里也能看到/试听这句话
     try:
@@ -805,6 +809,8 @@ async def change_friend_voice(request: Request, friend_id: str, body: VoiceChang
 
     改的是 voice_id + rate/pitch —— 只改 voice_id 会让语速/音高沿用旧原型，听感不到位。
     """
+    if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+        raise HTTPException(status_code=403, detail="人物声线由管理端统一绑定")
     services = _services(request)
     friend = await _thread(services.db.get_friend, friend_id)
     if not friend:
@@ -1078,16 +1084,21 @@ async def friend_status(request: Request, friend_id: str) -> dict:
 
 @router.get("/friends/{friend_id}/messages")
 async def friend_messages(
-    request: Request, friend_id: str, limit: int = 30, before: str | None = None
+    request: Request, friend_id: str, limit: int = 30, before: str | None = None,
+    cursor: str | None = None,
 ) -> dict:
     services = _services(request)
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
-    rows = await _thread(services.db.list_messages, friend_id, limit=limit, before=before)
+    bounded_limit = max(1, min(int(limit), 100))
+    rows = await _thread(services.db.list_messages, friend_id, limit=bounded_limit + 1, before=cursor or before)
+    has_more = len(rows) > bounded_limit
+    rows = rows[-bounded_limit:]
     return {
         "friend": await _friend_public(services, friend),
         "messages": [_message_public(m) for m in rows],
+        "next_cursor": f"{rows[0]['created_at']}|{rows[0]['id']}" if rows and has_more else "",
     }
 
 

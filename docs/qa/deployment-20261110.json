@@ -1,0 +1,43 @@
+﻿{
+    "date":  "2026-11-10",
+    "web":  {
+                "url":  "https://47-104-24-236.sslip.io/",
+                "health_url":  "https://47-104-24-236.sslip.io/api/v3/health",
+                "health_status":  200,
+                "static_path":  "/root/speakeasy/backend/app/static/app",
+                "static_files":  97,
+                "static_size_mb":  9.8,
+                "backups":  {
+                                "frontend":  "/root/speakeasy-web-backups/20261110-001651/app",
+                                "backend":  "/root/speakeasy-backend-backups/20261110-002034/app",
+                                "database":  "/root/speakeasy/data/_backup/deploy-20261110-002038/",
+                                "nginx":  "/root/nginx-speakeasy-https.20261110-002132.bak"
+                            },
+                "public_smoke":  {
+                                     "tabs":  4,
+                                     "discover_posts":  338,
+                                     "http_errors":  0,
+                                     "console_errors":  0,
+                                     "websocket_errors":  0,
+                                     "websocket_connected":  true,
+                                     "websocket_ready_messages":  1,
+                                     "speech_stream_status":  206
+                                 },
+                "nginx_ws_fix":  "proxy_set_header Upgrade/Connection added; nginx -t and reload passed"
+            },
+    "android":  {
+                    "artifact":  "deliverables/SpeakEasy-v4.1.0-release.apk",
+                    "package":  "com.speakeasy.app",
+                    "version_code":  410,
+                    "version_name":  "4.1.0",
+                    "api_base":  "https://47-104-24-236.sslip.io",
+                    "min_sdk":  24,
+                    "target_sdk":  36,
+                    "size_mb":  15.78,
+                    "sha256":  "ed3ab7c40aae19381e8cc23ca5e6adbc51c1d52a565651116edcb55fcb7d0fad",
+                    "signer_sha256":  "fac7e179e0365593908c632b2e4b71b87a6bfa6e66aa8fd86a33a416658369b1",
+                    "signature_verified":  true,
+                    "device_installed":  false,
+                    "device_note":  "adb devices returned no attached device"
+                }
+}

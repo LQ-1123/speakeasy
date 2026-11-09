@@ -172,6 +172,8 @@ class Settings(BaseSettings):
     hf_home: str = ""
     torch_home: str = ""
     data_dir: str = ""
+    jpush_app_key: str = ""
+    jpush_master_secret: str = ""
     ref_audio_dir: str = ""
     # 云端 STT：扁平 env（pydantic-settings 能直接读到；嵌套 STTSettings 字段读不到）
     stt_provider: str = ""

@@ -168,7 +168,7 @@ async def test_discover_and_accept_pending(client):
     assert r.status_code == 200
     data = r.json()
     friend = data["friend"]
-    assert friend["status"] == "active"
+    assert friend["status"] == "pending_request"
     assert friend["nationality"] == "Italy"
     assert data["message"]["sender"] == "friend"
     assert data["message"]["audio_url"].startswith("/api/v2/audio/")
@@ -514,6 +514,7 @@ async def test_user_moment_photo_and_call_summary(client):
 async def test_call_stream_turn_events_and_persistence(client):
     http, services = client
     friend = await _make_friend(services)
+    previous_messages = services.db.list_messages(friend["id"])
     events = [
         event
         async for event in services.chat.handle_call_turn_stream(
@@ -531,9 +532,10 @@ async def test_call_stream_turn_events_and_persistence(client):
     sentence_events = [e for e in events if e["type"] == "sentence"]
     assert all(e["audio_url"].startswith("/api/v2/audio/") for e in sentence_events)
     done = events[-1]
-    assert done["friend_message"]["audio_path"]
-    assert done["friend_message"]["msg_type"] == "voice"
-    assert done["total_turns"] >= 1
+    # Call turns stay transient; the call ends with one summary instead of
+    # creating an ordinary voice chat message for every sentence.
+    assert done["friend_message"] is None
+    assert services.db.list_messages(friend["id"]) == previous_messages
 
 
 async def test_call_warmup_only_prewarms(client):

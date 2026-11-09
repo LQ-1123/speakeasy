@@ -146,6 +146,21 @@ def test_events_reset_restores_previous(lib_dir):
     assert event_posts.VALUE_TIERS["meal"] == 0
 
 
+def test_removing_event_and_rhythm_overrides_restores_code_defaults(lib_dir):
+    tiers = event_posts.VALUE_TIERS
+    payload = _events_payload()
+    payload["types"]["meal"]["value_tier"] = 3
+    lexicon.save("events", payload)
+    lexicon.save("rhythm", _rhythm_payload(event_posts_per_day=3, rule_events_per_day=6))
+    lexicon.reset_to_default("events")
+    lexicon.reset_to_default("rhythm")
+    assert event_posts.VALUE_TIERS is tiers
+    assert event_posts.VALUE_TIERS["meal"] == 0
+    assert "relationship" in life_events.EVENT_TYPES
+    assert event_posts.DEFAULT_EVENT_POSTS_PER_DAY == 8
+    assert life_events.RULE_EVENTS_PER_DAY_DEFAULT == 4
+
+
 # --------------------------------------------------------------------------- #
 # 模拟今天
 # --------------------------------------------------------------------------- #

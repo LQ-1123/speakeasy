@@ -593,11 +593,12 @@ class ChatService:
     # ------------------------------------------------------------------ #
     # 语音通话（流式：边生成边按句 TTS）
     # ------------------------------------------------------------------ #
-    async def _synth_sentence(self, text: str, friend: dict) -> dict | None:
+    async def _synth_sentence(self, text: str, friend: dict, *, out_dir: str | None = None) -> dict | None:
         """为一句话合成 TTS，返回 {path,url,duration_ms}；失败返回 None。"""
         clean = _strip_emoji(text)
         if not clean or self.audio is None:
             return None
+        target_dir = out_dir or self.audio.audio_dir
         # Fish 优先：和聊天气泡同一条链路，延迟 ~1s；edge 兜底（国内约 6s）
         try:
             fish_audio = await self._fish_voice(clean, "neutral", friend)
@@ -605,7 +606,7 @@ class ChatService:
                 cfg = self.tts_config.load()
                 ext = (cfg.fish_format or "mp3").lower()
                 fname = f"fish_{uuid.uuid4().hex[:12]}.{ext}"
-                path = os.path.join(self.audio.audio_dir, fname)
+                path = os.path.join(target_dir, fname)
                 await asyncio.to_thread(_write_bytes, path, fish_audio)
                 duration_ms = max(500, int(len(fish_audio) * 8 / 128_000 * 1000))
                 return {
@@ -618,6 +619,8 @@ class ChatService:
         if self.voice is None:
             return None
         binding = self._voice_binding(friend)
+        if binding is not None and getattr(binding, "strict", False) and binding.fish_enabled:
+            return None  # Pinned Fish voice failed; never replace this person with Edge.
         edge_voice = (
             binding.edge_voice
             if binding is not None
@@ -629,7 +632,7 @@ class ChatService:
                 edge_voice,
                 rate=friend.get("voice_rate") or "+0%",
                 pitch=friend.get("voice_pitch") or "+0Hz",
-                out_dir=self.audio.audio_dir,
+                out_dir=target_dir,
             )
         except Exception as exc:  # noqa: BLE001 - 单句 TTS 失败不阻断通话
             log.warning("通话单句 TTS 失败（%s: %s）", type(exc).__name__, exc)
@@ -1545,6 +1548,8 @@ class ChatService:
                 getattr(self, "db", None), friend, cfg=self._tts_cfg()
             )
         except Exception as exc:  # noqa: BLE001 - 音色解析失败不阻断聊天
+            if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+                raise
             log.debug("解析好友音色失败（用好友行兜底）: %s", exc)
             return None
 
@@ -1634,7 +1639,6 @@ class ChatService:
             fish_audio = await self._fish_voice(speak_text, emotion, friend)
             if fish_audio is not None:
                 try:
-                    import os  # noqa: PLC0415
                     import uuid  # noqa: PLC0415
 
                     # Fish 回 mp3（wav 头帧数不可靠）。时长按 128kbps CBR 估算，
@@ -1652,6 +1656,8 @@ class ChatService:
 
             if path is None:
                 binding = self._voice_binding(friend)
+                if binding is not None and getattr(binding, "strict", False) and binding.fish_enabled:
+                    raise RuntimeError("speech-unavailable")
                 edge_voice = (
                     binding.edge_voice
                     if binding is not None
@@ -1664,12 +1670,12 @@ class ChatService:
                     pitch=pitch,
                     out_dir=self.audio.audio_dir,
                 )
-            import os  # noqa: PLC0415
-
             audio_filename = os.path.basename(path)
         except Exception as exc:  # noqa: BLE001 - tone 再兜一层
             log.warning("TTS 合成失败（落 tone）: %s: %s", type(exc).__name__, exc)
             try:
+                if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+                    raise RuntimeError("speech-unavailable")
                 from app.voice.tone_tts import ToneSynthesizer  # noqa: PLC0415
 
                 pcm = ToneSynthesizer(sample_rate=24000).synthesize(text)
@@ -1684,7 +1690,7 @@ class ChatService:
             fid,
             "friend",
             text,
-            msg_type="voice",
+            msg_type="voice" if audio_filename else "text",
             audio_path=audio_filename,
             duration_ms=int(duration_ms or 0),
             is_read=False,

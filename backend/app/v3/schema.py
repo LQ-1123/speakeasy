@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -532,9 +533,10 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
                 " bio=excluded.bio, personality=excluded.personality, interests=excluded.interests,"
                 " language=excluded.language, country=excluded.country, city=excluded.city,"
                 " timezone=excluded.timezone, occupation=excluded.occupation, age=excluded.age,"
-                " gender=excluded.gender, voice_id=excluded.voice_id,"
+                " gender=excluded.gender,"
+                " voice_id=CASE WHEN personas.voice_id<>'' THEN personas.voice_id ELSE excluded.voice_id END,"
                 " archetype_id=excluded.archetype_id, ai_config=excluded.ai_config,"
-                " status=excluded.status,"
+                " status=personas.status,"
                 # DNA 只在语料提供了非空值时才覆盖，保护已生成/已调优的旧数据
                 " speech_dna=CASE WHEN excluded.speech_dna NOT IN ('', '{}')"
                 " THEN excluded.speech_dna ELSE personas.speech_dna END",
@@ -544,7 +546,7 @@ def seed_if_needed(db: Any, *, force: bool = False) -> int:
                     _json(p["interests"]), p["language"], p["country"], p["city"],
                     p["timezone"], p["occupation"], int(p["age"]), p["gender"],
                     p["voice_id"], p["archetype_id"], _json(p["ai_config"]),
-                    p.get("status", "active"), _iso(now), speech_dna,
+                    ("waiting_voice" if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes") else p.get("status", "active")), _iso(now), speech_dna,
                 ),
             )
 

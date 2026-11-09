@@ -1,6 +1,6 @@
 "use client";
 
-/** 所有页共用的零件。样式在 w4.css，这里只管结构。 */
+/** 所有页共用的零件。基础样式在 styles/base.css，这里只管结构。 */
 
 import { type CSSProperties, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -8,6 +8,8 @@ import { X } from "lucide-react";
 
 import { avatarTint, durationLabel, initial, voiceBubbleWidth } from "./format";
 import type { Friend } from "./model";
+import { haptic } from "../theme/haptics";
+import { registerOverlay } from "./navigationStore";
 
 /* ------------------------------------------------------------------ 头像 */
 
@@ -157,15 +159,18 @@ export function Overlay({
   className?: string;
 }) {
   useEffect(() => {
+    const unregister = registerOverlay(onClose);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => { unregister(); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
   const node = (
     <div
       className={`w4-overlay ${className}`}
+      role="dialog"
+      aria-modal="true"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -246,9 +251,12 @@ export function Confirm({
 }
 
 export function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => registerOverlay(onClose), [onClose]);
   return (
     <div
       className="w4-lightbox"
+      role="dialog"
+      aria-modal="true"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -263,15 +271,19 @@ export function Lightbox({ src, onClose }: { src: string; onClose: () => void })
 
 /* ------------------------------------------------------------------ 其他 */
 
-export function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      aria-label={label}
       className={`w4-switch ${on ? "on" : ""}`}
-      onClick={() => onChange(!on)}
-    />
+      onClick={() => {
+        haptic("toggle");
+        onChange(!on);
+      }}
+    ><span aria-hidden="true" /></button>
   );
 }
 

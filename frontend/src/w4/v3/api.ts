@@ -21,6 +21,7 @@ export interface Identity {
   user_id: string;
   token: string;
   display_name?: string;
+  device_key?: string;
 }
 
 export interface PersonaBrief {
@@ -151,6 +152,7 @@ const nativeFetch: typeof fetch | null =
 
 let identity: Identity | null = null;
 let ready: Promise<Identity | null> | null = null;
+let refreshReady: Promise<Identity | null> | null = null;
 let patched = false;
 
 function readLocal<T>(key: string): T | null {
@@ -187,6 +189,10 @@ function deviceKeyFromUrl(): string {
 }
 
 function deviceKey(): string {
+  try {
+    const native = JSON.parse(window.SpeakEasyNative?.getIdentity?.() || "null") as { device_key?: string } | null;
+    if (native?.device_key && native.device_key.length >= 8) return native.device_key;
+  } catch { /* No native migration key. */ }
   const existing = readLocal<string>(DEVICE_STORE);
   if (typeof existing === "string" && existing.length >= 8) return existing;
   const migrated = deviceKeyFromUrl();
@@ -203,12 +209,20 @@ function deviceKey(): string {
 }
 
 /** 注册/取回设备身份（幂等；同一 device_key 永远同一 user_id）。 */
-export function ensureIdentity(): Promise<Identity | null> {
+export function ensureIdentity(forceRefresh = false): Promise<Identity | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
-  if (ready) return ready;
+  if (forceRefresh && refreshReady) return refreshReady;
+  if (ready && !forceRefresh) return ready;
   const stored = readLocal<Identity>(ID_STORE);
   ready = (async () => {
     try {
+      const { nativeClientIdentity, nativeBridge } = await import("./clientApi");
+      const nativeIdentity = await nativeClientIdentity();
+      if (nativeIdentity && !forceRefresh) {
+        identity = nativeIdentity;
+        return identity;
+      }
+      if (forceRefresh && window.SpeakEasyNative?.getIdentity && !nativeIdentity?.device_key) throw new Error("Your existing account could not be refreshed. Please retry after restoring its device identity.");
       const doFetch = nativeFetch ?? window.fetch.bind(window);
       const res = await doFetch(`${API_ORIGIN}/api/v3/auth/register`, {
         method: "POST",
@@ -217,14 +231,20 @@ export function ensureIdentity(): Promise<Identity | null> {
       });
       if (!res.ok) throw new Error(`register ${res.status}`);
       const data = (await res.json()) as Identity;
-      identity = { user_id: data.user_id, token: data.token, display_name: data.display_name };
+      identity = { user_id: data.user_id, token: data.token, display_name: data.display_name, device_key: deviceKey() };
       writeLocal(ID_STORE, identity);
+      nativeBridge()?.saveIdentity?.(JSON.stringify(identity));
       return identity;
-    } catch {
+    } catch (error) {
+      if (window.SpeakEasyNative?.getIdentity) throw error;
       identity = stored;
       return stored;
     }
   })();
+  if (forceRefresh) {
+    refreshReady = ready;
+    void ready.finally(() => { refreshReady = null; }).catch(() => undefined);
+  }
   return ready;
 }
 
@@ -263,7 +283,8 @@ export function installApiIdentity(): void {
     let id: Identity | null = null;
     try {
       id = await ensureIdentity();
-    } catch {
+    } catch (error) {
+      if (window.SpeakEasyNative?.getIdentity) throw error;
       id = readLocal<Identity>(ID_STORE);
     }
     if (!id) return original(input, init);
@@ -281,7 +302,7 @@ export function installApiIdentity(): void {
     if (res.status !== 401) return res;
     /* 身份失效（服务端重置/轮换）：重注册后重试一次，避免整页一直报错 */
     resetIdentity();
-    const next = await ensureIdentity();
+    const next = await ensureIdentity(true);
     return next ? send(next) : res;
   };
 }

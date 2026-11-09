@@ -1,0 +1,65 @@
+{
+  "messages": {
+    "longTasks": [],
+    "maxLongTask": 0,
+    "frames": 183,
+    "avgFrameMs": 16.67,
+    "p95FrameMs": 16.8,
+    "droppedOver20ms": 0,
+    "domNodes": 278,
+    "messagesRendered": 0,
+    "rowsRendered": 12
+  },
+  "chat": {
+    "longTasks": [],
+    "maxLongTask": 0,
+    "frames": 294,
+    "avgFrameMs": 16.67,
+    "p95FrameMs": 16.8,
+    "droppedOver20ms": 0,
+    "domNodes": 431,
+    "messagesRendered": 12,
+    "rowsRendered": 12
+  },
+  "afterSend": {
+    "longTasks": [],
+    "maxLongTask": 0,
+    "frames": 346,
+    "avgFrameMs": 16.67,
+    "p95FrameMs": 16.8,
+    "droppedOver20ms": 0,
+    "domNodes": 415,
+    "messagesRendered": 11,
+    "rowsRendered": 12
+  },
+  "longThread": {
+    "longTasks": [],
+    "maxLongTask": 0,
+    "frames": 193,
+    "avgFrameMs": 16.67,
+    "p95FrameMs": 16.7,
+    "droppedOver20ms": 0,
+    "domNodes": 475,
+    "messagesRendered": 13,
+    "rowsRendered": 15
+  },
+  "themeSwitch": {
+    "longTasks": [],
+    "maxLongTask": 0,
+    "frames": 191,
+    "avgFrameMs": 16.67,
+    "p95FrameMs": 16.8,
+    "droppedOver20ms": 0,
+    "domNodes": 160,
+    "messagesRendered": 0,
+    "rowsRendered": 0,
+    "elapsedMs": 50
+  },
+  "workerAudit": {
+    "elapsedMs": 75
+  },
+  "workerImage": {
+    "elapsedMs": 49,
+    "candidates": 6
+  }
+}

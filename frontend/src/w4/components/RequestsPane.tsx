@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /** 新的朋友：好友申请列表，可以试听 TA 的声音再决定。 */
 
 import { useEffect, useRef, useState } from "react";
@@ -8,11 +10,12 @@ import { Check, Play, X } from "lucide-react";
 import { playVoiceUrl, synthesizeVoice, ttsSampleUrl } from "../apiFacade";
 import type { Route } from "../model";
 import { useApp } from "../store";
+import { haptic } from "../../theme/haptics";
 import { Avatar, Empty, Icon } from "../ui";
 import type { Friend } from "../model";
 
 export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
-  const { requests, acceptRequest, declineRequest } = useApp();
+  const { requests, acceptRequest, declineRequest } = useApp(useShallow((state) => ({ requests: state.requests, acceptRequest: state.acceptRequest, declineRequest: state.declineRequest })));
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /* 离开新的朋友页暂停预览 */
@@ -81,7 +84,16 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
 
   return (
     <div className="w4-main">
-      <div className="w4-head">
+      <div className="w4-head se-pane-head">
+        <button
+          className="w4-icon-btn w4-only-mobile"
+          onClick={() => navigate({ name: "contacts" })}
+          aria-label="返回"
+        >
+          <Icon strokeWidth={2}>
+            <path d="M15 5l-7 7 7 7" />
+          </Icon>
+        </button>
         <div className="w4-head-main">
           <div className="w4-head-title">新的朋友</div>
           <div className="w4-head-sub">
@@ -174,11 +186,17 @@ function RequestRow({
         </button>
       </div>
       <div className="w4-request-actions">
-        <button className="w4-btn is-primary" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onAccept}>
+        <button
+          className="w4-btn is-primary"
+          onClick={() => {
+            haptic("success");
+            onAccept();
+          }}
+        >
           <Check size={13} />
           接受
         </button>
-        <button className="w4-btn" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onDecline}>
+        <button className="w4-btn" onClick={onDecline}>
           <X size={13} />
           忽略
         </button>

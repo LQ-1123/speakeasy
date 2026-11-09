@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * 发现 · 偶遇一个人。
  *
@@ -9,13 +11,14 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft } from "lucide-react";
 
 import { API_ORIGIN } from "../api";
 import { personaAvatarSrc } from "../avatar";
 import type { Route } from "../model";
-import type { DiscoverCandidate } from "../mock";
+import type { DiscoverCandidate } from "../model";
 import { useApp } from "../store";
-import { Icon } from "../ui";
+import { haptic } from "../../theme/haptics";
 import {
   addFriend as apiAddFriend,
   fetchDiscoverNext,
@@ -67,7 +70,7 @@ function toCandidate(res: DiscoverNext, zh: string): DiscoverCandidate {
 }
 
 export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
-  const { reloadAll } = useApp();
+  const { reloadAll } = useApp(useShallow((state) => ({ reloadAll: state.reloadAll })));
   const [candidate, setCandidate] = useState<DiscoverCandidate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -84,6 +87,7 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
 
   const pickOne = async () => {
     const my = ++seq.current;
+    haptic("selection");
     setLoading(true);
     setError("");
     setCandidate(null);
@@ -128,7 +132,12 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
       stopAudio();
       return;
     }
-    const a = new Audio(candidate.greetingAudio.startsWith("http") ? candidate.greetingAudio : `${API_ORIGIN}${candidate.greetingAudio}`);
+    haptic("toggle");
+    const a = new Audio(
+      candidate.greetingAudio.startsWith("http")
+        ? candidate.greetingAudio
+        : `${API_ORIGIN}${candidate.greetingAudio}`,
+    );
     audioRef.current = a;
     a.onended = () => setPlaying(false);
     a.onerror = () => setPlaying(false);
@@ -144,6 +153,7 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
     stopAudio();
     try {
       const res = await apiAddFriend(candidate.id);
+      haptic("save");
       await reloadAll();
       if (res?.friend_id) navigate({ name: "chat", friendId: res.friend_id });
       else navigate({ name: "persona", personaId: candidate.id });
@@ -155,31 +165,28 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
   };
 
   return (
-    <div className="w4-main">
-      <div className="w4-head">
+    <div className="w4-main disc-main">
+      <div className="w4-head disc-head">
         <button className="w4-icon-btn" onClick={() => navigate({ name: "discover" })} aria-label="返回">
-          <Icon strokeWidth={2}>
-            <path d="M15 5l-7 7 7 7" />
-          </Icon>
+          <ChevronLeft size={20} strokeWidth={2} />
         </button>
         <div className="w4-head-main">
-          <div className="w4-head-title">偶遇</div>
+          <div className="w4-head-title disc-head-title">偶遇</div>
           <div className="w4-head-sub">认识一位新朋友，先听听 TA 的声音</div>
         </div>
       </div>
 
       <div className="w4-scroll">
-        <div className="w4-discover">
+        <div className="disc-people">
           {loading ? (
-            <div className="w4-card w4-deck-loading">
-              <div className="w4-deck-spinner" aria-hidden />
-              <div className="w4-deck-loading-title">正在找一个人…</div>
+            <div className="disc-deck-loading">
+              <div className="disc-spinner" aria-hidden />
+              <div className="disc-deck-loading-title">正在找一个人…</div>
             </div>
           ) : error || !candidate ? (
-            <div className="w4-card" style={{ padding: 30, textAlign: "center" }}>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>
-                {error || "这次没找到合适的人"}
-              </div>
+            <div className="disc-deck disc-state">
+              <div className="disc-state-title">{error || "这次没找到合适的人"}</div>
+              <div className="disc-state-text">世界很大，换一个时间再看看。</div>
               <button className="w4-btn is-primary" onClick={() => void pickOne()}>
                 再试一次
               </button>
@@ -195,7 +202,6 @@ export function PeopleView({ navigate }: { navigate: (r: Route) => void }) {
               onOpen={() => void startChat()}
             />
           )}
-
         </div>
       </div>
     </div>

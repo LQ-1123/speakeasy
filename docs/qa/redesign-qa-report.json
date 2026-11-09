@@ -1,0 +1,818 @@
+{
+  "checks": [
+    {
+      "name": "messages title",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "conversation rows render",
+      "pass": true,
+      "detail": "12"
+    },
+    {
+      "name": "search filters",
+      "pass": true,
+      "detail": "1"
+    },
+    {
+      "name": "chat opens",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "bubble sides",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "send adds message",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "composer still present",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "call starts",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "call dock in flow",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "dock does not overlap composer",
+      "pass": true,
+      "detail": "{\"dockBox\":{\"x\":10,\"y\":6,\"width\":370,\"height\":64},\"composerBox\":{\"x\":0,\"y\":772,\"width\":390,\"height\":72}}"
+    },
+    {
+      "name": "call expands",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "call ends",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "back returns to list",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "discover loads",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "publish dialog opens",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "me loads",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "settings loads",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "dark theme applied",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "global notification appears",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "#/chats@320: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@360: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@430: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@600: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@768: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@960: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@1024: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@1440: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@320: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@360: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@430: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@600: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@768: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@960: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@1024: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@1440: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@320: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@360: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@430: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@600: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@768: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@960: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@1024: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@1440: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@320: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@360: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@390: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@430: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@600: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@768: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@960: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@1024: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/me@1440: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390-font0.85: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390-font1: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390-font1.3: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390-font1.6: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chats@390-font2: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390-font0.85: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390-font1: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390-font1.3: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390-font1.6: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat/fixture-1@390-font2: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390-font0.85: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390-font1: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390-font1.3: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390-font1.6: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/discover@390-font2: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "keyboard + dock: send visible",
+      "pass": true,
+      "detail": "{\"vh\":844,\"composer\":{\"top\":532,\"bottom\":604},\"dock\":{\"top\":6,\"bottom\":70},\"send\":{\"top\":543,\"bottom\":591}}"
+    },
+    {
+      "name": "keyboard + dock: no overlap",
+      "pass": true,
+      "detail": "{\"vh\":844,\"composer\":{\"top\":532,\"bottom\":604},\"dock\":{\"top\":6,\"bottom\":70},\"send\":{\"top\":543,\"bottom\":591}}"
+    },
+    {
+      "name": "safe area keeps header below top inset",
+      "pass": true,
+      "detail": "{\"appTop\":0,\"titleTop\":68.90625,\"tabBottom\":802,\"vh\":844}"
+    },
+    {
+      "name": "safe area keeps tab bar above bottom edge",
+      "pass": true,
+      "detail": "{\"appTop\":0,\"titleTop\":68.90625,\"tabBottom\":802,\"vh\":844}"
+    },
+    {
+      "name": "long friend list stays virtualized",
+      "pass": true,
+      "detail": "{\"normalRows\":12,\"longRows\":14}"
+    },
+    {
+      "name": "1000 messages stay virtualized",
+      "pass": true,
+      "detail": "12"
+    },
+    {
+      "name": "empty state renders",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "error state renders",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced motion is respected",
+      "pass": true,
+      "detail": "1e-06s"
+    },
+    {
+      "name": "call has three controls",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "call surface is opaque",
+      "pass": true,
+      "detail": "rgb(250, 248, 255)"
+    },
+    {
+      "name": "publish textarea has no square focus outline",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "name": "theme switch sends no API requests",
+      "pass": true,
+      "detail": "{\"apiBefore\":1,\"apiAfter\":1}"
+    },
+    {
+      "name": "#/chats@320-font2: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "#/chat@320-font2: no horizontal overflow",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "theme change keeps list node",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "composer input has no square focus outline",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "name": "AI text click starts read-aloud",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "read-aloud cue switches state",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "AI text right-click opens translation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mobile tab bar has four destinations",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "contacts is a mobile tab",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "no duplicated contacts shortcut in messages",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "discover sidebar hero box removed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "discover lead uses unified sans font",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "overflows": [
+    {
+      "label": "#/chats@320",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    },
+    {
+      "label": "#/chats@360",
+      "viewport": 360,
+      "scroll": 360,
+      "els": []
+    },
+    {
+      "label": "#/chats@390",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@430",
+      "viewport": 430,
+      "scroll": 430,
+      "els": []
+    },
+    {
+      "label": "#/chats@600",
+      "viewport": 600,
+      "scroll": 600,
+      "els": []
+    },
+    {
+      "label": "#/chats@768",
+      "viewport": 768,
+      "scroll": 768,
+      "els": []
+    },
+    {
+      "label": "#/chats@960",
+      "viewport": 960,
+      "scroll": 960,
+      "els": []
+    },
+    {
+      "label": "#/chats@1024",
+      "viewport": 1024,
+      "scroll": 1024,
+      "els": []
+    },
+    {
+      "label": "#/chats@1440",
+      "viewport": 1440,
+      "scroll": 1440,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@320",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@360",
+      "viewport": 360,
+      "scroll": 360,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@430",
+      "viewport": 430,
+      "scroll": 430,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@600",
+      "viewport": 600,
+      "scroll": 600,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@768",
+      "viewport": 768,
+      "scroll": 768,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@960",
+      "viewport": 960,
+      "scroll": 960,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@1024",
+      "viewport": 1024,
+      "scroll": 1024,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@1440",
+      "viewport": 1440,
+      "scroll": 1440,
+      "els": []
+    },
+    {
+      "label": "#/discover@320",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    },
+    {
+      "label": "#/discover@360",
+      "viewport": 360,
+      "scroll": 360,
+      "els": []
+    },
+    {
+      "label": "#/discover@390",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@430",
+      "viewport": 430,
+      "scroll": 430,
+      "els": []
+    },
+    {
+      "label": "#/discover@600",
+      "viewport": 600,
+      "scroll": 600,
+      "els": []
+    },
+    {
+      "label": "#/discover@768",
+      "viewport": 768,
+      "scroll": 768,
+      "els": []
+    },
+    {
+      "label": "#/discover@960",
+      "viewport": 960,
+      "scroll": 960,
+      "els": []
+    },
+    {
+      "label": "#/discover@1024",
+      "viewport": 1024,
+      "scroll": 1024,
+      "els": []
+    },
+    {
+      "label": "#/discover@1440",
+      "viewport": 1440,
+      "scroll": 1440,
+      "els": []
+    },
+    {
+      "label": "#/me@320",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    },
+    {
+      "label": "#/me@360",
+      "viewport": 360,
+      "scroll": 360,
+      "els": []
+    },
+    {
+      "label": "#/me@390",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/me@430",
+      "viewport": 430,
+      "scroll": 430,
+      "els": []
+    },
+    {
+      "label": "#/me@600",
+      "viewport": 600,
+      "scroll": 600,
+      "els": []
+    },
+    {
+      "label": "#/me@768",
+      "viewport": 768,
+      "scroll": 768,
+      "els": []
+    },
+    {
+      "label": "#/me@960",
+      "viewport": 960,
+      "scroll": 960,
+      "els": []
+    },
+    {
+      "label": "#/me@1024",
+      "viewport": 1024,
+      "scroll": 1024,
+      "els": []
+    },
+    {
+      "label": "#/me@1440",
+      "viewport": 1440,
+      "scroll": 1440,
+      "els": []
+    },
+    {
+      "label": "#/chats@390-font0.85",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@390-font1",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@390-font1.3",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@390-font1.6",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@390-font2",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390-font0.85",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390-font1",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390-font1.3",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390-font1.6",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chat/fixture-1@390-font2",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@390-font0.85",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@390-font1",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@390-font1.3",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@390-font1.6",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/discover@390-font2",
+      "viewport": 390,
+      "scroll": 390,
+      "els": []
+    },
+    {
+      "label": "#/chats@320-font2",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    },
+    {
+      "label": "#/chat@320-font2",
+      "viewport": 320,
+      "scroll": 320,
+      "els": []
+    }
+  ],
+  "shots": [
+    "artifacts/shots/qa/01-chats-390.png",
+    "artifacts/shots/qa/02-search.png",
+    "artifacts/shots/qa/03-chat-sent.png",
+    "artifacts/shots/qa/04-call.png",
+    "artifacts/shots/qa/05-discover-390.png",
+    "artifacts/shots/qa/07-me-390.png",
+    "artifacts/shots/qa/08-settings-390.png",
+    "artifacts/shots/qa/09-settings-dark.png",
+    "artifacts/shots/qa/10-notification.png"
+  ],
+  "consoleErrors": [],
+  "summary": {
+    "checks": 95,
+    "passed": 95,
+    "failed": 0,
+    "overflowRecords": 53,
+    "overflowFailures": 0
+  }
+}

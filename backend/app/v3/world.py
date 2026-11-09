@@ -159,7 +159,7 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
                 str(persona.get("voice_id") or _VOICE_BY_LANG[lang][0]),
                 "",
                 json.dumps({"generated": "llm"}, ensure_ascii=False),
-                "active",
+                "waiting_voice" if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes") else "active",
                 _now_iso(),
             ),
         )

@@ -176,7 +176,8 @@ class FriendVoiceSynth:
 
     # ---- 缓存 ----
     def _cache_key(self, text: str, voice_id: str, rate: str, pitch: str) -> tuple[str, str, str, str]:
-        return (text, voice_id, rate, pitch)
+        strict = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+        return (text, voice_id, rate, pitch + (":strict" if strict else ""))
 
     def _cache_get(self, key: tuple[str, str, str, str]) -> tuple[str, int] | None:
         hit = self._cache.get(key)
@@ -239,7 +240,7 @@ class FriendVoiceSynth:
         pitch = str(pitch or "+0Hz").strip() or "+0Hz"
         target_dir = os.path.abspath(out_dir or default_audio_dir())
 
-        key = self._cache_key(clean_text, voice, rate, pitch)
+        key = self._cache_key(clean_text, voice, rate, pitch + "|" + target_dir)
         cached = self._cache_get(key)
         if cached is not None:
             log.debug("FriendVoiceSynth 缓存命中: %r voice=%s", clean_text[:30], voice)
@@ -269,10 +270,14 @@ class FriendVoiceSynth:
             arr = np.asarray(pcm, dtype=np.float32).reshape(-1)
             if arr.size > 0:
                 return arr
+            if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+                raise RuntimeError("empty-speech")
             log.warning("Edge 合成返回空音频（text=%r voice=%s），降级 tone", text[:40], voice_id)
         except asyncio.CancelledError:
             raise  # 取消必须透传（barge-in / 关机）
         except Exception as exc:  # noqa: BLE001 - TTS 失败必须降级
+            if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+                raise
             log.warning(
                 "Edge 合成失败（text=%r voice=%s: %s: %s），降级 tone",
                 text[:40], voice_id, type(exc).__name__, exc,

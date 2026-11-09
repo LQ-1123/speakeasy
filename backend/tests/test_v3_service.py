@@ -100,6 +100,36 @@ def _event_count(db: DB, user_id: str) -> int:
         )
 
 
+def test_feed_hydrates_selected_page_with_bounded_relationship_queries(tmp_path):
+    db, service = make_service(tmp_path)
+    statements = []
+    db.conn.set_trace_callback(statements.append)
+    try:
+        page = service.feed("u_batched", limit=5)
+        assert len(page["items"]) == 5
+        related = [sql for sql in statements if "SELECT" in sql.upper() and (
+            "persona_post_comments" in sql or "persona_post_likes" in sql
+        )]
+        assert len(related) <= 3
+        assert all(" IN (" in sql for sql in related)
+    finally:
+        db.conn.set_trace_callback(None)
+        db.close()
+
+
+def test_feed_speech_url_revision_changes_with_synthesis_model(tmp_path, monkeypatch):
+    from app.voice import voice_registry
+
+    db, service = make_service(tmp_path)
+    cfg = SimpleNamespace(provider="edge", fish_model="model-a", fish_format="mp3")
+    monkeypatch.setattr(voice_registry, "load_cfg", lambda store=None: cfg)
+    first = service.feed("local", limit=1)["items"][0]["speech_version"]
+    cfg.fish_model = "model-b"
+    second = service.feed("local", limit=1)["items"][0]["speech_version"]
+    assert first != second
+    db.close()
+
+
 # --------------------------------------------------------------------------- #
 # 信息流
 # --------------------------------------------------------------------------- #
@@ -114,7 +144,7 @@ def test_feed_cursor_pagination_no_duplicates_no_gaps(tmp_path):
             ).fetchall()
             if r[0]
         ]
-        db.update_profile(target_languages=langs)
+        db.update_profile(user_id="u_feed", target_languages=langs)
 
         public_post = service.create_user_post("u_feed", "my public update")
         private_post = service.create_user_post(

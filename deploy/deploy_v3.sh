@@ -104,7 +104,7 @@ done
 log "7/8 关键链路自检（无模型调用）"
 curl -fsS "http://127.0.0.1:8000/" | grep -q "<!DOCTYPE html" || rollback
 curl -fsS "http://127.0.0.1:8000/api/v3/feed?limit=1" >/dev/null || rollback
-curl -fsS "http://127.0.0.1:8000/api/v3/personas/p_adrian" >/dev/null || rollback
+curl -fsS "http://127.0.0.1:8000/api/v3/personas?limit=1" >/dev/null || rollback
 echo "   首页 / feed / persona 均 200"
 
 log "8/8 完成"

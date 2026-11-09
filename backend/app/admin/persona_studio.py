@@ -358,6 +358,24 @@ def update_persona(db: Any, persona_id: str, payload: dict[str, Any]) -> dict[st
                 ],
             }
         payload = {**payload, "fish_voice_id": resolved}
+    if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes") and any(
+        key in payload for key in ("voice_id", "fish_voice_id")
+    ):
+        from app.voice.catalog import verified_voice
+
+        current = persona_detail(db, persona_id) or {}
+        merged = {**current, **payload}
+        provider, reference = (("fish", str(merged.get("fish_voice_id") or ""))
+                               if merged.get("fish_voice_id") else ("edge", str(merged.get("voice_id") or "")))
+        column = "fish_voice_id" if provider == "fish" else "voice_id"
+        with db._lock:
+            collision = db.conn.execute(
+                f"SELECT 1 FROM personas WHERE {column}=? AND id<>? AND status='active'", (reference, persona_id)
+            ).fetchone()
+        if collision:
+            return {"ok": False, "issues": ["voice_already_assigned"]}
+        if not verified_voice(db, provider, reference):
+            payload = {**payload, "status": "waiting_voice"}
     for field in EDITABLE_FIELDS:
         if field not in payload:
             continue
@@ -569,7 +587,8 @@ def create_persona(
         "fish_voice_id": voice,
         "archetype_id": str(payload.get("archetype_id") or ""),
         "ai_config": _json(payload.get("ai_config") or {"source": "admin-test"}),
-        "status": str(payload.get("status") or "active"),
+        "status": ("waiting_voice" if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+                   else str(payload.get("status") or "active")),
         "created_at": now,
         "lifecycle": str(payload.get("lifecycle") or "permanent"),
         "expires_at": str(payload.get("expires_at") or ""),
@@ -1001,7 +1020,7 @@ def _create_bulk(
             "fish_voice_id": voice,
             "archetype_id": "",
             "ai_config": _json({"generated": "admin-rebuild", "day": day}),
-            "status": "active",
+            "status": "waiting_voice" if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes") else "active",
             "created_at": now.isoformat(timespec="seconds"),
             "lifecycle": "permanent",
             "expires_at": "",
@@ -1274,6 +1293,25 @@ async def rematch_media(db: Any, llm: Any, *, limit: int = 20) -> dict[str, Any]
 
 
 
+def _studio_name_entries(pools: dict, language: str) -> list[dict[str, str]]:
+    """An absent editable name pool falls back to the built-in persona catalog."""
+    from app.v3 import daily_world
+    from app.v2.voices import load_archetypes
+
+    entries = daily_world._name_entries(pools, language)
+    if entries:
+        return entries
+    fallback: list[dict[str, str]] = []
+    for archetype in load_archetypes():
+        locale = archetype.get("locale_info") or {}
+        if str(locale.get("native_lang") or "en") != language:
+            continue
+        gender = str((archetype.get("vibe_constraints") or {}).get("gender") or "")
+        for name in archetype.get("name_pool") or []:
+            fallback.append({"name": str(name), "gender": gender, "country": str(locale.get("country") or "")})
+    return fallback
+
+
 def rebalance_genders(db: Any, service: Any, *, female_ratio: float = 0.5) -> dict[str, Any]:
     """把现有角色性别调整到大致 1:1（按语言/国家换同名性别的名字，同步好友行）。"""
     from app.v3 import daily_world as dw  # noqa: PLC0415
@@ -1306,7 +1344,7 @@ def rebalance_genders(db: Any, service: Any, *, female_ratio: float = 0.5) -> di
         if changed >= abs(need):
             break
         lang = str(row.get("language") or "en").strip().lower()
-        entries = dw._name_entries(pools, lang)  # noqa: SLF001
+        entries = _studio_name_entries(pools, lang)
         same_gender = [e for e in entries if str(e.get("gender") or "").lower() == new_gender]
         # 优先同国家，其次同语言，最后任意
         same_country = [
@@ -1315,7 +1353,7 @@ def rebalance_genders(db: Any, service: Any, *, female_ratio: float = 0.5) -> di
         pool = same_country or same_gender
         if not pool:
             for other in ("en", "de", "zh"):
-                entries2 = dw._name_entries(pools, other)  # noqa: SLF001
+                entries2 = _studio_name_entries(pools, other)
                 pool = [e for e in entries2 if str(e.get("gender") or "").lower() == new_gender]
                 if pool:
                     break
@@ -1412,7 +1450,7 @@ def _dedupe_nicknames(db: Any) -> tuple[int, list[dict[str, Any]]]:
             continue
         lang = str(row.get("language") or "en").strip().lower()
         gender = str(row.get("gender") or "female").strip().lower()
-        entries = dw._name_entries(pools, lang)  # noqa: SLF001
+        entries = _studio_name_entries(pools, lang)
         pool = [
             e
             for e in entries
@@ -1420,7 +1458,7 @@ def _dedupe_nicknames(db: Any) -> tuple[int, list[dict[str, Any]]]:
         ]
         if not pool:
             for other in ("en", "de", "zh"):
-                entries = dw._name_entries(pools, other)  # noqa: SLF001
+                entries = _studio_name_entries(pools, other)
                 pool = [
                     e
                     for e in entries
@@ -1463,16 +1501,21 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
     from app.admin import voice_pool  # noqa: PLC0415
 
     pool = voice_pool.load_pool()
+    if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+        from app.voice.catalog import verified_voice
+
+        pool = [v for v in pool if verified_voice(db, "fish", str(v.get("reference_id") or ""))]
     if not pool:
         return {"ok": False, "issues": ["素材池为空，先到「音色池」加音色"]}
     with db._lock:  # noqa: SLF001
         rows = [
             dict(r)
             for r in db.conn.execute(
-                "SELECT id, language, gender FROM personas ORDER BY created_at, id"
+                "SELECT id, language, gender, fish_voice_id FROM personas ORDER BY created_at, id"
             ).fetchall()
         ]
     usage = {str(v["reference_id"]): 0 for v in pool}
+    owners = {str(row["fish_voice_id"]): str(row["id"]) for row in rows if row["fish_voice_id"]}
     updated = 0
     for row in rows:
         lang = str(row.get("language") or "").lower()
@@ -1485,11 +1528,11 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
         ]
         chosen = None
         for tier in tiers:
-            if not tier:
+            available = [v for v in tier if not usage[str(v["reference_id"])]
+                         and owners.get(str(v["reference_id"]), str(row["id"])) == str(row["id"])]
+            if not available:
                 continue
-            lowest = min(usage[str(v["reference_id"])] for v in tier)
-            candidates = [v for v in tier if usage[str(v["reference_id"])] == lowest]
-            chosen = random.choice(candidates)
+            chosen = random.choice(available)
             break
         if not chosen:
             continue
@@ -1497,7 +1540,7 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
         usage[rid] += 1
         with db._lock, db.conn:  # noqa: SLF001
             db.conn.execute(
-                "UPDATE personas SET fish_voice_id=?, voice_id='' WHERE id=?",
+                "UPDATE personas SET fish_voice_id=? WHERE id=?",
                 (rid, row["id"]),
             )
         persona = persona_detail(db, row["id"])
@@ -1516,7 +1559,8 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
         ),
         key=lambda item: -item["count"],
     )
-    return {"ok": True, "updated": updated, "distribution": distribution[:20], "voices": len(pool)}
+    return {"ok": True, "updated": updated, "unassigned": len(rows) - updated,
+            "distribution": distribution[:20], "voices": len(pool)}
 
 
 def regenerate_posts(db: Any, service: Any, *, per_persona: int = 5) -> dict[str, Any]:

@@ -415,6 +415,7 @@ class V3Service:
         *,
         friends: set[str] | None = None,
         pending: set[str] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> dict:
         pmap = self._persona_map()
         persona = pmap.get(row["persona_id"]) or {}
@@ -422,24 +423,19 @@ class V3Service:
         pid = str(row["persona_id"])
         if friends is None or pending is None:
             friends, pending = self._friendship_sets(user_id)
-        with self.lock:
-            liked = self.conn.execute(
-                "SELECT 1 FROM persona_post_likes WHERE post_id=? AND user_id=? LIMIT 1",
-                (post_id, user_id),
-            ).fetchone()
-            comments = self.conn.execute(
-                "SELECT * FROM persona_post_comments WHERE post_id=? ORDER BY created_at, id LIMIT 2",
-                (post_id,),
-            ).fetchall()
-            comment_count = self.conn.execute(
-                "SELECT COUNT(*) AS n FROM persona_post_comments WHERE post_id=?", (post_id,)
-            ).fetchone()["n"]
+        if details is None:
+            details = self._batch_feed_details([("persona_post", row)], user_id)[post_id]
+        liked = details["liked"]
+        comments = details["comments"]
+        comment_count = details["comment_count"]
         content_text = str(row["content"])
         content_hash = hashlib.sha1(content_text.encode("utf-8")).hexdigest()[:12]
         # 语音缓存版本 = 内容 + 当前音色：换人换声线后 URL 必须变化，否则浏览器会播旧音频
         voice_key = str(persona.get("fish_voice_id") or persona.get("voice_id") or "")
+        from app.voice.voice_registry import render_revision
+
         speech_version = hashlib.sha1(
-            f"{content_hash}:{voice_key}".encode("utf-8")
+            f"{content_hash}:{voice_key}:{render_revision(persona)}".encode("utf-8")
         ).hexdigest()[:10]
         return {
             "kind": "persona_post",
@@ -508,29 +504,27 @@ class V3Service:
     # 用户动态
     # ------------------------------------------------------------------ #
     def _user_name(self, user_id: str) -> str:
-        if user_id == LOCAL_USER_ID:
-            try:
-                return str((self.db.get_profile() or {}).get("nickname") or "Traveler")
-            except Exception:  # noqa: BLE001
-                return "Traveler"
+        try:
+            nickname = str((self.db.get_profile(user_id=user_id) or {}).get("nickname") or "")
+            if nickname and (nickname != "Traveler" or user_id == LOCAL_USER_ID):
+                return nickname
+        except Exception:  # noqa: BLE001
+            pass
         with self.lock:
             row = self.conn.execute(
                 "SELECT display_name FROM v3_users WHERE id=?", (user_id,)
             ).fetchone()
         return str((row["display_name"] if row else "") or "Traveler")
 
-    def _user_post_public(self, row: Any, viewer_id: str) -> dict:
+    def _user_post_public(
+        self, row: Any, viewer_id: str, details: dict[str, Any] | None = None
+    ) -> dict:
         pmap = self._persona_map()
         post_id = row["id"]
-        with self.lock:
-            likes = self.conn.execute(
-                "SELECT persona_id FROM user_post_likes WHERE post_id=? ORDER BY created_at LIMIT 6",
-                (post_id,),
-            ).fetchall()
-            comments = self.conn.execute(
-                "SELECT * FROM user_post_comments WHERE post_id=? ORDER BY created_at, id LIMIT 8",
-                (post_id,),
-            ).fetchall()
+        if details is None:
+            details = self._batch_feed_details([("user_post", row)], viewer_id)[post_id]
+        likes = details["likes"]
+        comments = details["comments"]
         author_id = row["user_id"]
         return {
             "kind": "user_post",
@@ -546,12 +540,7 @@ class V3Service:
             "is_mine": author_id == viewer_id,
             "author": {
                 "id": author_id,
-                # 单用户 demo：用户动态的作者统一跟随个人资料（与「我」页一致）
-                "nickname": (
-                    (self.db.get_profile() or {}).get("nickname")
-                    or row["author_name"]
-                    or "Traveler"
-                ),
+                "nickname": row["author_name"] or "Traveler",
                 "avatar": "",
                 "is_ai": False,
                 "ai_label": "",
@@ -641,6 +630,43 @@ class V3Service:
     # ------------------------------------------------------------------ #
     # 信息流
     # ------------------------------------------------------------------ #
+    def _batch_feed_details(self, rows: list[tuple[str, Any]], user_id: str) -> dict[str, dict]:
+        persona_ids = [r["id"] for kind, r in rows if kind == "persona_post"]
+        user_ids = [r["id"] for kind, r in rows if kind == "user_post"]
+        details = {r["id"]: {"liked": False, "comment_count": 0, "comments": [], "likes": []}
+                   for _, r in rows}
+        with self.lock:
+            if persona_ids:
+                marks = ",".join("?" for _ in persona_ids)
+                for row in self.conn.execute(
+                    f"SELECT post_id,COUNT(*) AS n FROM persona_post_comments WHERE post_id IN ({marks}) GROUP BY post_id",
+                    persona_ids,
+                ):
+                    details[row["post_id"]]["comment_count"] = int(row["n"])
+                for row in self.conn.execute(
+                    f"SELECT * FROM (SELECT c.*,ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at,id) rn "
+                    f"FROM persona_post_comments c WHERE post_id IN ({marks})) WHERE rn<=2", persona_ids,
+                ):
+                    details[row["post_id"]]["comments"].append(row)
+                for row in self.conn.execute(
+                    f"SELECT post_id FROM persona_post_likes WHERE user_id=? AND post_id IN ({marks})",
+                    [user_id, *persona_ids],
+                ):
+                    details[row["post_id"]]["liked"] = True
+            if user_ids:
+                marks = ",".join("?" for _ in user_ids)
+                for row in self.conn.execute(
+                    f"SELECT * FROM (SELECT l.*,ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at) rn "
+                    f"FROM user_post_likes l WHERE post_id IN ({marks})) WHERE rn<=6", user_ids,
+                ):
+                    details[row["post_id"]]["likes"].append(row)
+                for row in self.conn.execute(
+                    f"SELECT * FROM (SELECT c.*,ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at,id) rn "
+                    f"FROM user_post_comments c WHERE post_id IN ({marks})) WHERE rn<=8", user_ids,
+                ):
+                    details[row["post_id"]]["comments"].append(row)
+        return details
+
     def feed(self, user_id: str | None = None, *, cursor: str | None = None, limit: int = FEED_PAGE) -> dict:
         uid = user_id or current_user_id()
         limit = max(1, min(int(limit), MAX_FEED_PAGE))
@@ -651,7 +677,7 @@ class V3Service:
         now_iso = _iso(_now_local())
         # 只推荐「在练语言」的人物动态（用户自己的动态不受限）
         try:
-            profile = self.db.get_profile() or {}
+            profile = self.db.get_profile(user_id=uid) or {}
             targets = [str(x) for x in (profile.get("target_languages") or []) if str(x).strip()]
         except Exception:  # noqa: BLE001
             targets = []
@@ -661,6 +687,7 @@ class V3Service:
 
         p_sql = (
             "SELECT * FROM persona_posts WHERE visibility='public'"
+            " AND EXISTS (SELECT 1 FROM personas p WHERE p.id=persona_posts.persona_id AND p.status='active')"
             " AND (expires_at='' OR expires_at>?)" + lang_clause
         )
         u_sql = ("SELECT * FROM user_posts WHERE (visibility='public' OR user_id=?)")
@@ -685,16 +712,22 @@ class V3Service:
         merged: list[tuple[str, str, dict]] = []
         friends, pending = self._friendship_sets(uid)
         for row in p_rows:
-            merged.append(
-                (row["created_at"], row["id"],
-                 self._persona_post_public(row, uid, friends=friends, pending=pending))
-            )
+            merged.append((row["created_at"], row["id"], "persona_post", row))
         for row in u_rows:
-            merged.append((row["created_at"], row["id"], self._user_post_public(row, uid)))
+            merged.append((row["created_at"], row["id"], "user_post", row))
         merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
         page = merged[:limit]
         next_cursor = f"{page[-1][0]}|{page[-1][1]}" if len(merged) > limit and page else ""
-        return {"items": [item[2] for item in page], "next_cursor": next_cursor}
+        details = self._batch_feed_details([(item[2], item[3]) for item in page], uid)
+        output = []
+        for _created, _post_id, kind, row in page:
+            if kind == "persona_post":
+                output.append(self._persona_post_public(
+                    row, uid, friends=friends, pending=pending, details=details[row["id"]]
+                ))
+            else:
+                output.append(self._user_post_public(row, uid, details[row["id"]]))
+        return {"items": output, "next_cursor": next_cursor}
 
     def feed_summary(self, user_id: str) -> dict:
         uid = user_id
@@ -824,8 +857,9 @@ class V3Service:
         user_id: str | None = None,
     ) -> dict:
         """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。"""
+        uid = user_id or current_user_id()
         try:
-            profile = self.db.get_profile() or {}
+            profile = self.db.get_profile(user_id=uid) or {}
         except Exception:  # noqa: BLE001
             profile = {}
         fact = profile.get("fact_sheet") or {}
@@ -870,12 +904,11 @@ class V3Service:
         if native_language:
             kwargs["native_language"] = str(native_language)[:12]
         try:
-            profile_row = self.db.update_profile(**kwargs) or {}
+            profile_row = self.db.update_profile(user_id=uid, **kwargs) or {}
             if nickname:
-                # 单用户 demo：所有「用户动态」共享同一份资料
                 with self.lock, self.conn:
                     self.conn.execute(
-                        "UPDATE user_posts SET author_name=?", (str(nickname)[:40],)
+                        "UPDATE user_posts SET author_name=? WHERE user_id=?", (str(nickname)[:40], uid)
                     )
             return profile_row
         except Exception as exc:  # noqa: BLE001
@@ -1447,7 +1480,7 @@ class V3Service:
         if user_id != LOCAL_USER_ID:
             return []
         try:
-            fact = (self.db.get_profile() or {}).get("fact_sheet") or {}
+            fact = (self.db.get_profile(user_id=user_id) or {}).get("fact_sheet") or {}
             return [str(x) for x in (fact.get("interests") or [])]
         except Exception:  # noqa: BLE001
             return []

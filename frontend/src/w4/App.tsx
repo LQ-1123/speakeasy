@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * W4 · SpeakEasy 原型
  *
@@ -12,15 +14,24 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { BookMarked, Compass, MessageCircle, UserRound, UsersRound } from "lucide-react";
+import { Compass, MessageCircle, UserRound, UsersRound } from "lucide-react";
 
-import "./w4-base.css";
-import "./w4.css";
-import "./w4-part2.css";
+import "./styles/base.css";
+import "./styles/shell.css";
 
 import type { Route, Section } from "./model";
+import { backRoute, parseRoute as parseHashRoute, routeToHash as serializeRoute, sectionOf as routeSection } from "./navigation";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./queryClient";
+import { CallPanel } from "./v3/CallPanel";
+import { installPlatform } from "./v3/platform";
+import { ThemeProvider } from "../theme/ThemeProvider";
+import { haptic } from "../theme/haptics";
 import { AppProvider, useApp } from "./store";
-import { isLocalMode } from "./local/keys";
+import { closeTopOverlay, useNavigation } from "./navigationStore";
+import { usePreferences } from "./v3/preferences";
+import { PushOptIn } from "./v3/PushOptIn";
+import { GlobalNotification } from "./v3/GlobalNotification";
 import { installAudioBus } from "./audioBus";
 import { installApiIdentity } from "./v3/api";
 import { Icon } from "./ui";
@@ -40,117 +51,40 @@ import { EmptyState } from "./components/EmptyState";
 import { FeedView } from "./v3/FeedView";
 import { EventsView } from "./v3/EventsView";
 import { PersonaProfileView } from "./v3/PersonaProfileView";
+import { installPreviewAdapter, isPreviewMode, previewVariant } from "./previewAdapter";
+import { PreviewBridge } from "./previewBridge";
 
 /* 设备身份：给所有 /api 请求补 X-User-Id / X-User-Token（浏览器环境幂等） */
 installApiIdentity();
 
-export function sectionOf(route: Route): Section {
-  switch (route.name) {
-    case "chat":
-    case "chats":
-      return "chats";
-    case "contacts":
-    case "contact":
-    case "requests":
-      return "contacts";
-    case "discover":
-    case "discoverFeed":
-    case "discoverMoments":
-    case "discoverPeople":
-    case "persona":
-    case "events":
-    case "moments":
-      return "discover";
-    case "expressions":
-      return "notes";
-    case "me":
-    case "settings":
-      return "me";
-    default:
-      return "chats";
-  }
+/* 设计验收 iframe：必须在任何请求发出前安装本地 fixture 适配器。 */
+if (typeof window !== "undefined" && isPreviewMode()) {
+  installPreviewAdapter();
 }
 
-function parseRoute(): Route {
-  if (typeof window === "undefined") return { name: "chats" };
-  const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  const head = parts[0] ?? "";
-  switch (head) {
-    case "chats":
-      return { name: "chats" };
-    case "chat":
-      return parts[1] ? { name: "chat", friendId: parts[1] } : { name: "chats" };
-    case "contacts":
-      return parts[1] ? { name: "contact", friendId: parts[1] } : { name: "contacts" };
-    case "discover":
-      if (parts[1] === "people") return { name: "discoverPeople" };
-      if (parts[1] === "feed") return { name: "discoverFeed" };
-      /* 老链接 #/discover/moments 直接落到 Persona 动态 */
-      return { name: "discover" };
-    case "persona":
-      return parts[1] ? { name: "persona", personaId: parts[1] } : { name: "discover" };
-    case "events":
-      return { name: "events" };
-    case "moments":
-      return { name: "moments" };
-    case "expressions":
-      return { name: "expressions" };
-    case "me":
-      return { name: "me" };
-    case "settings":
-      return { name: "settings", section: parts[1] };
-    case "requests":
-      return { name: "requests" };
-    default:
-      /* 首次进入落在「消息页」：先看谁在等你说话，而不是被推进发现页 */
-      return { name: "chats" };
-  }
-}
-
-function routeToHash(route: Route): string {
-  switch (route.name) {
-    case "chat":
-      return `#/chat/${route.friendId}`;
-    case "contact":
-      return `#/contacts/${route.friendId}`;
-    case "chats":
-      return "#/chats";
-    case "contacts":
-      return "#/contacts";
-    case "discover":
-      return "#/discover";
-    case "discoverFeed":
-      return "#/discover/feed";
-    case "discoverPeople":
-      return "#/discover/people";
-    case "persona":
-      return `#/persona/${route.personaId}`;
-    case "events":
-      return "#/events";
-    case "discoverMoments":
-      return "#/discover";
-    case "settings":
-      return route.section ? `#/settings/${route.section}` : "#/settings";
-    default:
-      return `#/${route.name}`;
-  }
-}
+export const sectionOf = routeSection;
+function parseRoute(): Route { return parseHashRoute(typeof window === "undefined" ? "" : window.location.hash); }
+const routeToHash = serializeRoute;
 
 const TAB_ITEMS: Array<{ key: Section; label: string; icon: React.ReactNode; route: Route }> = [
-  { key: "chats", label: "消息", icon: <MessageCircle size={21} strokeWidth={1.7} />, route: { name: "chats" } },
-  { key: "contacts", label: "通讯录", icon: <UsersRound size={21} strokeWidth={1.7} />, route: { name: "contacts" } },
-  { key: "discover", label: "发现", icon: <Compass size={21} strokeWidth={1.7} />, route: { name: "discover" } },
-  { key: "notes", label: "表达本", icon: <BookMarked size={21} strokeWidth={1.7} />, route: { name: "expressions" } },
-  { key: "me", label: "我", icon: <UserRound size={21} strokeWidth={1.7} />, route: { name: "me" } },
+  { key: "chats", label: "消息", icon: <MessageCircle size={21} strokeWidth={1.8} />, route: { name: "chats" } },
+  { key: "contacts", label: "通讯录", icon: <UsersRound size={21} strokeWidth={1.8} />, route: { name: "contacts" } },
+  { key: "discover", label: "发现", icon: <Compass size={21} strokeWidth={1.8} />, route: { name: "discover" } },
+  { key: "me", label: "我", icon: <UserRound size={21} strokeWidth={1.8} />, route: { name: "me" } },
 ];
 
 function Shell() {
-  const { toast, requests, friends } = useApp();
-  const [route, setRoute] = useState<Route>(() => parseRoute());
+  const { toast, requests, friends } = useApp(useShallow((state) => ({ toast: state.toast, requests: state.requests, friends: state.friends })));
+  const route = useNavigation((state) => state.route);
+  const setRoute = useNavigation((state) => state.setRoute);
   const [mobile, setMobile] = useState(false);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 900px)");
+    void usePreferences.getState().load();
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 959.98px)");
     const update = () => setMobile(mq.matches);
     update();
     mq.addEventListener("change", update);
@@ -165,22 +99,28 @@ function Shell() {
   }, []);
 
   const navigate = useCallback((next: Route) => {
+    haptic("selection");
     window.location.hash = routeToHash(next);
     setRoute(next);
   }, []);
 
-  const back = useCallback(() => {
-    const section = sectionOf(route);
-    const fallback: Route =
-      section === "contacts"
-        ? { name: "contacts" }
-        : section === "chats"
-          ? { name: "chats" }
-          : section === "discover"
-            ? { name: "discover" }
-            : { name: "me" };
-    navigate(fallback);
-  }, [route, navigate]);
+  const back = useCallback(() => navigate(backRoute(route)), [route, navigate]);
+
+  useEffect(() => {
+    const teardown = installPlatform(() => {
+      if (closeTopOverlay()) return true;
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const close = dialog?.querySelector<HTMLButtonElement>('button[aria-label*="关闭"],button[aria-label*="取消"],button[data-dialog-close]');
+      if (close) { close.click(); return true; }
+      const legacy = (window as unknown as { w4HandleBack?: () => string }).w4HandleBack;
+      if (legacy?.() === "handled") return true;
+      const next = backRoute(route);
+      if (routeToHash(next) === routeToHash(route)) return false;
+      back();
+      return true;
+    });
+    return teardown;
+  }, [route, back]);
 
   const unread = friends.reduce((sum, f) => sum + f.unread, 0);
   const section = sectionOf(route);
@@ -202,11 +142,7 @@ function Shell() {
         return <RequestsPane navigate={navigate} />;
       case "discover":
         /* 手机：发现 = 二级菜单（动态 / 偶遇 / 通知）；桌面：左列菜单 + 右侧动态 */
-        return mobile ? (
-          <DiscoverIndex active="feed" navigate={navigate} />
-        ) : (
-          <FeedView navigate={navigate} />
-        );
+        return <FeedView navigate={navigate} />;
       case "discoverFeed":
       case "discoverMoments":
       case "moments":
@@ -231,7 +167,7 @@ function Shell() {
       case "contacts":
         return <ContactsIntro navigate={navigate} />;
       default:
-        return <EmptyState />;
+        return <EmptyState navigate={navigate} />;
     }
   })();
 
@@ -295,6 +231,7 @@ function Shell() {
   return (
     <div className="w4-root" style={{ height: "100%" }}>
       <div className="w4-app" data-mobile-view={dataView}>
+        <CallPanel />
         <div className="w4-shell">
           <Rail active={section} unread={unread} requests={requests.length} navigate={navigate} />
 
@@ -343,7 +280,7 @@ function Shell() {
             {TAB_ITEMS.map((t) => {
               const badge =
                 t.key === "chats" ? unread : t.key === "contacts" ? requests.length : 0;
-              const isDot = t.key === "contacts";
+              const isDot = false;
               return (
                 <button
                   key={t.key}
@@ -370,7 +307,8 @@ function Shell() {
         ) : null}
       </div>
 
-      <LocalWelcome />
+      <PushOptIn />
+      <GlobalNotification />
 
       {toast ? (
         <div className="w4-toast" key={toast.id} role="status">
@@ -390,65 +328,17 @@ function Shell() {
 installAudioBus();
 
 export function App() {
+  const preview = isPreviewMode();
   return (
-    <AppProvider>
-      <Shell />
-    </AppProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AppProvider>
+          <Shell />
+          {preview ? <PreviewBridge variant={previewVariant()} /> : null}
+        </AppProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 
 /** 本地模式首次进入：三步上手引导 */
-function LocalWelcome() {
-  const { profile } = useApp();
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    if (!isLocalMode()) return;
-    try {
-      const dismissed = window.localStorage.getItem("speakeasy.welcome.dismissed") === "1";
-      if (!dismissed && !profile?.name) setShow(true);
-    } catch {
-      /* ignore */
-    }
-  }, [profile?.name]);
-
-  const dismiss = () => {
-    try {
-      window.localStorage.setItem("speakeasy.welcome.dismissed", "1");
-    } catch {
-      /* ignore */
-    }
-    setShow(false);
-  };
-
-  if (!show) return null;
-  return (
-    <div className="w4-overlay" role="dialog" aria-modal="true">
-      <div className="w4-dialog" style={{ maxWidth: 420 }}>
-        <div className="w4-dialog-title">欢迎使用 SpeakEasy 本地版</div>
-        <p className="w4-hint" style={{ marginTop: 8 }}>
-          所有数据只存在这台设备上，不需要服务器。三步就能开始：
-        </p>
-        <ol className="w4-hint" style={{ margin: "10px 0 0 18px", lineHeight: 1.9 }}>
-          <li>设置 → 本地与密钥：填 DeepSeek 和 SiliconFlow 两个 Key</li>
-          <li>我 → 右上角铅笔：填昵称、目标语言</li>
-          <li>发现 → 偶遇：捏个好友，通过后就能聊天 / 语音 / 通话</li>
-        </ol>
-        <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-          <button
-            className="w4-btn is-primary"
-            onClick={() => {
-              dismiss();
-              window.location.hash = "#/settings/local";
-            }}
-          >
-            去填 Key
-          </button>
-          <button className="w4-btn" onClick={dismiss}>
-            先逛逛
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

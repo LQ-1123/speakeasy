@@ -1,19 +1,24 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * V3 · Persona 主页。
  *
  * 信息流里点作者进入：头像、昵称、AI 身份说明、介绍、性格、兴趣标签、动态列表，
- * 以及「加好友 / 去聊天 / 处理好友申请」三种状态入口。
+ * 以及「发消息 / 处理好友申请」入口。
+ *
+ * 视觉：oversized 头像 + 姓名 → 一句主行动 → 次级资料 → 动态流。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, MessageCircle, Sparkles, UserPlus, X } from "lucide-react";
+import { Check, ChevronLeft, MessageCircle, X } from "lucide-react";
 
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { personaAvatarSrc } from "../avatar";
-import { Avatar, Icon } from "../ui";
+import { haptic } from "../../theme/haptics";
+import { Avatar } from "../ui";
 import {
   acceptEvent,
   addFriend,
@@ -23,13 +28,11 @@ import {
   fetchPersona,
   languageLabel,
   likePersonaPost,
-  relTimeOf,
   type FeedItem,
   type PersonaProfile,
   type PersonaRelationBrief,
 } from "./api";
 import { FeedCard } from "./FeedView";
-import "./v3.css";
 
 /**
  * 把「TA 身边的人」翻译成一句自然中文。
@@ -55,6 +58,16 @@ function relationsLine(relations?: PersonaRelationBrief[]): string {
   return "";
 }
 
+function flagOf(country: string): string {
+  const map: Array<[string, string]> = [
+    ["United Kingdom", "🇬🇧"], ["United States", "🇺🇸"], ["Australia", "🇦🇺"],
+    ["Brazil", "🇧🇷"], ["Ireland", "🇮🇪"], ["Italy", "🇮🇹"], ["Japan", "🇯🇵"],
+    ["Spain", "🇪🇸"], ["Korea", "🇰🇷"], ["China", "🇨🇳"], ["Singapore", "🇸🇬"],
+    ["Germany", "🇩🇪"],
+  ];
+  return map.find(([k]) => (country || "").includes(k))?.[1] ?? "🌍";
+}
+
 export function PersonaProfileView({
   personaId,
   navigate,
@@ -62,7 +75,9 @@ export function PersonaProfileView({
   personaId: string;
   navigate: (r: Route) => void;
 }) {
-  const { reloadAll, showToast } = useApp();
+  const { reloadAll, showToast } = useApp(
+    useShallow((state) => ({ reloadAll: state.reloadAll, showToast: state.showToast })),
+  );
   const [profile, setProfile] = useState<PersonaProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -98,14 +113,31 @@ export function PersonaProfileView({
     void load();
   }, [load]);
 
-  const doAddFriend = async () => {
-    if (!profile) return;
+  const friendship = profile?.friendship;
+  const isFriend = friendship?.status === "accepted";
+  const isPending = friendship?.status === "pending";
+
+  /** 主行动「发消息」：已是好友直接进聊天；否则先加好友再进聊天。 */
+  const startChat = async () => {
+    if (!profile || busy) return;
+    if (isFriend && friendship?.friend_id) {
+      navigate({ name: "chat", friendId: friendship.friend_id });
+      return;
+    }
     setBusy(true);
     try {
-      await addFriend(personaId, `Hi ${profile.nickname}! I saw your post and wanted to say hi.`);
+      const res = await addFriend(
+        personaId,
+        `Hi ${profile.nickname}! I saw your post and wanted to say hi.`,
+      );
+      haptic("save");
       await reloadAll();
-      await load();
       showToast(`已添加 ${profile.nickname}，可以开始聊天了`, "success");
+      if (res?.friend_id) {
+        navigate({ name: "chat", friendId: res.friend_id });
+      } else {
+        await load();
+      }
     } catch (exc) {
       showToast(exc instanceof Error ? exc.message : "添加失败");
     } finally {
@@ -123,6 +155,7 @@ export function PersonaProfileView({
       } else if (accept) {
         await addFriend(personaId);
       }
+      haptic("save");
       await reloadAll();
       await load();
       showToast(accept ? "已接受好友申请" : "已拒绝好友申请", "success");
@@ -152,6 +185,7 @@ export function PersonaProfileView({
     );
     try {
       await likePersonaPost(item.id);
+      haptic("save");
     } catch {
       showToast("点赞失败");
     }
@@ -175,6 +209,7 @@ export function PersonaProfileView({
             }
           : prev,
       );
+      haptic("send");
     } catch {
       showToast("评论失败");
     }
@@ -182,160 +217,176 @@ export function PersonaProfileView({
     setCommentFor(null);
   };
 
-  const friendship = profile?.friendship;
-  const isFriend = friendship?.status === "accepted";
-  const isPending = friendship?.status === "pending";
+  const relations = relationsLine(profile?.relations);
+  const meta: string[] = [];
+  if (profile) {
+    if (profile.age) meta.push(`${profile.age} 岁`);
+    if (profile.occupation) meta.push(profile.occupation);
+    if (profile.city) meta.push(profile.city);
+    if (profile.country) meta.push(profile.country);
+  }
 
   return (
-    <div className="w4-main">
-      <div className="w4-head">
+    <div className="w4-main disc-main">
+      <div className="w4-head disc-head">
         <button className="w4-icon-btn" onClick={() => navigate({ name: "discover" })} aria-label="返回">
-          <Icon strokeWidth={2}>
-            <path d="M15 5l-7 7 7 7" />
-          </Icon>
+          <ChevronLeft size={20} strokeWidth={2} />
         </button>
         <div className="w4-head-main">
-          <div className="w4-head-title">{profile?.nickname ?? "人物主页"}</div>
+          <div className="w4-head-title disc-head-title">{profile?.nickname ?? "人物主页"}</div>
           <div className="w4-head-sub">AI 人物主页</div>
         </div>
       </div>
 
       <div className="w4-scroll">
-        {loading && !profile ? (
-          <div className="v3-profile-loading">加载中…</div>
-        ) : error && !profile ? (
-          <div className="v3-error">
-            <div className="v3-error-title">主页加载失败</div>
-            <div className="v3-error-text">{error}</div>
-            <button className="w4-btn is-primary" onClick={() => void load()}>
-              重试
-            </button>
-          </div>
-        ) : profile ? (
-          <div className="v3-profile">
-            <div className="v3-profile-hero">
-              <div
-                className="v3-profile-cover"
-                style={{ backgroundImage: `url(${personaAvatarSrc(profile.avatar_seed || profile.id, profile.avatar_style, profile.avatar_options, profile.avatar)})` }}
-                aria-hidden
-              />
-              <div className="v3-profile-id">
-                <Avatar
-                  src={personaAvatarSrc(
-                    profile.avatar_seed || profile.id,
-                    profile.avatar_style,
-                    profile.avatar_options,
-                    profile.avatar,
-                  )}
-                  name={profile.nickname}
-                  size={78}
-                  round
-                />
-                <div className="v3-profile-name">
-                  {profile.nickname}
-                  <span className="v3-ai-tag">AI 人物</span>
-                </div>
-                <div className="v3-profile-meta">
-                  {profile.age ? `${profile.age} 岁 · ` : ""}
-                  {profile.occupation}
-                  {profile.city ? ` · ${profile.city}` : ""}
-                  {profile.country ? `，${profile.country}` : ""}
-                  {` · 母语：${languageLabel(profile.language)}`}
-                </div>
+        <div className="w4-feed disc-profile-page">
+          {loading && !profile ? (
+            <div className="disc-state">
+              <div className="disc-spinner" aria-hidden />
+              <div className="disc-state-text" style={{ marginTop: 16 }}>
+                正在打开主页…
               </div>
             </div>
-
-            <div className="v3-profile-body">
-              <p className="v3-profile-bio">{profile.bio}</p>
-              {profile.personality ? (
-                <div className="v3-profile-section">
-                  <span className="v3-profile-label">性格</span>
-                  <p>{profile.personality}</p>
-                </div>
-              ) : null}
-              {profile.interests.length ? (
-                <div className="v3-profile-section">
-                  <span className="v3-profile-label">兴趣</span>
-                  <div className="v3-tags">
-                    {profile.interests.map((t) => (
-                      <span key={t} className="v3-tag">
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {relationsLine(profile.relations) ? (
-                <div className="v3-profile-section">
-                  <span className="v3-profile-label">身边的人</span>
-                  <p>{relationsLine(profile.relations)}</p>
-                </div>
-              ) : null}
-
-              <div className="v3-profile-actions">
-                {isFriend ? (
-                  <button
-                    className="w4-btn is-primary"
-                    onClick={() =>
-                      friendship?.friend_id
-                        ? navigate({ name: "chat", friendId: friendship.friend_id })
-                        : void load()
-                    }
-                  >
-                    <MessageCircle size={15} /> 去聊天
-                  </button>
-                ) : isPending ? (
-                  <>
-                    <button className="w4-btn is-primary" disabled={busy} onClick={() => void respondRequest(true)}>
-                      <Check size={15} /> 接受好友申请
-                    </button>
-                    <button className="w4-btn" disabled={busy} onClick={() => void respondRequest(false)}>
-                      <X size={15} /> 拒绝
-                    </button>
-                  </>
-                ) : (
-                  <button className="w4-btn is-primary" disabled={busy} onClick={() => void doAddFriend()}>
-                    <UserPlus size={15} /> {busy ? "添加中…" : "添加好友"}
-                  </button>
-                )}
-              </div>
+          ) : error && !profile ? (
+            <div className="disc-state">
+              <div className="disc-state-title">主页加载失败</div>
+              <div className="disc-state-text">{error}</div>
+              <button className="w4-btn is-primary" onClick={() => void load()}>
+                重试
+              </button>
             </div>
-
-            <div className="v3-profile-posts">
-              <div className="v3-profile-posts-title">
-                TA 的动态 <span>{profile.post_count}</span>
-              </div>
-              {profile.posts.items.length === 0 ? (
-                <div className="v3-empty">
-                  <div className="v3-empty-text">还没有发过动态。</div>
-                </div>
-              ) : (
-                profile.posts.items.map((item) => (
-                  <FeedCard
-                    key={item.id}
-                    item={item}
-                    onOpenPersona={() => undefined}
-                    onLike={() => void toggleLike(item)}
-                    onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
-                          onDelete={() => undefined}
-                    onZoom={() => undefined}
-                    onNotify={showToast}
-                    commentOpen={commentFor === item.id}
-                    draft={draft}
-                    setDraft={setDraft}
-                    onSubmitComment={(text) => void submitComment(item, text)}
+          ) : profile ? (
+            <>
+              <section className="disc-profile-hero" aria-label={`${profile.nickname} 的资料`}>
+                <div className="disc-profile-avatar">
+                  <Avatar
+                    src={personaAvatarSrc(
+                      profile.avatar_seed || profile.id,
+                      profile.avatar_style,
+                      profile.avatar_options,
+                      profile.avatar,
+                    )}
+                    name={profile.nickname}
+                    size={132}
+                    round
                   />
-                ))
-              )}
-            </div>
-            <div style={{ height: 24 }} />
-          </div>
-        ) : null}
+                  <span className="disc-profile-badge">AI</span>
+                </div>
+
+                <h1 className="disc-profile-name">
+                  {profile.nickname}
+                  <span className="disc-profile-flag" aria-label={profile.country || "地区"}>
+                    {flagOf(profile.country)}
+                  </span>
+                </h1>
+
+                <div className="disc-profile-meta">
+                  <span className="disc-meta-chip is-accent">{profile.ai_label || "AI 人物"}</span>
+                  {meta.length ? <span className="disc-meta-chip">{meta.join(" · ")}</span> : null}
+                  <span className="disc-meta-chip">母语 {languageLabel(profile.language)}</span>
+                </div>
+
+                {profile.bio ? <p className="disc-profile-bio">{profile.bio}</p> : null}
+
+                <div className="disc-profile-actions">
+                  {isPending ? (
+                    <>
+                      <button
+                        className="w4-btn is-primary disc-profile-primary"
+                        disabled={busy}
+                        onClick={() => void respondRequest(true)}
+                      >
+                        <Check size={18} />
+                        {busy ? "处理中…" : "接受好友申请"}
+                      </button>
+                      <button
+                        className="w4-btn disc-profile-secondary"
+                        disabled={busy}
+                        onClick={() => void respondRequest(false)}
+                      >
+                        <X size={17} />
+                        拒绝
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="w4-btn is-primary disc-profile-primary"
+                      disabled={busy}
+                      onClick={() => void startChat()}
+                    >
+                      <MessageCircle size={18} />
+                      {busy ? "正在打开…" : "发消息"}
+                    </button>
+                  )}
+                </div>
+              </section>
+
+              {profile.personality || profile.interests.length || relations ? (
+                <section className="disc-about" aria-label="关于 TA">
+                  <div className="disc-section-head">
+                    <h2 className="disc-section-title">关于 TA</h2>
+                  </div>
+                  <div>
+                    {profile.personality ? (
+                      <div className="disc-about-row">
+                        <span className="disc-about-label">性格</span>
+                        <p className="disc-about-value">{profile.personality}</p>
+                      </div>
+                    ) : null}
+                    {profile.interests.length ? (
+                      <div className="disc-about-row">
+                        <span className="disc-about-label">兴趣</span>
+                        <div className="disc-about-chips">
+                          {profile.interests.map((t) => (
+                            <span key={t} className="disc-chip">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {relations ? (
+                      <div className="disc-about-row">
+                        <span className="disc-about-label">身边的人</span>
+                        <p className="disc-about-value">{relations}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="disc-profile-posts" aria-label="TA 的动态">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">TA 的动态</h2>
+                  <span className="disc-section-count">{profile.post_count}</span>
+                </div>
+                {profile.posts.items.length === 0 ? (
+                  <div className="disc-state">
+                    <div className="disc-state-text">还没有发过动态。</div>
+                  </div>
+                ) : (
+                  profile.posts.items.map((item) => (
+                    <FeedCard
+                      key={item.id}
+                      item={item}
+                      onOpenPersona={() => undefined}
+                      onLike={() => void toggleLike(item)}
+                      onComment={() => setCommentFor(commentFor === item.id ? null : item.id)}
+                      onDelete={() => undefined}
+                      onZoom={() => undefined}
+                      onNotify={showToast}
+                      commentOpen={commentFor === item.id}
+                      draft={draft}
+                      setDraft={setDraft}
+                      onSubmitComment={(text) => void submitComment(item, text)}
+                    />
+                  ))
+                )}
+              </section>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
-
-/** 未使用占位，避免打包器把 lucide 图标摇掉（保持与 FeedView 一致的图标集）。 */
-export { ArrowLeft };

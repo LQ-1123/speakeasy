@@ -1,0 +1,304 @@
+/* ===========================================================================
+   Global notification surfaces: in-app glass banner + push opt-in card.
+   Semantic colours only: every value resolves to a --md-* token (via color-mix).
+   Imported from GlobalNotification / PushOptIn.
+   =========================================================================== */
+
+/* ----------------------------------------------------------- glass banner */
+
+.se-global-notification {
+  position: fixed;
+  z-index: 880;
+  /* Sits below the safe area and, when a call is minimized, below the call
+     dock. GlobalNotification measures the real dock and sets `top` inline. */
+  top: calc(var(--safe-top) + var(--call-dock-height) + 10px);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(460px, calc(100vw - 24px));
+  padding: 8px 10px 8px 8px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
+  border-radius: var(--shape-lg);
+  background: color-mix(in srgb, var(--md-surface-container-high) 80%, transparent);
+  color: var(--md-on-surface);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  text-align: left;
+  animation: se-notif-drop var(--dur-slow) var(--ease-expressive);
+}
+
+.se-notif-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  border-radius: var(--shape-md);
+  text-align: left;
+}
+
+.se-notif-main:hover {
+  background: color-mix(in srgb, var(--md-surface-container-highest) 52%, transparent);
+}
+
+.se-notif-main:active {
+  background: color-mix(in srgb, var(--md-surface-container-highest) 74%, transparent);
+}
+
+.se-notif-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.se-notif-kind {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid color-mix(in srgb, var(--md-surface-container-lowest) 92%, transparent);
+  border-radius: 50%;
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.se-notif-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.se-notif-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.se-notif-line1 strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.se-notif-action {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--md-on-surface-variant);
+  font-size: var(--text-sm);
+}
+
+.se-notif-line2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.se-notif-source {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--shape-full);
+  background: color-mix(in srgb, var(--md-primary-container) 64%, transparent);
+  color: var(--md-on-primary-container);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.se-notif-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  color: var(--md-on-surface-variant);
+  font-size: var(--text-sm);
+}
+
+.se-notif-time {
+  flex: none;
+  padding-right: 2px;
+  color: color-mix(in srgb, var(--md-on-surface-variant) 76%, transparent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.se-notif-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--md-on-surface-variant) 78%, transparent);
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.se-notif-close:hover {
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface);
+}
+
+@keyframes se-notif-drop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+/* ----------------------------------------------------------- push opt-in */
+
+.se-push-opt-in {
+  position: fixed;
+  z-index: 870;
+  right: 20px;
+  bottom: calc(20px + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(360px, calc(100vw - 40px));
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 44%, transparent);
+  border-radius: var(--shape-2xl);
+  background: color-mix(in srgb, var(--md-surface-container-lowest) 88%, transparent);
+  color: var(--md-on-surface);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  animation: se-sheet-in var(--dur-slow) var(--ease-expressive);
+}
+
+.se-push-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.se-push-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.se-push-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.se-push-copy strong {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.se-push-copy p {
+  margin: 0;
+  color: var(--md-on-surface-variant);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.se-push-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.se-push-actions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--shape-full);
+  color: var(--md-on-surface-variant);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.se-push-actions button:hover {
+  background: var(--md-surface-container);
+  color: var(--md-on-surface);
+}
+
+.se-push-actions button.is-primary {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  box-shadow: var(--shadow-1);
+}
+
+.se-push-actions button.is-primary:hover {
+  background: color-mix(in srgb, var(--md-primary) 88%, var(--md-on-primary));
+}
+
+@keyframes se-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ----------------------------------------------------------- touch widths */
+
+@media (max-width: 959.98px) {
+  .se-global-notification {
+    width: calc(100vw - 20px);
+    border-radius: var(--shape-lg);
+  }
+
+  .se-notif-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .se-push-opt-in {
+    left: 12px;
+    right: 12px;
+    bottom: calc(92px + var(--safe-bottom));
+    width: auto;
+    max-width: none;
+    border-radius: var(--shape-xl);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .se-global-notification,
+  .se-push-opt-in {
+    animation-duration: 0.001ms;
+  }
+}

@@ -1955,9 +1955,22 @@ def persona_recent_facts(
 
 
 
+_CODE_VALUE_TIERS = dict(VALUE_TIERS)
+_CODE_SHARE_WEIGHT = dict(EVENT_TYPE_SHARE_WEIGHT)
+_CODE_RHYTHM = {name: globals()[name] for name in (
+    "DEFAULT_EVENT_POSTS_PER_DAY", "TENSION_PENALTY_STEP", "TENSION_PENALTY_FLOOR",
+    "COMMENT_BACKFILL_WINDOW_HOURS", "_VALUE_TIER_SQL",
+)}
+
+
 def refresh_from_lexicon() -> dict[str, int]:
     """把 ``events.json``（价值档/分享权重）和 ``rhythm.json``（配额/惩罚/补位窗口）应用回运行时。"""
     applied = {"event_types": 0, "rhythm": 0}
+    VALUE_TIERS.clear()
+    VALUE_TIERS.update(_CODE_VALUE_TIERS)
+    EVENT_TYPE_SHARE_WEIGHT.clear()
+    EVENT_TYPE_SHARE_WEIGHT.update(_CODE_SHARE_WEIGHT)
+    globals().update(_CODE_RHYTHM)
     try:
         from app.v3 import lexicon  # noqa: PLC0415
 

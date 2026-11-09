@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /** 通讯录在宽屏下的右栏：没有选中好友时的说明页。 */
 
 import { UserPlus } from "lucide-react";
@@ -9,10 +11,10 @@ import { useApp } from "../store";
 import { Empty } from "../ui";
 
 export function ContactsIntro({ navigate }: { navigate: (r: Route) => void }) {
-  const { friends, requests } = useApp();
+  const { friends, requests } = useApp(useShallow((state) => ({ friends: state.friends, requests: state.requests })));
   return (
     <div className="w4-main">
-      <div className="w4-head">
+      <div className="w4-head se-pane-head">
         <div className="w4-head-main">
           <div className="w4-head-title">通讯录</div>
           <div className="w4-head-sub">

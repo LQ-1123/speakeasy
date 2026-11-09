@@ -125,11 +125,14 @@ async def bind_current_user(request: Request) -> str:
     set_current_user(raw_id)
     # 更新活跃时间（低频写，失败不影响请求）
     try:
-        await asyncio.to_thread(
-            lambda: db.conn.execute(
-                "UPDATE v3_users SET last_seen_at=? WHERE id=?", (_now(), raw_id)
-            )
-        )
+        def touch():
+            with db._lock, db.conn:
+                db.conn.execute(
+                    "UPDATE v3_users SET last_seen_at=? WHERE id=?"
+                    " AND (last_seen_at IS NULL OR datetime(last_seen_at)<datetime('now','-5 minutes'))",
+                    (_now(), raw_id),
+                )
+        await asyncio.to_thread(touch)
     except Exception:  # noqa: BLE001
         pass
     return raw_id

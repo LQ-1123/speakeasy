@@ -77,7 +77,8 @@ class PersonaAudioCache:
         content = str(post.get("content") or "")
         content_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
         binding = _binding_for(post, persona)
-        safe_key = binding.render_key.replace("/", "_").replace(":", "_")
+        parameter_key = voice_registry.render_revision(persona)
+        safe_key = f"{binding.render_key}-v2-{parameter_key}".replace("/", "_").replace(":", "_")
         return f"{post['id']}-{content_hash}-{safe_key}", _post_lang(post, persona), binding.token
 
     def _candidates(self, base: str) -> list[str]:

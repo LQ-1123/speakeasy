@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * 单聊页。
  *
@@ -10,7 +12,9 @@
  * 交互状态（播放中的波形、展开的译文、可收藏的建议卡）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { savedScrollPosition, useScrollMemory } from "../useScrollMemory";
 import {
   Camera,
   Image as ImageIcon,
@@ -31,8 +35,11 @@ import {
 } from "lucide-react";
 
 import { clockTime, dayOf } from "../format";
+import "../styles/chat.css";
 import type { Friend, Message, Route } from "../model";
 import { API_ORIGIN } from "../api";
+import { callSession } from "../v3/callSession";
+import { registerOverlay } from "../navigationStore";
 import {
   callOpening,
   callTurnStream,
@@ -44,7 +51,8 @@ import {
   callTurnFromText,
 } from "../apiFacade";
 import { useApp } from "../store";
-import { playMessageSound } from "../notify";
+import { haptic } from "../../theme/haptics";
+import { isPreviewMode } from "../previewAdapter";
 import { Avatar, Confirm, Dialog, Icon, Lightbox, VoiceBar } from "../ui";
 import { FriendInfo } from "./FriendInfo";
 
@@ -60,6 +68,35 @@ const PHOTOS = [
   "/mock/photos/beach.jpg",
   "/mock/photos/night.jpg",
 ];
+
+/** Preview fixture has no server-side TTS: use the browser voice only for review. */
+function speechLangFor(friend: Friend): string {
+  const code = (friend.language || "").toLowerCase();
+  const map: Record<string, string> = {
+    en: "en-US",
+    de: "de-DE",
+    fr: "fr-FR",
+    es: "es-ES",
+    it: "it-IT",
+    pt: "pt-PT",
+    ja: "ja-JP",
+    ko: "ko-KR",
+    zh: "zh-CN",
+  };
+  const labels: Record<string, string> = {
+    英语: "en-US",
+    德语: "de-DE",
+    法语: "fr-FR",
+    西语: "es-ES",
+    西班牙语: "es-ES",
+    意大利语: "it-IT",
+    葡语: "pt-PT",
+    日语: "ja-JP",
+    韩语: "ko-KR",
+    中文: "zh-CN",
+  };
+  return map[code] ?? labels[friend.language] ?? "en-US";
+}
 
 
 /* WebAudio 播放：荣耀/华为 WebView 对 <audio> 支持差，用 AudioContext 解码播放更稳 */
@@ -91,8 +128,11 @@ export function ChatPane({
   onBack: () => void;
   navigate: (r: Route) => void;
 }) {
-  const { friends,
-    friendById,
+  const loadOlderThread = useApp((state) => state.loadOlderThread);
+  const hasOlder = useApp((state) => state.threadHasMore[friendId]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const { friendById,
+    loadThread,
     messagesOf,
     typing,
     markRead,
@@ -107,15 +147,13 @@ export function ChatPane({
     dismissSuggestion,
     translateAll,
     showToast,
-    settings,
     deleteFriend,
-    callSummary,
-  } = useApp();
+  } = useApp(useShallow((state) => ({ friends: state.friends, friendById: state.friendById, loadThread: state.loadThread, messagesOf: state.messagesOf, typing: state.typing, markRead: state.markRead, sendText: state.sendText, sendVoiceBlob: state.sendVoiceBlob, sendImage: state.sendImage, zhOpen: state.zhOpen, toggleZh: state.toggleZh, translateMessage: state.translateMessage, toggleShownText: state.toggleShownText, saveSuggestion: state.saveSuggestion, dismissSuggestion: state.dismissSuggestion, translateAll: state.translateAll, showToast: state.showToast, deleteFriend: state.deleteFriend })));
 
   const friend = friendById(friendId);
-  const totalUnread = friends.reduce((n, f) => n + (f.unread || 0), 0);
   const msgs = messagesOf(friendId);
   const isTyping = typing[friendId];
+  useEffect(() => { void loadThread(friendId); }, [friendId, loadThread]);
 
   useEffect(() => {
     const w = window as unknown as { w4OnCallAudio?: (s: string) => void };
@@ -130,20 +168,6 @@ export function ChatPane({
   }, [showToast]);
 
   /* 收到好友新消息时播放提示音 */
-  const lastFriendMsgId = useRef("");
-  useEffect(() => {
-    const last = [...msgs].reverse().find((m) => m.from === "friend");
-    if (!last) return;
-    if (!lastFriendMsgId.current) {
-      lastFriendMsgId.current = last.id;
-      return;
-    }
-    if (last.id !== lastFriendMsgId.current) {
-      lastFriendMsgId.current = last.id;
-      playMessageSound();
-    }
-  }, [msgs]);
-
   const [draft, setDraft] = useState("");
   const [voiceMode, setVoiceMode] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -159,45 +183,6 @@ export function ChatPane({
   const [pendingUrl, setPendingUrl] = useState("");
   const [infoOpen, setInfoOpen] = useState(false);
   /* ---- 通话中的真实回合 ---- */
-  const [callTurns, setCallTurns] = useState(0);
-  const [callUserText, setCallUserText] = useState("");
-  const [callFriendText, setCallFriendText] = useState("");
-  const [callTalking, setCallTalking] = useState(false);
-  const [callWaiting, setCallWaiting] = useState(false);
-  const callRec = useRef<MediaRecorder | null>(null);
-  const callStreamRef = useRef<MediaStream | null>(null);
-  const callChunks = useRef<Blob[]>([]);
-  const callStartAt = useRef(0);
-  const callAudioQueue = useRef<string[]>([]);
-  const callAudioPlaying = useRef(false);
-  const [speakerOn, setSpeakerOn] = useState(true);
-  const speakerOnRef = useRef(true);
-  const currentCallAudio = useRef<HTMLAudioElement | null>(null);
-
-  /* ---- 免提自动断句（VAD）---- */
-  const vadRef = useRef<{
-    stream: MediaStream;
-    ctx: AudioContext;
-    analyser: AnalyserNode;
-    timer: number | null;
-    rec: MediaRecorder | null;
-    chunks: Blob[];
-    startedAt: number;
-    silenceSince: number;
-  } | null>(null);
-  const callListeningRef = useRef(false);
-  const callMutedRef = useRef(false);
-  const [callListening, setCallListening] = useState(false);
-  const [callMuted, setCallMuted] = useState(false);
-  const [callFriendSpeaking, setCallFriendSpeaking] = useState(false);
-  const [callUserZh, setCallUserZh] = useState("");
-  const [callFriendZh, setCallFriendZh] = useState("");
-
-  /* 关掉声音时立刻停下正在播的那句，而不是等它播完 */
-  useEffect(() => {
-    speakerOnRef.current = speakerOn;
-    if (!speakerOn) currentCallAudio.current?.pause();
-  }, [speakerOn]);
   const [mobileInfo, setMobileInfo] = useState(false);
 
   /* 系统返回键：详情浮层打开时先关闭浮层，而不是退回聊天列表 */
@@ -224,11 +209,18 @@ export function ChatPane({
     y: number;
   } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [calling, setCalling] = useState(false);
-  const [callSeconds, setCallSeconds] = useState(0);
-  const [callPhase, setCallPhase] = useState<"dialing" | "live">("dialing");
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  /** 打开对方资料：宽屏走右侧资料栏，窄屏/手机走覆盖层 */
+  const openInfo = () => {
+    haptic("selection");
+    setMobileInfo(!wide);
+    setInfoOpen(true);
+  };
+
+  const scrollRef = useScrollMemory<HTMLDivElement>(`thread:${friendId}`);
+  const initialThreadPosition = useRef(savedScrollPosition(`thread:${friendId}`));
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const [messageListOffset, setMessageListOffset] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recTimer = useRef<number | null>(null);
   const recStart = useRef(0);
@@ -239,6 +231,8 @@ export function ChatPane({
   const playingTimer = useRef<number | null>(null);
   const galleryRef = useRef<HTMLInputElement | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => photoOpen ? registerOverlay(() => setPhotoOpen(false)) : undefined, [photoOpen]);
+  useEffect(() => msgMenu ? registerOverlay(() => setMsgMenu(null)) : undefined, [msgMenu]);
 
   const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -279,7 +273,7 @@ export function ChatPane({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && initialThreadPosition.current === undefined) el.scrollTop = el.scrollHeight;
   }, [msgs.length, isTyping, friendId]);
 
   useEffect(() => {
@@ -296,13 +290,17 @@ export function ChatPane({
   /** 播放中的消息：只允许一条同时响 */
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  /* 离开聊天页暂停所有播放 */
+  const ttsCache = useRef(new Map<string, string>());
+  /* 离开聊天页暂停所有播放 / 浏览器预览朗读 */
   useEffect(
     () => () => {
       audioRef.current?.pause();
       audioRef.current = null;
-      currentCallAudio.current?.pause();
-      currentCallAudio.current = null;
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      for (const url of ttsCache.current.values()) URL.revokeObjectURL(url);
+      ttsCache.current.clear();
     },
     [],
   );
@@ -339,8 +337,11 @@ export function ChatPane({
       setPlayingId(m.id);
       // 一条消息没有音频文件（本地模式只存了文字）→ 现场合成一条再播
       void (async () => {
-        const synth = m.text ? await synthesizeVoice(m.text, friendId) : null;
+        const key = `${friendId}:${m.text}`;
+        const cached = ttsCache.current.get(key);
+        const synth = cached ?? (m.text ? await synthesizeVoice(m.text, friendId) : null);
         if (synth) {
+          if (!cached) ttsCache.current.set(key, synth);
           audioRef.current?.pause();
           const played = await playVoiceUrl(synth);
           if (played) {
@@ -358,8 +359,46 @@ export function ChatPane({
     [playingId],
   );
 
+  /**
+   * AI 文本消息朗读：真实后端走 /tts/sample（friend_id 绑定角色音色）；
+   * 本地预览 fixture 没有服务端 TTS，用浏览器语音做验收兜底。
+   */
+  const readAloud = useCallback(
+    (m: Message) => {
+      if (!m.text.trim()) return;
+      if (isPreviewMode() && typeof window !== "undefined" && "speechSynthesis" in window) {
+        if (playingId === m.id) {
+          window.speechSynthesis.cancel();
+          setPlayingId(null);
+          return;
+        }
+        audioRef.current?.pause();
+        audioRef.current = null;
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(m.text);
+        utterance.lang = friend ? speechLangFor(friend) : "en-US";
+        utterance.rate = 0.96;
+        let fallback = 0;
+        const clear = () => {
+          window.clearTimeout(fallback);
+          setPlayingId((current) => (current === m.id ? null : current));
+        };
+        utterance.onend = clear;
+        utterance.onerror = clear;
+        fallback = window.setTimeout(clear, Math.min(15000, 1200 + m.text.length * 70));
+        setPlayingId(m.id);
+        window.speechSynthesis.speak(utterance);
+        return;
+      }
+      togglePlay(m);
+    },
+    [friend, playingId, togglePlay],
+  );
+
   const send = () => {
     const text = draft.trim();
+    if (!pendingImage && !text) return;
+    haptic("send");
     if (pendingImage) {
       void sendImage(friendId, pendingImage, text);
       clearPendingImage();
@@ -367,7 +406,6 @@ export function ChatPane({
       inputRef.current?.focus();
       return;
     }
-    if (!text) return;
     sendText(friendId, text);
     setDraft("");
     inputRef.current?.focus();
@@ -379,6 +417,7 @@ export function ChatPane({
     setCancelHint(false);
     setRecZone(null);
     setRecSeconds(0);
+    haptic("recordStart");
     recStart.current = Date.now();
     startY.current = y;
     recTimer.current = window.setInterval(() => {
@@ -411,6 +450,7 @@ export function ChatPane({
 
   const finishRecording = (cancelled: boolean, transcribe = false) => {
     if (!recording) return;
+    if (cancelled) haptic("recordCancel");
     setRecZone(null);
     setCancelHint(false);
     stopRecTimer();
@@ -439,561 +479,14 @@ export function ChatPane({
         showToast("没录到声音，再试一次", "error");
         return;
       }
+      haptic("send");
       void sendVoiceBlob(friendId, blob, ms, { openTranscript: transcribe });
     };
     rec.stop();
   };
 
   /** 顺序播放后端逐句下发的语音；播完自动继续听用户说 */
-  const pumpCallAudio = async () => {
-    if (callAudioPlaying.current) return;
-    callAudioPlaying.current = true;
-    while (callAudioQueue.current.length) {
-      const url = callAudioQueue.current.shift();
-      if (!url) break;
-      await new Promise<void>((resolve) => {
-        const audio = new Audio(url);
-        audio.muted = !speakerOnRef.current;
-        currentCallAudio.current = audio;
-        let settled = false;
-        let timer = 0;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          if (timer) window.clearTimeout(timer);
-          resolve();
-        };
-        audio.onended = finish;
-        audio.onerror = finish;
-        audio.addEventListener("loadedmetadata", () => {
-          const d = Number.isFinite(audio.duration) ? audio.duration : 0;
-          if (d > 0) {
-            if (timer) window.clearTimeout(timer);
-            timer = window.setTimeout(finish, d * 1000 + 2000);
-          }
-        });
-        /* 兜底：避免某些环境 ended 永远不触发，通话卡在“正在说” */
-        timer = window.setTimeout(finish, 20000);
-        void audio.play().catch(finish);
-      });
-    }
-    callAudioPlaying.current = false;
-    setCallFriendSpeaking(false);
-    window.setTimeout(() => resumeCallListening(), 350);
-  };
-
-  /** 一段话录完：发给后端，流式拿回逐句语音 */
-  const sendCallBlob = async (blob: Blob, ms: number) => {
-    if (!friend) return;
-    setCallWaiting(true);
-    setCallUserText("");
-    setCallFriendText("");
-    setCallUserZh("");
-    setCallFriendZh("");
-    const ok = await callTurnStream(friend.id, blob, ms, (ev) => {
-      if (ev.type === "transcript") {
-        setCallUserText(ev.text);
-        if (ev.text) {
-          void apiTranslate(ev.text, friend.id).then((zh) => {
-            if (zh) setCallUserZh(zh);
-          });
-        }
-      } else if (ev.type === "sentence") {
-        setCallFriendText((t) => (t ? t + " " : "") + ev.text);
-        void apiTranslate(ev.text, friend.id).then((zh) => {
-          if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
-        });
-        setCallFriendSpeaking(true);
-        // 通话语音：优先用事件里的音频（本地模式是 blob），没有就现场合成
-        if (ev.audioUrl || ev.text) {
-          void (async () => {
-            let url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
-            if (!url) return;
-            if (!url.startsWith("http")) {
-              url = `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
-            }
-            callAudioPlaying.current = true;
-            const nat = (window as unknown as { AndroidTone?: { playUrl?: (u: string) => void } })
-              .AndroidTone;
-            let played = false;
-            if (nat?.playUrl) {
-              // 原生播放：荣耀 WebView 对 <audio>/WebAudio 限制严，原生 MediaPlayer 最稳
-              nat.playUrl(url);
-              played = true;
-            } else {
-              played = await playVoiceUrl(url);
-            }
-            if (!played) showToast("通话语音加载失败", "error");
-            const ms = Math.min(15000, 800 + (ev.text || "").length * 75);
-            window.setTimeout(() => {
-              callAudioPlaying.current = false;
-              if (played) resumeCallListening();
-            }, played ? ms : 200);
-          })();
-        }
-      } else if (ev.type === "done") {
-        setCallWaiting(false);
-        setCallTurns((n) => n + 1);
-        window.setTimeout(() => {
-          if (callAudioPlaying.current || callAudioQueue.current.length) return;
-          setCallFriendSpeaking(false);
-          resumeCallListening();
-        }, 1200);
-      } else if (ev.type === "error") {
-        setCallWaiting(false);
-        showToast(ev.message || "这一轮没接上", "error");
-      }
-    });
-    if (!ok) {
-      setCallWaiting(false);
-      showToast("通话连接失败", "error");
-    }
-    if (!callAudioQueue.current.length && !callAudioPlaying.current) {
-      setCallWaiting(false);
-      window.setTimeout(() => resumeCallListening(), 350);
-    }
-  };
-
-  /** VAD 主循环：说话开始录音，停顿 ~0.85s 自动发送 */
-  async function vadTick() {
-    const v = vadRef.current;
-    if (!v) return;
-    const buf: Float32Array<ArrayBuffer> = new Float32Array(
-      new ArrayBuffer(v.analyser.fftSize * Float32Array.BYTES_PER_ELEMENT),
-    );
-    v.analyser.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (let k = 0; k < buf.length; k += 1) sum += buf[k] * buf[k];
-    const rms = Math.sqrt(sum / buf.length);
-    const now = Date.now();
-    const speaking = rms > 0.02;
-
-    if (!v.rec && speaking) {
-      v.chunks = [];
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const rec = new MediaRecorder(v.stream, { mimeType: mime });
-      rec.ondataavailable = (e) => {
-        if (e.data && e.data.size) v.chunks.push(e.data);
-      };
-      v.startedAt = now;
-      v.silenceSince = 0;
-      v.rec = rec;
-      rec.onstop = () => {
-        if (!vadRef.current) return;
-        if (suppressUploadRef.current) {
-          suppressUploadRef.current = false;
-          return;
-        }
-        const ms = Date.now() - v.startedAt;
-        const blob = new Blob(v.chunks, { type: rec.mimeType || "audio/webm" });
-        v.chunks = [];
-        v.rec = null;
-        setCallTalking(false);
-        if (blob.size >= 1200) void sendCallBlob(blob, ms);
-        else window.setTimeout(() => vadTick(), 200);
-      };
-      rec.start(100);
-      setCallTalking(true);
-    } else if (v.rec) {
-      if (speaking) {
-        v.silenceSince = 0;
-      } else if (!v.silenceSince) {
-        v.silenceSince = now;
-      }
-      const silentFor = v.silenceSince ? now - v.silenceSince : 0;
-      const total = now - v.startedAt;
-      if (silentFor >= 550 || total >= 15000) {
-        const rec = v.rec;
-        v.rec = null;
-        if (sttReadyRef.current && sttWsRef.current?.readyState === 1) {
-          sttPartialRef.current = "";
-          try {
-            sttNodeRef.current?.port.postMessage({ cmd: "flush" });
-            sttWsRef.current.send(JSON.stringify({ type: "stop" }));
-          } catch {
-            /* ignore */
-          }
-          const text = (await waitSttFinal(2200)).trim();
-          setCallTalking(false);
-          if (text) {
-            const ok = await sendCallText(text, total);
-            if (ok) {
-              try {
-                suppressUploadRef.current = true;
-                if (rec && rec.state !== "inactive") rec.stop();
-              } catch {
-                suppressUploadRef.current = false;
-              }
-              return;
-            }
-            setCallUserZh("流式回复失败，改用整段识别…");
-          }
-        }
-        try {
-          if (rec && rec.state !== "inactive") rec.stop();
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-    }
-    v.timer = window.setTimeout(vadTick, 60);
-  }
-
-  /** 恢复“继续听”：只在没静音、没在等回复、对方也没在说话时 */
-  const resumeCallListening = () => {
-    const v = vadRef.current;
-    if (!v || v.rec) return;
-    if (callMutedRef.current || !callListeningRef.current) return;
-    if (callWaiting) return;
-    if (callAudioPlaying.current) {
-      if (callAudioQueue.current.length || currentCallAudio.current) return;
-      callAudioPlaying.current = false;
-      setCallFriendSpeaking(false);
-    }
-    if (callFriendSpeaking) setCallFriendSpeaking(false);
-    if (v.timer) window.clearTimeout(v.timer);
-    v.timer = window.setTimeout(vadTick, 120);
-  };
-
-  /* ---------------- Deepgram 流式 STT（通话说一句就识别） ---------------- */
-  const sttWsRef = useRef<WebSocket | null>(null);
-  const sttNodeRef = useRef<AudioWorkletNode | null>(null);
-  const sttReadyRef = useRef(false);
-  const sttPartialRef = useRef("");
-  const sttFinalRef = useRef<((t: string) => void) | null>(null);
-  const suppressUploadRef = useRef(false);
-
-  const stopSttStream = () => {
-    sttReadyRef.current = false;
-    try {
-      sttNodeRef.current?.port.postMessage({ cmd: "stop" });
-      sttNodeRef.current?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    sttNodeRef.current = null;
-    const ws = sttWsRef.current;
-    sttWsRef.current = null;
-    if (ws) {
-      try {
-        if (ws.readyState === 1) ws.send(JSON.stringify({ type: "close" }));
-      } catch {
-        /* ignore */
-      }
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    sttFinalRef.current?.(sttPartialRef.current);
-    sttFinalRef.current = null;
-  };
-
-  const waitSttFinal = (ms: number) =>
-    new Promise<string>((resolve) => {
-      let done = false;
-      const finish = (t: string) => {
-        if (done) return;
-        done = true;
-        window.clearTimeout(timer);
-        sttFinalRef.current = null;
-        resolve(t);
-      };
-      const timer = window.setTimeout(() => finish(sttPartialRef.current), ms);
-      sttFinalRef.current = finish;
-    });
-
-  const startSttStream = async (ctx: AudioContext, stream: MediaStream) => {
-    try {
-      const base = API_ORIGIN || window.location.origin;
-      const wsUrl = `${base.replace(/^http/, "ws")}/api/v2/stt/stream?language=en`;
-      const ws = new WebSocket(wsUrl);
-      await new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(() => reject(new Error("ws-timeout")), 3500);
-        ws.onopen = () => {
-          window.clearTimeout(timer);
-          resolve();
-        };
-        ws.onerror = () => {
-          window.clearTimeout(timer);
-          reject(new Error("ws-error"));
-        };
-      });
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(String(e.data)) as {
-            type?: string;
-            text?: string;
-          };
-          if (data.type === "partial" && data.text) {
-            sttPartialRef.current = data.text;
-            setCallUserText(data.text);
-          } else if (data.type === "final" && data.text) {
-            sttPartialRef.current = data.text;
-            setCallUserText(data.text);
-          } else if (data.type === "done") {
-            sttFinalRef.current?.(data.text || sttPartialRef.current);
-          } else if (data.type === "error") {
-            sttReadyRef.current = false;
-            showToast(`STT 错误：${(data as { message?: string }).message ?? "unknown"}`, "error");
-          }
-        } catch {
-          /* ignore */
-        }
-      };
-      await ctx.audioWorklet.addModule("/worklets/pcm-processor.js");
-      const node = new AudioWorkletNode(ctx, "pcm-processor", {
-        processorOptions: { inputRate: ctx.sampleRate },
-      });
-      const src = ctx.createMediaStreamSource(stream);
-      const sink = ctx.createGain();
-      sink.gain.value = 0;
-      src.connect(node);
-      node.connect(sink);
-      sink.connect(ctx.destination);
-      node.port.onmessage = (ev: MessageEvent) => {
-        const pcm = (ev.data as { pcm?: ArrayBuffer }).pcm;
-        if (!pcm) return;
-        const sock = sttWsRef.current;
-        if (
-          sock &&
-          sock.readyState === 1 &&
-          callListeningRef.current &&
-          !callMutedRef.current
-        ) {
-          sock.send(pcm);
-        }
-      };
-      node.port.postMessage({ cmd: "start" });
-      sttNodeRef.current = node;
-      sttWsRef.current = ws;
-      sttReadyRef.current = true;
-    } catch {
-      sttReadyRef.current = false;
-      showToast("STT 连接失败，本轮回退整段识别", "error");
-      try {
-        sttWsRef.current?.close();
-      } catch {
-        /* ignore */
-      }
-      sttWsRef.current = null;
-    }
-  };
-
-  /** 流式 STT 拿到文本后，直接请求通话回复（不再上传音频） */
-  const sendCallText = async (text: string, ms: number): Promise<boolean> => {
-    if (!friend) return false;
-    setCallWaiting(true);
-    setCallFriendText("");
-    setCallFriendZh("");
-    let ok = false;
-    try {
-      ok = await callTurnFromText(friend.id, text, ms, (ev) => {
-      if (ev.type === "transcript") {
-        setCallUserText(ev.text);
-        if (ev.text) {
-          void apiTranslate(ev.text, friend.id).then((zh) => {
-            if (zh) setCallUserZh(zh);
-          });
-        }
-      } else if (ev.type === "sentence") {
-        setCallFriendText((t) => (t ? t + " " : "") + ev.text);
-        void apiTranslate(ev.text, friend.id).then((zh) => {
-          if (zh) setCallFriendZh((t) => (t ? t + " " : "") + zh);
-        });
-        setCallFriendSpeaking(true);
-        void (async () => {
-          let url = ev.audioUrl || (await synthesizeVoice(ev.text, friend.id));
-          if (!url) return;
-          if (!url.startsWith("http")) {
-            url = `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
-          }
-          callAudioPlaying.current = true;
-          const nat = (window as unknown as {
-            AndroidTone?: { playUrl?: (u: string) => void };
-          }).AndroidTone;
-          let played = false;
-          if (nat?.playUrl) {
-            nat.playUrl(url);
-            played = true;
-          } else {
-            played = await playVoiceUrl(url);
-          }
-          if (!played) showToast("通话语音加载失败", "error");
-          const playMs = Math.min(15000, 800 + (ev.text || "").length * 75);
-          window.setTimeout(() => {
-            callAudioPlaying.current = false;
-            if (played) resumeCallListening();
-          }, played ? playMs : 200);
-        })();
-      } else if (ev.type === "done") {
-        setCallWaiting(false);
-        setCallTurns((n) => n + 1);
-        window.setTimeout(() => {
-          if (callAudioPlaying.current || callAudioQueue.current.length) return;
-          setCallFriendSpeaking(false);
-          resumeCallListening();
-        }, 1200);
-      } else if (ev.type === "error") {
-        setCallWaiting(false);
-        showToast(ev.message || "这一轮没接上", "error");
-      }
-      });
-    } catch (err) {
-      ok = false;
-      setCallUserZh("流式回复请求失败：" + String((err as Error)?.message ?? err));
-    }
-    if (!ok) {
-      setCallWaiting(false);
-      showToast("流式回复失败，已回退整段上传", "error");
-      return false;
-    }
-    if (!callAudioQueue.current.length && !callAudioPlaying.current) {
-      setCallWaiting(false);
-      window.setTimeout(() => resumeCallListening(), 350);
-    }
-    return true;
-  };
-
-  const startVad = async () => {
-    if (vadRef.current || callMutedRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new AudioContext();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      source.connect(analyser);
-      void startSttStream(ctx, stream);
-      vadRef.current = {
-        stream,
-        ctx,
-        analyser,
-        timer: null,
-        rec: null,
-        chunks: [],
-        startedAt: 0,
-        silenceSince: 0,
-      };
-      callListeningRef.current = true;
-      setCallListening(true);
-      resumeCallListening();
-    } catch {
-      showToast("没有麦克风权限，先在浏览器里允许一下", "error");
-    }
-  };
-
-  const stopVad = () => {
-    stopSttStream();
-    const v = vadRef.current;
-    vadRef.current = null;
-    callListeningRef.current = false;
-    setCallListening(false);
-    setCallTalking(false);
-    setCallFriendSpeaking(false);
-    if (!v) return;
-    if (v.timer) window.clearTimeout(v.timer);
-    try {
-      if (v.rec && v.rec.state !== "inactive") v.rec.stop();
-    } catch {
-      /* ignore */
-    }
-    v.stream.getTracks().forEach((t) => t.stop());
-    void v.ctx.close().catch(() => {});
-  };
-
-  const toggleCallMute = () => {
-    const next = !callMutedRef.current;
-    callMutedRef.current = next;
-    setCallMuted(next);
-    const v = vadRef.current;
-    if (next) {
-      if (v?.timer) window.clearTimeout(v.timer);
-      if (v) {
-        try {
-          if (v.rec && v.rec.state !== "inactive") v.rec.stop();
-        } catch {
-          /* ignore */
-        }
-        v.rec = null;
-      }
-      setCallTalking(false);
-    } else {
-      resumeCallListening();
-      if (!vadRef.current) void startVad();
-    }
-  };
-
-  const startCall = async () => {
-    (window as unknown as { AndroidTone?: { ding?: () => void } }).AndroidTone?.ding?.();
-    setCalling(true);
-    setCallTurns(0);
-    setCallUserText("");
-    setCallFriendText("");
-    setCallFriendSpeaking(false);
-    callMutedRef.current = false;
-    setCallMuted(false);
-    if (friend) {
-      await callWarmup(friend.id);
-      // 接通后对方先开口：每次都现生成一句，避免固定“Hey”出戏
-      const greet = (await callOpening(friend.id)) || "Can you hear me?";
-      setCallFriendText(greet);
-      void (async () => {
-        const url = await synthesizeVoice(greet, friend.id);
-        if (!url) return;
-        setCallFriendSpeaking(true);
-        callAudioPlaying.current = true;
-        const played = await playVoiceUrl(url);
-        window.setTimeout(() => {
-          setCallFriendSpeaking(false);
-          callAudioPlaying.current = false;
-        }, played ? Math.min(12000, 900 + greet.length * 75) : 200);
-      })();
-    }
-  };
-
-  const endCall = (seconds: number) => {
-    (window as unknown as { AndroidTone?: { stop?: () => void } }).AndroidTone?.stop?.();
-    stopVad();
-    setCalling(false);
-    callAudioQueue.current = [];
-    currentCallAudio.current?.pause();
-    currentCallAudio.current = null;
-    if (callRec.current && callRec.current.state !== "inactive") callRec.current.stop();
-    callStreamRef.current?.getTracks().forEach((t) => t.stop());
-    callRec.current = null;
-    callStreamRef.current = null;
-    if (seconds >= 2) {
-      callSummary(friendId, seconds, callTurns);
-      showToast(callTurns > 0 ? `通话结束，聊了 ${callTurns} 轮` : "通话结束，摘要已存进会话");
-    }
-  };
-
-  useEffect(() => {
-    if (!calling) {
-      stopVad();
-      return;
-    }
-    if (callPhase === "live" && !callMutedRef.current) void startVad();
-    return () => stopVad();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calling, callPhase]);
-
-  useEffect(() => {
-    if (!calling) return;
-    setCallSeconds(0);
-    setCallPhase("dialing");
-    const dial = window.setTimeout(() => setCallPhase("live"), 1600);
-    const tick = window.setInterval(() => setCallSeconds((s) => s + 1), 1000);
-    return () => {
-      window.clearTimeout(dial);
-      window.clearInterval(tick);
-    };
-  }, [calling]);
+  const startCall = () => { if (friend) void callSession.start(friend); };
 
   const grouped = useMemo(() => {
     const out: Array<{ day: string; items: Message[] }> = [];
@@ -1005,6 +498,17 @@ export function ChatPane({
     });
     return out;
   }, [msgs]);
+  const messageVirtualizer = useVirtualizer({ count: msgs.length, getScrollElement: () => scrollRef.current, estimateSize: () => 120, overscan: 5, getItemKey: (index) => msgs[index].id, scrollMargin: messageListOffset });
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    const scroller = scrollRef.current;
+    if (!list || !scroller) return;
+    const measure = () => setMessageListOffset(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [friendId, Boolean(friend)]);
 
   if (!friend) {
     return (
@@ -1016,7 +520,7 @@ export function ChatPane({
         </div>
       ) : null}
 
-        <div className="w4-head">
+        <div className="w4-head se-pane-head">
           <button className="w4-icon-btn" onClick={onBack} aria-label="返回">
             <Icon strokeWidth={2}>
               <path d="M15 5l-7 7 7 7" />
@@ -1026,8 +530,8 @@ export function ChatPane({
             <div className="w4-head-title">会话不存在</div>
           </div>
         </div>
-        <div className="w4-centered" style={{ color: "var(--w-text-3)", fontSize: 13 }}>
-          这个好友可能已经被删除了。
+        <div className="w4-centered">
+          <div className="se-muted-text">这个好友可能已经被删除了。</div>
         </div>
       </div>
     );
@@ -1036,22 +540,14 @@ export function ChatPane({
   return (
     <div className="w4-main">
       {/* 顶部 */}
-      <div className="w4-head">
-        <button className="w4-icon-btn w4-only-mobile w4-back-badge-wrap" onClick={onBack} aria-label="返回">
+      <div className="w4-head se-chat-head">
+        <button className="w4-icon-btn w4-only-mobile" onClick={onBack} aria-label="返回">
           <Icon strokeWidth={2}>
             <path d="M15 5l-7 7 7 7" />
           </Icon>
-          {totalUnread > 0 ? (
-            <span className="w4-back-badge">{totalUnread > 99 ? "99+" : totalUnread}</span>
-          ) : null}
         </button>
-        <button
-          className="w4-head-person"
-          onClick={() => {
-            setMobileInfo(true);
-            setInfoOpen(true);
-          }}
-        >
+        <button className="w4-head-person" onClick={openInfo}>
+          <Avatar friend={friend} size={40} round online={friend.online} />
           <span className="w4-head-main">
             <span className="w4-head-title">{friend.name}</span>
             <span className="w4-head-sub">
@@ -1065,12 +561,12 @@ export function ChatPane({
         </button>
         <div className="w4-head-actions">
           <button
-            className="w4-icon-btn"
+            className="se-head-call"
             aria-label="语音通话"
             onClick={() => void startCall()}
             title="语音通话"
           >
-            <Phone size={17} strokeWidth={1.8} />
+            <Phone size={19} strokeWidth={1.8} />
           </button>
         </div>
       </div>
@@ -1079,26 +575,27 @@ export function ChatPane({
         <div className="w4-chat">
           <div className="w4-chat-scroll" ref={scrollRef}>
             <div className="w4-chat-inner">
-              <div className="w4-chat-intro">
-                <Avatar friend={friend} size={52} round />
-                <div className="w4-chat-intro-name">{friend.name}</div>
-                <div className="w4-chat-intro-meta">
-                  {friend.flag} {friend.city} · {friend.localTime}
-                  {friend.localActivity ? ` · ${friend.localActivity}` : ""}
+              {hasOlder ? <button className="se-load-older" disabled={loadingOlder} onClick={async () => {
+                const node = scrollRef.current;
+                const height = node?.scrollHeight || 0;
+                initialThreadPosition.current = node?.scrollTop || 0;
+                setLoadingOlder(true);
+                await loadOlderThread(friendId);
+                setLoadingOlder(false);
+                requestAnimationFrame(() => { if (node) node.scrollTop += node.scrollHeight - height; });
+              }}>{loadingOlder ? "加载中…" : "更早的消息"}</button> : null}
+              {msgs.length === 0 && !hasOlder ? (
+                <div className="se-chat-empty">
+                  <Avatar friend={friend} size={64} round />
+                  <div className="se-chat-empty-title">和 {friend.name} 打个招呼</div>
+                  <p>从一句 hello 开始，TA 会用语音回你。</p>
                 </div>
-                <div className="w4-chat-intro-hint">
-                  {friend.closeness >= 3
-                    ? `你们已经聊了 ${friend.turns} 轮。TA 记得你说过的事。`
-                    : "说错了也没关系，TA 会等你说完。"}
-                </div>
-              </div>
-
-              {grouped.map((group) => (
-                <div key={group.day}>
-                  <div className="w4-day">
-                    <span>{group.day}</span>
-                  </div>
-                  {group.items.map((m) => (
+              ) : null}
+              <div ref={messageListRef} style={{ position: "relative", height: messageVirtualizer.getTotalSize() }}>
+              {messageVirtualizer.getVirtualItems().map((item) => {
+                const m = msgs[item.index];
+                return <div key={m.id} data-index={item.index} ref={messageVirtualizer.measureElement} style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - messageVirtualizer.options.scrollMargin}px)` }}>
+                  {item.index === 0 || dayOf(msgs[item.index - 1].time) !== dayOf(m.time) ? <div className="w4-day"><span>{dayOf(m.time)}</span></div> : null}
                     <MessageRow
                       key={m.id}
                       message={m}
@@ -1106,27 +603,32 @@ export function ChatPane({
                       zhShown={!!zhOpen[m.id]}
                       playing={playingId === m.id}
                       onPlay={() => togglePlay(m)}
+                      onRead={() => readAloud(m)}
+                      onTranslateLongPress={() => {
+                        haptic("selection");
+                        void translateMessage(m.id);
+                      }}
                       onToggleZh={() => void translateMessage(m.id)}
                       onToggleText={() => toggleShownText(m.id)}
-                      onSave={() => saveSuggestion(m.id)}
+                      onSave={() => {
+                        haptic("save");
+                        saveSuggestion(m.id);
+                      }}
                       onDismiss={() => dismissSuggestion(m.id)}
                       onZoom={setZoom}
                       onLongPress={(pos) =>
                         setMsgMenu({ message: m, x: pos.x, y: pos.y })
                       }
-                      onAvatarClick={() => {
-                        setMobileInfo(true);
-                        setInfoOpen(true);
-                      }}
+                      onAvatarClick={openInfo}
                     />
-                  ))}
-                </div>
-              ))}
+                </div>;
+              })}
+              </div>
 
               {isTyping ? (
                 <div className="w4-msg">
-                        <div className="w4-msg-col">
-                    <div className="w4-bubble" style={{ padding: "10px 13px" }}>
+                  <div className="w4-msg-col">
+                    <div className="w4-bubble is-typing">
                       <span className="w4-typing">
                         <i />
                         <i />
@@ -1245,8 +747,10 @@ export function ChatPane({
                           className="w4-send-btn"
                           disabled={!draft.trim() && !pendingImage}
                           onClick={send}
+                          aria-label="发送"
+                          title="发送"
                         >
-                          发送
+                          <ArrowUp size={20} strokeWidth={2.4} />
                         </button>
                       </>
                     )}
@@ -1254,7 +758,7 @@ export function ChatPane({
                 </div>
               </div>
             ) : (
-              <div className="w4-composer-inner">
+              <div className="w4-composer-inner is-mobile">
                 <div className="w4-composer-actions">
                   <button
                     className={`w4-icon-btn ${voiceMode ? "is-active" : ""}`}
@@ -1350,10 +854,12 @@ export function ChatPane({
                     />
                     <button
                       className="w4-send-btn"
-                      disabled={!draft.trim()}
+                      disabled={!draft.trim() && !pendingImage}
                       onClick={send}
+                      aria-label="发送"
+                      title="发送"
                     >
-                      发送
+                      <ArrowUp size={20} strokeWidth={2.4} />
                     </button>
                   </div>
                 )}
@@ -1382,7 +888,7 @@ export function ChatPane({
           ) : null}
 
           {recording && !recMouse ? (
-            <div className="w4-rec-overlay">
+            <div className={`w4-rec-overlay${cancelHint ? " is-cancel" : ""}`}>
               <div className="w4-rec-bars" aria-hidden>
                 {Array.from({ length: 9 }).map((_, i) => (
                   <i
@@ -1390,7 +896,6 @@ export function ChatPane({
                     style={{
                       height: 10 + ((i * 7) % 20),
                       animationDelay: `${i * 0.08}s`,
-                      background: cancelHint ? "#f08a80" : "#fff",
                     }}
                   />
                 ))}
@@ -1407,28 +912,6 @@ export function ChatPane({
                       ? "松开鼠标发送"
                       : "上滑取消 · 右滑转文字"}
               </div>
-              {recMouse && false ? (
-                <div className="w4-rec-bar">
-                  <button className="w4-rec-bar-btn" onClick={() => finishRecording(true)}>
-                    <X size={15} strokeWidth={2.2} />
-                    取消
-                  </button>
-                  <button
-                    className="w4-rec-bar-btn"
-                    onClick={() => finishRecording(false, true)}
-                  >
-                    <Languages size={15} strokeWidth={2} />
-                    转文字
-                  </button>
-                  <button
-                    className="w4-rec-bar-btn is-send"
-                    onClick={() => finishRecording(false)}
-                  >
-                    <ArrowUp size={15} strokeWidth={2.4} />
-                    发送
-                  </button>
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -1453,27 +936,6 @@ export function ChatPane({
             </div>
           ) : null}
 
-          {calling ? (
-            <CallOverlay
-              friend={friend}
-              phase={callPhase}
-              seconds={callSeconds}
-              turns={callTurns}
-              userText={callUserText}
-              userZh={callUserZh}
-              friendText={callFriendText}
-              friendZh={callFriendZh}
-              talking={callTalking}
-              waiting={callWaiting}
-              listening={callListening}
-              muted={callMuted}
-              friendSpeaking={callFriendSpeaking}
-              speakerOn={speakerOn}
-              onToggleMute={toggleCallMute}
-              onToggleSpeaker={() => setSpeakerOn((v) => !v)}
-              onEnd={() => endCall(callSeconds)}
-            />
-          ) : null}
         </div>
 
         {infoOpen ? (
@@ -1495,7 +957,7 @@ export function ChatPane({
                 >
                   查看完整资料
                 </button>
-                <button className="w4-info-btn" onClick={() => setCalling(true)}>
+                <button className="w4-info-btn" onClick={startCall}>
                   <Phone size={13} />
                   打电话
                 </button>
@@ -1506,20 +968,15 @@ export function ChatPane({
                   <span className="w4-voice-readonly-icon">
                     <Mic size={14} />
                   </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 500, display: "block" }}>
-                      {friend.voiceLabel}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: "var(--w-text-3)" }}>
-                      每个角色一个声音 · 系统自动分配
-                    </span>
+                  <span className="se-voice-main">
+                    <span className="se-voice-name">{friend.voiceLabel}</span>
+                    <span className="se-voice-note">每个角色一个声音 · 系统自动分配</span>
                   </span>
                 </div>
               </div>
               <div className="w4-info-section">
                 <button
-                  className="w4-info-btn is-danger"
-                  style={{ width: "100%" }}
+                  className="w4-info-btn is-danger is-block"
                   onClick={() => setConfirmDelete(true)}
                 >
                   <Trash2 size={13} />
@@ -1539,7 +996,7 @@ export function ChatPane({
             className="w4-ctx-menu"
             style={(() => {
               const W = 132;
-              const H = 82;
+              const H = 90;
               const pad = 8;
               const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
               const vh = typeof window === "undefined" ? 768 : window.innerHeight;
@@ -1608,6 +1065,8 @@ function MessageRow({
   zhShown,
   playing,
   onPlay,
+  onRead,
+  onTranslateLongPress,
   onToggleZh,
   onToggleText,
   onSave,
@@ -1621,6 +1080,8 @@ function MessageRow({
   zhShown: boolean;
   playing: boolean;
   onPlay: () => void;
+  onRead: () => void;
+  onTranslateLongPress: () => void;
   onToggleZh: () => void;
   onToggleText: () => void;
   onSave: () => void;
@@ -1629,7 +1090,7 @@ function MessageRow({
   onLongPress?: (pos: { x: number; y: number }) => void;
   onAvatarClick?: () => void;
 }) {
-  const { profile } = useApp();
+  const { profile } = useApp(useShallow((state) => ({ profile: state.profile })));
   const mine = message.from === "me";
 
   /* 长按/右键语音消息 → 在指针位置弹出「转文字」菜单 */
@@ -1651,14 +1112,14 @@ function MessageRow({
     if (longPressed.current) e.preventDefault();
   };
 
-  const startPress = (e: React.TouchEvent) => {
+  const startPress = (e: React.TouchEvent, onHold: (pos: { x: number; y: number }) => void) => {
     longPressed.current = false;
     cancelPress();
     const t = e.touches?.[0];
     pressPos.current = { x: t ? t.clientX : 0, y: t ? t.clientY : 0 };
     pressTimer.current = window.setTimeout(() => {
       longPressed.current = true;
-      onLongPress?.(pressPos.current);
+      onHold(pressPos.current);
     }, 420);
   };
 
@@ -1681,31 +1142,70 @@ function MessageRow({
 
   const isVoice = message.kind === "voice";
   const isImage = message.kind === "image";
+  const readable = !mine && !isVoice && !isImage && message.text.trim().length > 0;
+
+  const handleBubbleClick = () => {
+    if (longPressed.current) {
+      longPressed.current = false;
+      return;
+    }
+    const selection = typeof window === "undefined" ? "" : window.getSelection()?.toString() ?? "";
+    if (selection.trim()) return;
+    if (playing) {
+      onRead();
+      return;
+    }
+    haptic("selection");
+    onRead();
+  };
+
+  const handleBubbleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    handleBubbleClick();
+  };
 
   return (
     <div className={`w4-msg ${mine ? "is-me" : ""}`}>
       {mine ? null : (
         <button className="w4-msg-avatar" onClick={onAvatarClick} aria-label="查看资料">
-          <Avatar friend={friend} size={32} />
+          <Avatar friend={friend} size={36} />
         </button>
       )}
       <div className="w4-msg-col">
         <div className="w4-bubble-row">
           <div className="w4-bubble-stack">
           <div
-            className={`w4-bubble ${isImage ? "is-image" : ""}`}
-            title={clockTime(message.time)}
-            onTouchStart={isVoice ? (e) => startPress(e) : undefined}
-            onTouchEnd={isVoice ? endPress : undefined}
-            onTouchMove={isVoice ? cancelPress : undefined}
-            onTouchCancel={isVoice ? cancelPress : undefined}
+            className={`w4-bubble ${isImage ? "is-image" : ""} ${readable ? "is-readable" : ""} ${readable && playing ? "is-reading" : ""}`}
+            title={readable ? "单击朗读 · 长按或右键翻译" : clockTime(message.time)}
+            role={readable ? "button" : undefined}
+            tabIndex={readable ? 0 : undefined}
+            aria-label={readable ? `朗读：${message.text}` : undefined}
+            onClick={readable ? handleBubbleClick : undefined}
+            onKeyDown={readable ? handleBubbleKeyDown : undefined}
+            onTouchStart={
+              isVoice
+                ? (e) => startPress(e, (pos) => onLongPress?.(pos))
+                : readable
+                  ? (e) => startPress(e, () => onTranslateLongPress())
+                  : undefined
+            }
+            onTouchEnd={isVoice || readable ? endPress : undefined}
+            onTouchMove={isVoice || readable ? cancelPress : undefined}
+            onTouchCancel={isVoice || readable ? cancelPress : undefined}
             onContextMenu={
               isVoice
                 ? (e) => {
                     e.preventDefault();
                     onLongPress?.({ x: e.clientX, y: e.clientY });
                   }
-                : undefined
+                : readable
+                  ? (e) => {
+                      e.preventDefault();
+                      haptic("selection");
+                      onTranslateLongPress();
+                    }
+                  : undefined
             }
           >
           {isVoice ? (
@@ -1764,13 +1264,19 @@ function MessageRow({
 
         {/* 操作条 */}
         <div className="w4-bubble-tools">
+          {readable ? (
+            <span className={`w4-read-cue ${playing ? "on" : ""}`} aria-hidden>
+              <Volume2 size={12} strokeWidth={2} />
+              {playing ? "朗读中" : "点按朗读"}
+            </span>
+          ) : null}
           {/* 语音的「转文字 / 翻译」已经在气泡右侧，这里不再重复 */}
           {!isVoice && message.translation ? (
             <button className="w4-mini-btn" onClick={onToggleZh}>
               {zhShown ? "收起翻译" : "翻译"}
             </button>
           ) : null}
-          <span className="w4-msg-meta" style={{ padding: 0, marginLeft: 2 }}>
+          <span className="w4-msg-meta">
             {clockTime(message.time)}
             {mine ? (message.read ? " · 已读" : " · 发送中") : ""}
           </span>
@@ -1798,11 +1304,11 @@ function SuggestionCard({
         更地道一点
         <span className="w4-tip-tag">{s.tag}</span>
         <button
-          style={{ marginLeft: "auto", color: "var(--w-text-3)", display: "inline-flex" }}
+          className="w4-tip-close"
           onClick={onDismiss}
           aria-label="忽略"
         >
-          <X size={12} strokeWidth={2} />
+          <X size={13} strokeWidth={2} />
         </button>
       </div>
       <div className="w4-tip-better">{s.better}</div>
@@ -1836,149 +1342,3 @@ function SuggestionCard({
 }
 
 /* --------------------------------------------------------------- 通话 */
-
-function CallOverlay({
-  friend,
-  phase,
-  seconds,
-  turns,
-  userText,
-  userZh,
-  friendText,
-  friendZh,
-  talking,
-  waiting,
-  listening,
-  muted,
-  friendSpeaking,
-  speakerOn,
-  onToggleMute,
-  onToggleSpeaker,
-  onEnd,
-}: {
-  friend: Friend;
-  phase: "dialing" | "live";
-  seconds: number;
-  turns: number;
-  userText: string;
-  userZh: string;
-  friendText: string;
-  friendZh: string;
-  talking: boolean;
-  waiting: boolean;
-  listening: boolean;
-  muted: boolean;
-  friendSpeaking: boolean;
-  speakerOn: boolean;
-  onToggleMute: () => void;
-  onToggleSpeaker: () => void;
-  onEnd: () => void;
-}) {
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-
-  const status =
-    phase === "dialing"
-      ? "正在连接…"
-      : muted
-        ? "已静音，点一下话筒继续"
-        : friendSpeaking
-          ? `${friend.name} 正在说…`
-          : waiting
-            ? `${friend.name} 正在想怎么回你…`
-            : talking
-              ? "在听你说…"
-              : turns === 0
-                ? "免提中 · 你说完停顿一下，我就回你"
-                : `已聊 ${turns} 轮 · 继续说就好`;
-
-  return (
-    <div className="w4-call">
-      {/* 模糊背景：把 TA 的头像放大、虚化，作为通话时的氛围底 */}
-      <div className="w4-call-bg" style={{ backgroundImage: `url("${friend.avatar}")` }} />
-      <div className="w4-call-shade" />
-
-      <div className="w4-call-top">
-        <button className="w4-call-min" onClick={onEnd} aria-label="收起通话">
-          <Minimize2 size={18} strokeWidth={1.9} />
-        </button>
-        <span className="w4-call-label">语音通话</span>
-      </div>
-
-      <div className="w4-call-stage">
-        <div className={`w4-call-cardwrap${waiting ? " is-waiting" : ""}`}>
-          <div className="w4-call-card">
-            <img src={friend.avatar} alt="" />
-          </div>
-          <span className="w4-call-card-badge">
-            <img src={friend.avatar} alt="" />
-          </span>
-        </div>
-
-        <div className="w4-call-dots" aria-label={`通话进行中，已聊 ${turns} 轮`}>
-          <i className={phase === "live" ? "on" : ""} />
-          <i className={talking ? "on" : ""} />
-          <i className={turns > 0 ? "on" : ""} />
-        </div>
-
-        <div className="w4-call-name">{friend.name}</div>
-        <div className="w4-call-time">
-          {phase === "dialing" ? "正在接通…" : `通话中 ${mm}:${ss}`}
-        </div>
-
-        <div className="w4-call-sub">
-          {userText ? (
-            <div className="w4-call-line is-me">
-              你：{userText}
-              {userZh ? <div className="w4-call-zh">{userZh}</div> : null}
-            </div>
-          ) : null}
-          {friendText ? (
-            <div className="w4-call-line">
-              {friendText}
-              {friendZh ? <div className="w4-call-zh">{friendZh}</div> : null}
-            </div>
-          ) : null}
-          {talking || waiting || friendSpeaking ? (
-            <span className="w4-call-wave" aria-hidden>
-              <i /><i /><i /><i /><i /><i /><i />
-            </span>
-          ) : null}
-        </div>
-
-        <div className="w4-call-status">{status}</div>
-      </div>
-
-      <div className="w4-call-keys">
-        <div className="w4-call-key">
-          <button
-            className={`w4-call-keybtn is-talk${talking ? " is-rec" : ""}${muted ? " is-off" : ""}`}
-            onClick={onToggleMute}
-            aria-label={muted ? "打开麦克风" : "静音"}
-          >
-            {muted ? <MicOff size={27} strokeWidth={1.9} /> : <Mic size={27} strokeWidth={1.9} />}
-          </button>
-          <span>{muted ? "已静音" : talking ? "正在听你说" : "免提中"}</span>
-        </div>
-
-        <div className="w4-call-key">
-          <button className="w4-call-keybtn is-hangup" onClick={onEnd} aria-label="挂断">
-            <Phone size={27} strokeWidth={1.9} style={{ transform: "rotate(135deg)" }} />
-          </button>
-          <span>挂断</span>
-        </div>
-
-        <div className="w4-call-key">
-          <button
-            className={`w4-call-keybtn is-speaker${speakerOn ? "" : " is-off"}`}
-            onClick={onToggleSpeaker}
-            aria-label={speakerOn ? "关闭声音" : "打开声音"}
-          >
-            {speakerOn ? <Volume2 size={27} strokeWidth={1.9} /> : <VolumeX size={27} strokeWidth={1.9} />}
-          </button>
-          <span>{speakerOn ? "声音已开" : "声音已关"}</span>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -601,6 +601,7 @@ LANGUAGE_VOICES: dict[str, tuple[str, ...]] = {
     "en": (
         "en-GB-RyanNeural", "en-US-AvaMultilingualNeural", "en-AU-WilliamMultilingualNeural",
         "en-GB-SoniaNeural", "en-US-AndrewMultilingualNeural", "en-IE-ConnorNeural",
+        "en-US-JennyNeural",
     ),
     "ja": ("ja-JP-KeitaNeural", "ja-JP-NanamiNeural"),
     "ko": ("ko-KR-InJoonNeural", "ko-KR-SunHiNeural"),
@@ -902,8 +903,25 @@ async def ensure_persona_voices(
             )
             if not voice:
                 break  # 池子耗尽：宁可留空，也不允许两人共用一色
+            if pool is None:
+                from app.voice.catalog import verify_voice
+
+                if not await verify_voice(db, "fish", voice, language=str(row.get("language") or "en")):
+                    used.add(voice)
+                    continue
             try:
                 with db._lock, db.conn:  # noqa: SLF001
+                    if not db.conn.in_transaction:
+                        db.conn.execute("BEGIN IMMEDIATE")
+                    current = db.conn.execute(
+                        "SELECT fish_voice_id FROM personas WHERE id=?", (pid,)
+                    ).fetchone()
+                    if current is None or str(current[0] or "") != str(row.get("fish_voice_id") or ""):
+                        continue
+                    if db.conn.execute(
+                        "SELECT 1 FROM personas WHERE fish_voice_id=? AND id<>?", (voice, pid)
+                    ).fetchone():
+                        continue
                     db.conn.execute(
                         "UPDATE personas SET fish_voice_id=? WHERE id=?", (voice, pid)
                     )

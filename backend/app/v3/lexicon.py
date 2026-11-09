@@ -382,6 +382,8 @@ def reset_to_default(name: str) -> dict[str, Any]:
         _CACHE.pop((name, path), None)
         refresh()
         return {"restored": "code-default"}
+    _CACHE.pop((name, path), None)
+    refresh()
     return {"restored": "none"}
 
 

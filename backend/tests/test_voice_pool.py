@@ -60,6 +60,11 @@ def test_pick_from_pool_prefers_language_and_gender(pool_root):
     assert vp.pick_from_pool("en", "female") == ""
 
 
+def test_pick_from_pool_reports_exhaustion_instead_of_reusing_voice(pool_root):
+    vp.add_voice("only-voice", gender="female", language="en")
+    assert vp.pick_from_pool("en", "female", used={"only-voice"}) == ""
+
+
 @pytest.fixture()
 def client(pool_root, monkeypatch):
     monkeypatch.delenv("SE_ADMIN_TOKEN", raising=False)

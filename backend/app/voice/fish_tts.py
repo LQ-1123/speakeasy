@@ -91,6 +91,7 @@ async def pick_voice_for(
     api_key: str = "",
     base_url: str = "https://api.fish.audio",
     timeout: float = 30.0,
+    used: set[str] | None = None,
 ) -> str:
     """捏人时随机挑一个 Fish 音色 id（按语言 + 性别过滤）。
 
@@ -135,7 +136,7 @@ async def pick_voice_for(
 
     # 性别优先于语言：宁可口音不完美，也不能男声配女角色
     for need_lang, need_gender in ((True, True), (False, True), (False, False)):
-        cands = [v["id"] for v in pool if ok(v, need_lang, need_gender) and v.get("id")]
+        cands = [v["id"] for v in pool if ok(v, need_lang, need_gender) and v.get("id") and v["id"] not in (used or set())]
         if cands:
             return _random.choice(cands)
     return ""

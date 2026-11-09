@@ -1,9 +1,11 @@
 "use client";
 
-/** 通讯录 — 好友详情（微信资料页的排布：大头像 → 资料 → 操作）。 */
+import { useShallow } from "zustand/react/shallow";
+
+/** 通讯录 — 好友详情（Material 3 Expressive：头像身份 → 资料 → 动态 → 操作）。 */
 
 import { useEffect, useState } from "react";
-import { MessageCircle, Mic, Phone, Trash2 } from "lucide-react";
+import { MessageCircle, Mic, Trash2 } from "lucide-react";
 
 import { CLOSENESS, listTime } from "../format";
 import type { Route } from "../model";
@@ -20,7 +22,7 @@ export function ContactDetailPane({
   onBack: () => void;
   navigate: (r: Route) => void;
 }) {
-  const { friendById, messagesOf, deleteFriend, expressions } = useApp();
+  const { friendById, messagesOf, deleteFriend, expressions } = useApp(useShallow((state) => ({ friendById: state.friendById, messagesOf: state.messagesOf, deleteFriend: state.deleteFriend, expressions: state.expressions })));
   const friend = friendById(friendId);
   const [confirm, setConfirm] = useState(false);
   const [posts, setPosts] = useState<FriendPostItem[]>([]);
@@ -49,7 +51,7 @@ export function ContactDetailPane({
   if (!friend) {
     return (
       <div className="w4-main">
-        <div className="w4-head">
+        <div className="w4-head se-pane-head">
           <button className="w4-icon-btn w4-only-mobile" onClick={onBack} aria-label="返回">
             <Icon strokeWidth={2}>
               <path d="M15 5l-7 7 7 7" />
@@ -59,8 +61,8 @@ export function ContactDetailPane({
             <div className="w4-head-title">好友不存在</div>
           </div>
         </div>
-        <div className="w4-centered" style={{ fontSize: 13, color: "var(--w-text-3)" }}>
-          这个人可能已经被删除了。
+        <div className="w4-centered">
+          <div className="se-muted-text">这个人可能已经被删除了。</div>
         </div>
       </div>
     );
@@ -71,7 +73,7 @@ export function ContactDetailPane({
 
   return (
     <div className="w4-main">
-      <div className="w4-head">
+      <div className="w4-head se-pane-head">
         <button className="w4-icon-btn w4-only-mobile" onClick={onBack} aria-label="返回">
           <Icon strokeWidth={2}>
             <path d="M15 5l-7 7 7 7" />
@@ -83,18 +85,18 @@ export function ContactDetailPane({
       </div>
 
       <div className="w4-scroll">
-        <div className="w4-detail">
-          <div className="w4-detail-card">
-            <div className="w4-detail-head">
-              <Avatar friend={friend} size={64} round online={friend.online} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="w4-detail-name">
-                  {friend.name} <span>{friend.flag}</span>
+        <div className="se-detail">
+          <div className="se-detail-card">
+            <div className="se-detail-head">
+              <Avatar friend={friend} size={72} round online={friend.online} />
+              <div className="se-detail-identity">
+                <div className="se-detail-name">
+                  {friend.name} <span className="se-info-flag">{friend.flag}</span>
                 </div>
-                <div className="w4-detail-meta">
+                <div className="se-detail-meta">
                   {friend.age} 岁 · {friend.city} · {friend.occupation}
                 </div>
-                <div className="w4-chips" style={{ marginTop: 6 }}>
+                <div className="w4-chips se-detail-chips">
                   <span className="w4-chip is-green">{CLOSENESS[friend.closeness]}</span>
                   <span className="w4-chip">{friend.languageLabel}</span>
                   <span className="w4-chip">{friend.voiceLabel}</span>
@@ -102,59 +104,57 @@ export function ContactDetailPane({
               </div>
             </div>
 
-            <p className="w4-detail-bio">{friend.bio || "这个人还没写简介。"}</p>
+            <p className="se-detail-bio">{friend.bio || "这个人还没写简介。"}</p>
 
-            <div className="w4-detail-rows">
-              <div className="w4-detail-row">
-                <span className="w4-detail-key">当地</span>
+            <div className="se-detail-rows">
+              <div className="se-detail-row">
+                <span className="se-detail-key">当地</span>
                 <span>
                   {friend.localTime} · {friend.localPeriod}
                   {friend.localActivity ? `，${friend.localActivity}` : ""}
                 </span>
               </div>
-              <div className="w4-detail-row">
-                <span className="w4-detail-key">说话方式</span>
+              <div className="se-detail-row">
+                <span className="se-detail-key">说话方式</span>
                 <span>{friend.quirks.join("、") || "没什么特别的"}</span>
               </div>
-              <div className="w4-detail-row">
-                <span className="w4-detail-key">共同经历</span>
+              <div className="se-detail-row">
+                <span className="se-detail-key">共同经历</span>
                 <span>
                   {friend.sharedEpisodes.length
                     ? friend.sharedEpisodes.join("；")
                     : "还没什么共同经历"}
                 </span>
               </div>
-              <div className="w4-detail-row">
-                <span className="w4-detail-key">一起练过</span>
+              <div className="se-detail-row">
+                <span className="se-detail-key">一起练过</span>
                 <span>
                   {friend.turns} 轮对话
                   {saved.length ? `，收藏了 ${saved.length} 条表达` : ""}
                 </span>
               </div>
-              <div className="w4-detail-row">
-                <span className="w4-detail-key">聊天记录</span>
+              <div className="se-detail-row">
+                <span className="se-detail-key">聊天记录</span>
                 <span>{msgs.length} 条消息</span>
               </div>
             </div>
 
             {posts.length ? (
-              <div className="w4-detail-posts">
+              <div className="se-detail-posts">
                 <div className="w4-info-label">TA 的动态</div>
                 {posts.map((post) => (
-                  <div key={post.id} className="w4-detail-post">
-                    <div className="w4-detail-post-head">
-                      <Avatar friend={friend} size={26} round />
-                      <span className="w4-detail-post-meta">
+                  <div key={post.id} className="se-detail-post">
+                    <div className="se-detail-post-head">
+                      <Avatar friend={friend} size={28} round />
+                      <span className="se-detail-post-meta">
                         {friend.name} · {listTime(post.created_at)}
                       </span>
                     </div>
                     {post.content ? (
-                      <p className="w4-detail-post-text">{post.content}</p>
+                      <p className="se-detail-post-text">{post.content}</p>
                     ) : null}
                     {post.media?.length ? (
-                      <div
-                        className={`w4-moment-imgs n${Math.min(4, post.media.length)}`}
-                      >
+                      <div className={`se-detail-imgs n${Math.min(4, post.media.length)}`}>
                         {post.media.slice(0, 4).map((src) => (
                           <img
                             key={src}
@@ -166,7 +166,7 @@ export function ContactDetailPane({
                       </div>
                     ) : null}
                     {post.media_credit ? (
-                      <div className="v3-media-credit">图：{post.media_credit}</div>
+                      <div className="se-detail-credit">图：{post.media_credit}</div>
                     ) : null}
                   </div>
                 ))}
@@ -174,25 +174,25 @@ export function ContactDetailPane({
             ) : null}
 
             {saved.length ? (
-              <div className="w4-detail-saved">
+              <div className="se-detail-saved">
                 <div className="w4-info-label">从 TA 这里学到的</div>
                 {saved.map((e) => (
-                  <div key={e.id} className="w4-detail-saved-row">
+                  <div key={e.id} className="se-detail-saved-row">
                     <span>{e.better}</span>
                   </div>
                 ))}
               </div>
             ) : null}
 
-            <div className="w4-detail-actions">
+            <div className="se-detail-actions">
               <button
-                className="w4-btn"
+                className="w4-btn is-primary"
                 onClick={() => navigate({ name: "chat", friendId: friend.id })}
               >
                 <MessageCircle size={15} />
                 发消息
               </button>
-              <button className="w4-btn" onClick={() => navigate({ name: "chat", friendId: friend.id })}>
+              <button className="w4-btn is-tonal" onClick={() => navigate({ name: "chat", friendId: friend.id })}>
                 <Mic size={15} />
                 按住说话
               </button>

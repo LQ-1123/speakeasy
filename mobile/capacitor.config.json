@@ -3,16 +3,11 @@
   "appName": "SpeakEasy",
   "webDir": "www",
   "server": {
-    "androidScheme": "http",
-    "cleartext": true,
+    "androidScheme": "https",
     "errorPath": "offline.html",
-    "allowNavigation": [
-      "*"
-    ]
+    "allowNavigation": []
   },
-  "android": {
-    "allowMixedContent": true
-  },
+  "android": {},
   "plugins": {
     "CapacitorHttp": {
       "enabled": true

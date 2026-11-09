@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
+import "../theme/tokens.css";
+import { THEME_BOOTSTRAP_SCRIPT } from "../theme/bootstrap";
 
 export const metadata: Metadata = {
   title: "SpeakEasy · 和世界聊聊天",
@@ -13,7 +15,6 @@ export const metadata: Metadata = {
     title: "SpeakEasy",
   },
   icons: {
-    /* 用新文件名（brand-*），避开浏览器对旧 favicon 的强缓存 */
     icon: [
       { url: "/favicon.ico", sizes: "any" },
       { url: "/icons/brand-32.png", sizes: "32x32", type: "image/png" },
@@ -25,16 +26,18 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ededed",
+  themeColor: "#f4f3fa",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body>{children}</body>
     </html>
   );

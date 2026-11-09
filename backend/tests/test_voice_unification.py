@@ -75,6 +75,7 @@ def _fish_enabled_for_tests(monkeypatch):
     聊天新合成失败走 Edge」的双声），所以测试要先模拟一次成功。
     """
     monkeypatch.setenv("SE_TTS_FISH", "1")
+    monkeypatch.setattr(voice_registry, "load_cfg", lambda store=None: CFG_FISH)
     voice_registry.reset_state()
     voice_registry.mark_fish_success()
 

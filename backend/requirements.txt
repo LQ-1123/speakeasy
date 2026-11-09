@@ -19,7 +19,8 @@
 # ---- Web 框架 ----
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.32
-websockets>=13.0
+websockets>=15.0,<16
+tzdata>=2025.1
 python-multipart>=0.0.12
 # 用户上传图片（Pillow）
 pillow>=10.0

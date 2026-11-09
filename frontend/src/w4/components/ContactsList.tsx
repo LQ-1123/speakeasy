@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * 通讯录列。跟微信一样按拼音首字母分组，
  * 顶部是「新的朋友」「我的二维码」这类入口。
@@ -7,6 +9,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useScrollMemory } from "../useScrollMemory";
 import { Search, UserPlus } from "lucide-react";
 
 import type { Route } from "../model";
@@ -22,7 +25,8 @@ export function ContactsList({
   navigate: (r: Route) => void;
   requestsCount: number;
 }) {
-  const { friends, messagesOf, typing } = useApp();
+  const { friends, messagesOf, typing } = useApp(useShallow((state) => ({ friends: state.friends, messagesOf: state.messagesOf, typing: state.typing })));
+  const scrollRef = useScrollMemory<HTMLDivElement>("contacts");
   const [query, setQuery] = useState("");
 
   const groups = useMemo(() => {
@@ -68,16 +72,17 @@ export function ContactsList({
             value={query.trim()}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索好友"
+            aria-label="搜索好友"
           />
         </label>
       </div>
 
-      <div className="w4-list-scroll">
+      <div className="w4-list-scroll" ref={scrollRef}>
         {!query ? (
-          <div style={{ paddingBottom: 4 }}>
+          <div className="se-shortcut-wrap">
             <button className="w4-shortcut" onClick={() => navigate({ name: "requests" })}>
-              <span className="w4-shortcut-icon" style={{ background: "#e8993a" }}>
-                <UserPlus size={18} strokeWidth={1.9} />
+              <span className="w4-shortcut-icon">
+                <UserPlus size={20} strokeWidth={1.9} />
               </span>
               <span className="w4-shortcut-label">新的朋友</span>
               {requestsCount ? <span className="w4-unread">{requestsCount}</span> : null}
@@ -91,13 +96,15 @@ export function ContactsList({
             {list.map((f) => {
               const msgs = messagesOf(f.id);
               const last = msgs[msgs.length - 1];
+              const active = activeId === f.id;
               return (
                 <button
                   key={f.id}
-                  className={`w4-row ${activeId === f.id ? "on" : ""}`}
+                  className={`w4-row ${active ? "on" : ""}`}
+                  aria-current={active ? "page" : undefined}
                   onClick={() => navigate({ name: "contact", friendId: f.id })}
                 >
-                  <Avatar friend={f} size={40} online={f.online} />
+                  <Avatar friend={f} size={48} online={f.online} />
                   <span className="w4-row-body">
                     <span className="w4-row-top">
                       <span className="w4-row-name">
@@ -122,9 +129,7 @@ export function ContactsList({
         ))}
 
         {friends.length === 0 ? (
-          <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: "var(--w-text-3)" }}>
-            通讯录还是空的。
-          </div>
+          <div className="se-list-empty">通讯录还是空的。</div>
         ) : null}
       </div>
     </>

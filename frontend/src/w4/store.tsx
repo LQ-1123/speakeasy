@@ -14,71 +14,41 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createStore, useStore, type StoreApi } from "zustand";
+import { mergeMessages } from "./messageCache";
+import { useNavigation } from "./navigationStore";
 
-import {
-  DISCOVER_POOL,
-  EXPRESSIONS,
-  FRIENDS,
-  ME,
-  MESSAGES,
-  MOMENTS,
-  REQUESTS,
-  type DiscoverCandidate,
-} from "./mock";
+
 import {
   loadAll as apiLoadAll,
   sendText as apiSendText,
   sendVoiceBlob as apiSendVoiceBlob,
   fetchMessages as apiFetchMessages,
   acceptFriend as apiAcceptFriend,
-  callWarmup as apiCallWarmup,
   markThreadRead as apiMarkThreadRead,
-  saveCallSummary as apiSaveCallSummary,
   declineFriend as apiDeclineFriend,
   removeFriend as apiRemoveFriend,
   deleteExpressionOnServer as apiDeleteExpression,
   generateMoments as apiGenerateMoments,
-  loadExpressions as apiLoadExpressions,
   loadMoments as apiLoadMoments,
-  loadSettings as apiLoadSettings,
   patchExpression as apiPatchExpression,
   publishMomentToServer as apiPublishMoment,
   translate as apiTranslate,
   deleteMoment as apiDeleteMoment,
   loadFriendList as apiLoadFriendList,
-  setFriendVoice as apiSetFriendVoice,
 } from "./apiFacade";
 import type { Expression, Friend, Message, Moment, MomentComment, Profile, Suggestion } from "./model";
-import { uploadChatImage as apiUploadChatImage } from "./api";
-import { isLocalMode } from "./local/keys";
+import { mapClientBootstrap, uploadChatImage as apiUploadChatImage } from "./api";
+import { clientApi, nativeBridge } from "./v3/clientApi";
+import { connectClientEvents } from "./v3/clientEvents";
+import { queryClient } from "./queryClient";
+import { addExpression as apiAddExpression } from "./api";
 import { playMessageSound, playRequestSound, unlockNotifyAudio } from "./notify";
-
-export interface Settings {
-  llm: {
-    preset: string;
-    baseUrl: string;
-    model: string;
-    keyMasked: string;
-    hasKey: boolean;
-  };
-  stt: {
-    provider: "auto" | "local" | "siliconflow" | "custom";
-    model: string;
-    keyMasked: string;
-    hasKey: boolean;
-  };
-  tts: {
-    provider: "system" | "fish";
-    emotion: boolean;
-    keyMasked: string;
-    hasKey: boolean;
-  };
-  notify: { messages: boolean; practice: boolean };
-}
 
 interface Toast {
   id: number;
@@ -93,7 +63,6 @@ interface Store {
   moments: Moment[];
   expressions: Expression[];
   profile: Profile;
-  settings: Settings;
   toast: Toast | null;
   typing: Record<string, boolean>;
   /** 哪些消息/动态展开了中文（视图状态，不写进数据） */
@@ -109,7 +78,6 @@ interface Store {
     durationMs: number,
     opts?: { openTranscript?: boolean },
   ) => Promise<void>;
-  sendVoice: (friendId: string, durationMs: number) => void;
   sendImage: (friendId: string, file: Blob, text?: string) => void;
   markRead: (friendId: string) => void;
   toggleZh: (key: string) => void;
@@ -131,18 +99,17 @@ interface Store {
   generateMoments: () => Promise<void>;
   acceptRequest: (friendId: string) => void;
   declineRequest: (friendId: string) => void;
-  addDiscovered: (candidate: DiscoverCandidate) => Friend;
   practiceExpression: (id: string, remembered: boolean) => void;
   toggleMastered: (id: string) => void;
   removeExpression: (id: string) => void;
   updateProfile: (patch: Partial<Profile>) => void;
-  updateSettings: (patch: Partial<Settings>) => void;
-  updateFriendVoice: (friendId: string, voice: string, voiceLabel: string) => void;
   deleteFriend: (friendId: string) => void;
-  callSummary: (friendId: string, seconds: number, turns?: number) => void;
   /** 偶遇捏到新人后，刷新好友/会话，让新朋友能被打开 */
   reloadAll: () => Promise<void>;
-  discoverPool: DiscoverCandidate[];
+  loadThread: (friendId: string) => Promise<void>;
+  loadOlderThread: (friendId: string) => Promise<void>;
+  threadHasMore: Record<string, boolean>;
+  bootError: string;
 }
 
 /**
@@ -168,197 +135,15 @@ function sanitizeMoment(m: Moment): Moment {
 }
 
 /** 后端 /settings + /settings/tts → store 里的 Settings（只做展示需要的映射） */
-function mapLiveSettings(
-  core: { llm?: Record<string, any>; stt?: Record<string, any>; tts?: Record<string, any> },
-  tts: Record<string, any> | null,
-): Partial<Settings> {
-  const llmCfg = (core.llm?.config ?? {}) as Record<string, any>;
-  const sttCfg = (core.stt?.config ?? {}) as Record<string, any>;
-  const ttsCfg = (tts ?? core.tts ?? {}) as Record<string, any>;
-  const provider = String(ttsCfg.provider ?? "");
-  return {
-    llm: {
-      preset: "deepseek",
-      baseUrl: String(llmCfg.base_url ?? ""),
-      model: String(llmCfg.model ?? ""),
-      keyMasked: String(llmCfg.api_key_masked ?? ""),
-      hasKey: Boolean(llmCfg.api_key_set),
-    },
-    stt: {
-      provider: (sttCfg.provider === "local" || sttCfg.provider === "siliconflow"
-        ? sttCfg.provider
-        : "auto") as Settings["stt"]["provider"],
-      model: String(sttCfg.model ?? ""),
-      keyMasked: String(sttCfg.api_key_masked ?? ""),
-      hasKey: Boolean(sttCfg.api_key_set),
-    },
-    tts: {
-      provider: provider === "fish" ? "fish" : "system",
-      emotion: Boolean(ttsCfg.fish_reference_id || ttsCfg.emotion),
-      keyMasked: String(ttsCfg.api_key_masked ?? ttsCfg.fish_api_key_masked ?? ttsCfg.fish_api_key ?? ""),
-      hasKey: Boolean(ttsCfg.api_key_set ?? ttsCfg.fish_api_key_set ?? ttsCfg.fish_api_key),
-    },
-  };
-}
+const AppCtx = createContext<StoreApi<Store> | null>(null);
 
-const AppCtx = createContext<Store | null>(null);
-
-export function useApp(): Store {
+export function useApp(): Store;
+export function useApp<T>(selector: (state: Store) => T): T;
+export function useApp<T>(selector?: (state: Store) => T): T | Store {
   const ctx = useContext(AppCtx);
   if (!ctx) throw new Error("useApp must be used inside <AppProvider>");
-  return ctx;
+  return useStore(ctx, selector ?? ((state: Store) => state as unknown as T));
 }
-
-/* --------------------------------------------------------------- mock 回复 */
-
-const REPLIES: Record<string, Array<{ text: string; zh: string; ms?: number }>> = {
-  callum: [
-    {
-      text: "Ha — fair enough. Right, I'm off to sort the grinder. Give us a shout later, yeah?",
-      zh: "哈——行吧。好了，我去弄磨豆机了。晚点再聊？",
-      ms: 6900,
-    },
-    {
-      text: "Honestly, that flat's been in my head all week. If the landlord's decent I might actually take it.",
-      zh: "说实话，那套房这周一直在我脑子里。要是房东靠谱，我可能真租了。",
-      ms: 8200,
-    },
-    {
-      text: "Right, I've got a queue of people who all want oat milk. Back in a bit.",
-      zh: "好了，一堆人都要燕麦奶。我一会儿回来。",
-      ms: 5400,
-    },
-  ],
-  giulia: [
-    {
-      text: "Eh, piano piano. Non importa se sbagli — l'importante è che parli.",
-      zh: "哎，慢慢来。说错没关系，重要的是你在说。",
-      ms: 6100,
-    },
-    {
-      text: "Allora, domenica mattina? Il mercato è meglio prima delle dieci.",
-      zh: "那周天早上？市场十点前更好逛。",
-      ms: 5800,
-    },
-  ],
-  haruto: [
-    {
-      text: "いいですね。じゃあ、写真は明日の朝に送ります。楽しみにしていてください。",
-      zh: "好啊。那我明天早上把照片发给你，期待着吧。",
-      ms: 7000,
-    },
-    {
-      text: "あなたの日本語、前より自然になりましたよ。少しずつで大丈夫です。",
-      zh: "你的日语比之前自然了。一点一点来就好。",
-      ms: 6600,
-    },
-  ],
-  camila: [
-    {
-      text: "Obrigada! Vou tentar terminar hoje. Se eu conseguir, te mando uma foto da maquete pronta.",
-      zh: "谢谢！我今天试着做完。要是做完了，拍张成品给你看。",
-      ms: 7400,
-    },
-    {
-      text: "Ah, e lembrei — você queria correr de manhã? Podemos correr juntos, virtualmente.",
-      zh: "哦对了，你之前说想晨跑？我们可以「云跑步」。",
-      ms: 7800,
-    },
-  ],
-  jiwoo: [
-    {
-      text: "맞아요, 저도 그래요. 같이 연습하면 조금 덜 어색할 거예요.",
-      zh: "对呀，我也一样。一起练的话会没那么尴尬。",
-      ms: 5200,
-    },
-    {
-      text: "오늘은 여기까지 공부하고 집에 갈 거예요. 내일 또 봐요!",
-      zh: "今天学到这儿就回家了。明天见！",
-      ms: 5400,
-    },
-  ],
-  morten: [
-    {
-      text: "Wise. The umbrella was never going to survive Bergen anyway.",
-      zh: "明智。反正那把伞在卑尔根也活不下来。",
-      ms: 4700,
-    },
-    {
-      text: "Right. Back to counting fish. Don't lose another umbrella.",
-      zh: "好了，回去数鱼了。别再丢伞了。",
-      ms: 4600,
-    },
-  ],
-  tom: [
-    {
-      text: "Sure, no bother at all. I'll leave it at the front desk with your name on it.",
-      zh: "当然，一点也不麻烦。我会放在前台，写上你的名字。",
-      ms: 6200,
-    },
-    {
-      text: "Good man. And if the first chapter's slow, skip to chapter three — I won't tell anyone.",
-      zh: "好样的。第一章要是慢，直接跳第三章，我不告诉别人。",
-      ms: 7100,
-    },
-  ],
-  ines: [
-    {
-      text: "Bom dia! Se quiser, passo aí na quinta e levo um buquê para você.",
-      zh: "早上好！要的话我周四路过，给你带一束花。",
-      ms: 6100,
-    },
-  ],
-  rosa: [{ text: "¡Genial! Pues hablamos mañana, ¿vale?", zh: "太好了！那我们明天聊，好吗？", ms: 4200 }],
-  finn: [{ text: "Sweet as. Talk soon, eh!", zh: "好极了。回头聊！", ms: 3600 }],
-  niamh: [{ text: "Grand! Chat later so.", zh: "好！那晚点聊。", ms: 3200 }],
-  meimei: [
-    {
-      text: "Great. Let's do a quick mock meeting next time — ten minutes, no pressure.",
-      zh: "好。下次来个十分钟的模拟会议，别有压力。",
-      ms: 5200,
-    },
-  ],
-};
-
-const DEFAULT_REPLY = [
-  {
-    text: "That sounds good. Tell me more when you have a minute.",
-    zh: "听起来不错。有空再多跟我说说。",
-    ms: 5000,
-  },
-];
-
-/** 我发语音时「识别」出来的话 */
-const MY_TRANSCRIPTS = [
-  "Yeah, that sounds good — this weekend works for me.",
-  "I'm not sure yet. Let me think about it and get back to you.",
-  "Sorry, could you say that again? I didn't catch the last part.",
-  "Actually, I'd love to. What time were you thinking?",
-];
-
-const SUGGESTION_POOL: Array<Omit<Suggestion, "saved">> = [
-  {
-    better: "Sounds good — this weekend works for me.",
-    why: "口语里更常说 sounds good，比 that sounds good 轻快；works for me 是约时间最自然的说法。",
-    tag: "自然",
-  },
-  {
-    better: "Let me get back to you on that.",
-    why: "「我再回复你」的固定说法，比 think about it and tell you 更简洁，也更像成年人说话。",
-    tag: "地道",
-  },
-  {
-    better: "Sorry, could you say that again? I didn't quite catch it.",
-    why: "didn't catch it 指没听清，比 didn't hear 更准确——不是没听见，是没听懂。",
-    tag: "自然",
-  },
-];
-
-const CALL_LINES = [
-  "聊到周末计划，TA 问你要不要一起去市场。",
-  "你听懂了大部分，有一句请对方重复了一次。",
-  "结束时 TA 说下次再聊。",
-];
 
 let seq = 1000;
 const nextId = (prefix: string) => `${prefix}-${(seq += 1)}`;
@@ -367,11 +152,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<Friend[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [threadHasMore, setThreadHasMore] = useState<Record<string, boolean>>({});
   const [moments, setMoments] = useState<Moment[]>(() => []);
   const [expressions, setExpressions] = useState<Expression[]>([]);
   const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], gender: '', nativeLanguage: 'zh', levels: {}, birthday: '' });
-  /* 是否已拿到真实后端数据（拿不到就一直用 mock，原型仍可浏览） */
-  const [live, setLive] = useState(false);
+  const [bootError, setBootError] = useState("");
   /* 提示音：跟踪未读数 / 好友申请数变化 */
   const notifyReady = useRef(false);
   const lastUnread = useRef(0);
@@ -385,30 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [typing, setTyping] = useState<Record<string, boolean>>({});
   const [zhOpen, setZhOpen] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<Toast | null>(null);
-  const [settings, setSettings] = useState<Settings>({
-    llm: {
-      preset: "deepseek",
-      baseUrl: "https://api.deepseek.com/v1",
-      model: "deepseek-flash",
-      keyMasked: "sk-••••••••••••3f7a",
-      hasKey: true,
-    },
-    stt: {
-      provider: "auto",
-      model: "FunAudioLLM/SenseVoiceSmall",
-      keyMasked: "",
-      hasKey: false,
-    },
-    tts: {
-      provider: "fish",
-      emotion: true,
-      keyMasked: "fa-••••••••2c91",
-      hasKey: true,
-    },
-    notify: { messages: true, practice: false },
-  });
 
-  /* 后端可用时用真数据覆盖 mock；不可用则保持 mock 不变 */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -421,32 +183,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         /* 隐私模式忽略 */
       }
 
-      const snap = await apiLoadAll();
-      if (cancelled || !snap) return;
+      const snap = await apiLoadAll().catch((error) => { setBootError(error instanceof Error ? error.message : "Unable to connect"); return null; });
+      if (cancelled) return;
+      if (!snap) return;
+      setBootError("");
       setFriends(snap.friends);
-      setMessages(snap.messages);
+      setMessages((list) => mergeMessages(list, snap.messages));
       setRequests(snap.requests ?? []);
       lastUnread.current = snap.friends.reduce((n, f) => n + (f.unread || 0), 0);
       lastRequests.current = (snap.requests ?? []).length;
       setProfile((prev) => ({ ...prev, ...snap.profile }));
 
-      /* 设置 / 朋友圈 / 表达本 也换成真数据（接口失败就保持 mock） */
-      const [core, tts, momentsLive, expressionsLive] = await Promise.all([
-        apiLoadSettings(),
-        fetch("/api/v2/settings/tts")
-          .then((r) => (r.ok ? r.json() : null))
-          .then((j) => (j?.tts ?? null))
-          .catch(() => null),
-        apiLoadMoments(),
-        apiLoadExpressions(),
-      ]);
-      if (cancelled) return;
-      if (core) setSettings((prev) => ({ ...prev, ...mapLiveSettings(core, tts) }));
-      /* 真后端返回空就是空：朋友圈会显示「让好友们发几条」，不再拿 mock 冒充 */
-      if (momentsLive) setMoments(momentsLive);
-      if (expressionsLive) setExpressions(expressionsLive);
-      setProfile((prev) => ({ ...prev, ...snap.profile }));
-      setLive(true);
+      setExpressions(snap.expressions);
     })();
     return () => {
       cancelled = true;
@@ -463,26 +211,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const snap = await apiLoadFriendList();
       if (stopped || !snap) return;
       const unread = snap.friends.reduce((n, f) => n + (f.unread || 0), 0);
-      if (notifyReady.current) {
-        if (snap.requests.length > lastRequests.current) playRequestSound();
-        if (unread > lastUnread.current) playMessageSound();
-      }
       lastUnread.current = unread;
       lastRequests.current = snap.requests.length;
       notifyReady.current = true;
       setFriends(snap.friends);
       setRequests(snap.requests);
     };
-    const timer = window.setInterval(() => void refresh(), isLocalMode() ? 2_500 : 12_000);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
+    const disconnect = connectClientEvents((events) => {
+      void refresh();
+      const route = useNavigation.getState().route;
+      const friendId = route.name === "chat" ? route.friendId : null;
+      if (friendId && events.some((event) => event.friend_id === friendId)) {
+        void apiFetchMessages(friendId).then((fresh) => {
+          if (!fresh || stopped) return;
+          setMessages((list) => mergeMessages(list, fresh));
+        });
+      }
+    }, (raw) => {
+      if (stopped) return;
+      const snapshot = mapClientBootstrap(raw);
+      setFriends(snapshot.friends);
+      setRequests(snapshot.requests);
+      setExpressions(snapshot.expressions);
+      setProfile((profile) => ({ ...profile, ...snapshot.profile }));
+      setMessages((list) => mergeMessages(list, snapshot.messages));
+    });
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     const onKick = () => void refresh();
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("speakeasy:refresh", onKick);
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      disconnect();
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("speakeasy:refresh", onKick);
     };
@@ -528,118 +288,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void apiMarkThreadRead(friendId);
   }, []);
 
-  const scheduleReply = useCallback(
-    (friendId: string) => {
-      setTyping((t) => ({ ...t, [friendId]: true }));
-      const pool = REPLIES[friendId] ?? DEFAULT_REPLY;
-      const index = replyIndex.current[friendId] ?? 0;
-      replyIndex.current[friendId] = index + 1;
-      const reply = pool[index % pool.length];
-      /* 只有「我」发的动态才安排好友评论 */
-      later(() => {
-        setTyping((t) => ({ ...t, [friendId]: false }));
-        setMessages((list) => [
-          ...list,
-          {
-            id: nextId("f"),
-            friendId,
-            from: "friend",
-            kind: reply.ms ? "voice" : "text",
-            text: reply.text,
-            translation: reply.zh,
-            durationMs: reply.ms,
-            time: new Date().toISOString(),
-            read: true,
-          },
-        ]);
-        setFriends((list) =>
-          list.map((f) => (f.id === friendId ? { ...f, lastActive: "刚刚" } : f)),
-        );
-      }, 1500 + Math.random() * 1300);
-    },
-    [later],
-  );
+  const sendText = useCallback((friendId: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const tempId = nextId("pending");
+    setMessages((list) => [...list, { id: tempId, friendId, from: "me", kind: "text", text: trimmed, time: new Date().toISOString(), read: false }]);
+    setTyping((state) => ({ ...state, [friendId]: true }));
+    void apiSendText(friendId, trimmed).then((fresh) => {
+      setTyping((state) => ({ ...state, [friendId]: false }));
+      if (!fresh) { showToast("Message could not be sent. Please try again.", "error"); return; }
+      setMessages((list) => mergeMessages(list, fresh, [tempId]));
+      setFriends((list) => list.map((friend) => friend.id === friendId ? { ...friend, unread: 0 } : friend));
+    });
+  }, [showToast]);
 
-  const attachSuggestion = useCallback(
-    (messageId: string) => {
-      later(() => {
-        const s = SUGGESTION_POOL[suggestionIndex.current % SUGGESTION_POOL.length];
-        suggestionIndex.current += 1;
-        setMessages((list) =>
-          list.map((m) => (m.id === messageId ? { ...m, suggestion: { ...s, saved: false } } : m)),
-        );
-      }, 2600);
-    },
-    [later],
-  );
-
-  const sendText = useCallback(
-    (friendId: string, text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-
-      /* 接了真后端就走真接口：乐观显示 → 等回复 → 用真实消息替换 */
-      if (live) {
-        const tempId = nextId("u");
-        setMessages((list) => [
-          ...list,
-          {
-            id: tempId,
-            friendId,
-            from: "me",
-            kind: "text",
-            text: trimmed,
-            time: new Date().toISOString(),
-            read: false,
-          },
-        ]);
-        setTyping((t) => ({ ...t, [friendId]: true }));
-        void (async () => {
-          const fresh = await apiSendText(friendId, trimmed);
-          setTyping((t) => ({ ...t, [friendId]: false }));
-          if (!fresh) {
-            setMessages((list) =>
-              list.map((m) =>
-                m.id === tempId
-                  ? { ...m, translation: "没发出去，检查一下网络" }
-                  : m,
-              ),
-            );
-            return;
-          }
-          setMessages((list) => {
-            const mine = list.filter((m) => m.friendId !== friendId);
-            return [...mine, ...fresh];
-          });
-          setFriends((list) =>
-            list.map((f) =>
-              f.id === friendId ? { ...f, lastActive: "刚刚", unread: 0 } : f,
-            ),
-          );
-        })();
-        return;
-      }
-      const id = nextId("u");
-      setMessages((list) => [
-        ...list,
-        {
-          id,
-          friendId,
-          from: "me",
-          kind: "text",
-          text: trimmed,
-          time: new Date().toISOString(),
-          read: false,
-        },
-      ]);
-      setFriends((list) => list.map((f) => (f.id === friendId ? { ...f, lastActive: "刚刚" } : f)));
-      scheduleReply(friendId);
-      if (trimmed.split(/\s+/).length >= 3) attachSuggestion(id);
-    },
-    [attachSuggestion, scheduleReply, live],
-  );
-
-  /** 真实语音：先放一条占位气泡，等后端返回后整体替换 */
   const sendVoiceBlob = useCallback(
     async (
       friendId: string,
@@ -686,34 +348,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           );
         }
       }
-      setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...merged]);
+      setMessages((list) => mergeMessages(list, merged, [tempId]));
 
     },
     [showToast],
-  );
-
-  const sendVoice = useCallback(
-    (friendId: string, durationMs: number) => {
-      const text = MY_TRANSCRIPTS[transcriptIndex.current % MY_TRANSCRIPTS.length];
-      transcriptIndex.current += 1;
-      setMessages((list) => [
-        ...list,
-        {
-          id: nextId("u"),
-          friendId,
-          from: "me",
-          kind: "voice",
-          text,
-          durationMs,
-          time: new Date().toISOString(),
-          read: false,
-          shownText: false,
-        },
-      ]);
-      setFriends((list) => list.map((f) => (f.id === friendId ? { ...f, lastActive: "刚刚" } : f)));
-      scheduleReply(friendId);
-    },
-    [scheduleReply],
   );
 
   const sendImage = useCallback(
@@ -770,7 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       showToast("正在翻译…");
-      const zh = await apiTranslate(msg.text, msg.friendId);
+      const zh = await apiTranslate(msg.text, msg.friendId, profile.nativeLanguage || "zh");
       if (!zh) {
         showToast("翻译失败，稍后再试", "error");
         return;
@@ -780,7 +418,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       setZhOpen((open) => ({ ...open, [messageId]: true }));
     },
-    [messages, showToast],
+    [messages, showToast, profile.nativeLanguage],
   );
 
   const translateAll = useCallback(
@@ -796,7 +434,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       showToast("已翻译最近消息", "success");
     },
-    [messages, showToast],
+    [messages, showToast, profile.nativeLanguage],
   );
 
   const translateAllMoments = useCallback(() => {
@@ -819,28 +457,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveSuggestion = useCallback(
     (messageId: string) => {
       const msg = messages.find((m) => m.id === messageId);
-      if (!msg || !msg.suggestion || msg.suggestion.saved) return;
-      const s = msg.suggestion;
-      setMessages((list) =>
-        list.map((m) => (m.id === messageId ? { ...m, suggestion: { ...m.suggestion!, saved: true } } : m)),
-      );
-      setExpressions((list) => [
-        {
-          id: nextId("e"),
-          original: msg.text,
-          better: s.better,
-          why: s.why,
-          sourceFriendId: msg.friendId,
-          createdAt: "刚刚",
-          status: "learning",
-          mastery: 0,
-          due: 100,
-        },
-        ...list,
-      ]);
-      showToast("已加入表达本", "success");
-    },
-    [messages, showToast],
+      if (!msg?.suggestion || msg.suggestion.saved) return;
+      void apiAddExpression(msg.suggestion.better, msg.text, msg.suggestion.why).then((saved) => {
+        if (!saved) { showToast("Could not save expression. Please try again.", "error"); return; }
+        setExpressions((list) => [saved, ...list.filter((entry) => entry.id !== saved.id)]);
+        setMessages((list) => list.map((m) => m.id === messageId ? { ...m, suggestion: { ...m.suggestion!, saved: true } } : m));
+        showToast("Expression saved", "success");
+      });
+    }, [messages, showToast],
   );
 
   const dismissSuggestion = useCallback((messageId: string) => {
@@ -881,50 +505,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const publishMoment = useCallback(
-    (text: string, images: string[], mood: string) => {
-      const id = nextId("mo");
-      /* 真后端：先落库，AI 好友评论由后端后台生成，稍后拉回 */
-      void apiPublishMoment(text, mood).then(() => {
-        later(() => {
-          void apiLoadMoments().then((fresh) => {
-            if (fresh && fresh.length) setMoments(fresh);
-          });
-        }, 6000);
-      });
-      setMoments((list) => [
-        { id, authorId: "me", images, text, mood, time: "刚刚", comments: [], likedBy: [], commentsPending: true },
-        ...list,
-      ]);
-      later(() => {
-        setMoments((list) =>
-          list.map((m) =>
-            m.id === id
-              ? {
-                  ...m,
-                  commentsPending: false,
-                  comments: [
-                    {
-                      id: nextId("cm"),
-                      friendId: "callum",
-                      text: "Looks decent. Next time bring one to the shop and I'll judge it properly.",
-                      time: "刚刚",
-                    },
-                    {
-                      id: nextId("cm"),
-                      friendId: "camila",
-                      text: "Que bonito! Quero ver mais fotos.",
-                      time: "刚刚",
-                    },
-                  ],
-                }
-              : m,
-          ),
-        );
-      }, 3400);
-    },
-    [later],
-  );
+  const publishMoment = useCallback((text: string, _images: string[], mood: string) => {
+    void apiPublishMoment(text, mood).then(async (ok) => {
+      if (!ok) { showToast("Post could not be saved", "error"); return; }
+      const fresh = await apiLoadMoments();
+      if (fresh) setMoments(fresh);
+    });
+  }, [showToast]);
 
   const acceptRequest = useCallback(
     (friendId: string) => {
@@ -962,63 +549,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   const reloadAll = useCallback(async () => {
-    const snap = await apiLoadAll();
+    const snap = await apiLoadAll().catch((error) => { setBootError(error instanceof Error ? error.message : "Unable to connect"); return null; });
     if (!snap) return;
     setFriends(snap.friends);
-    setMessages(snap.messages);
+    setMessages((list) => { const ids = new Set(list.map((item) => item.id)); return [...list, ...snap.messages.filter((item) => !ids.has(item.id))]; });
     setRequests(snap.requests ?? []);
+    setBootError("");
   }, []);
 
-  const addDiscovered = useCallback(
-    (candidate: DiscoverCandidate) => {
-      const friend: Friend = {
-        id: candidate.id,
-        name: candidate.name,
-        avatar: candidate.avatar,
-        city: candidate.city,
-        country: candidate.country,
-        flag: candidate.flag,
-        language: candidate.language,
-        languageLabel: candidate.languageLabel,
-        timezone: "",
-        localTime: "",
-        localPeriod: "",
-        localActivity: "",
-        occupation: candidate.occupation,
-        age: candidate.age,
-        bio: candidate.bio,
-        quirks: candidate.tags,
-        closeness: 1,
-        turns: 1,
-        sharedEpisodes: [],
-        openLoops: [],
-        unread: 0,
-        online: candidate.online,
-        lastActive: "刚刚",
-        voice: "",
-        voiceLabel: candidate.voiceLabel,
-        greeting: candidate.greeting,
-        greetingZh: candidate.greetingZh,
-      };
-      setFriends((list) => (list.some((f) => f.id === friend.id) ? list : [friend, ...list]));
-      setMessages((list) => [
-        ...list,
-        {
-          id: nextId("f"),
-          friendId: friend.id,
-          from: "friend",
-          kind: "voice",
-          text: candidate.greeting,
-          translation: candidate.greetingZh,
-          durationMs: 5600,
-          time: new Date().toISOString(),
-          read: true,
-        },
-      ]);
-      return friend;
-    },
-    [],
-  );
+  const loadThread = useCallback(async (friendId: string) => {
+    const fresh = await queryClient.fetchQuery({ queryKey: ["thread", friendId], queryFn: () => apiFetchMessages(friendId), staleTime: 10_000 });
+    if (!fresh) { showToast("Could not load conversation", "error"); return; }
+    setMessages((list) => mergeMessages(list, fresh));
+    setThreadHasMore((state) => ({ ...state, [friendId]: fresh.length >= 30 }));
+  }, [showToast]);
+
+  const loadOlderThread = useCallback(async (friendId: string) => {
+    const first = messages.filter((item) => item.friendId === friendId).sort((a, b) => a.time.localeCompare(b.time))[0];
+    if (!first) return;
+    const cursor = `${first.time}|${first.id}`;
+    const fresh = await queryClient.fetchQuery({ queryKey: ["thread", friendId, cursor], queryFn: () => apiFetchMessages(friendId, cursor), staleTime: 60_000 });
+    if (!fresh) { showToast("Could not load earlier messages", "error"); return; }
+    setMessages((list) => { const ids = new Set(list.map((item) => item.id)); return [...fresh.filter((item) => !ids.has(item.id)), ...list]; });
+    setThreadHasMore((state) => ({ ...state, [friendId]: fresh.length >= 30 }));
+  }, [messages, showToast]);
 
   const practiceExpression = useCallback((id: string, remembered: boolean) => {
     const cur = expressions.find((e) => e.id === id);
@@ -1069,19 +623,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProfile((p) => ({ ...p, ...patch }));
   }, []);
 
-  const updateSettings = useCallback((patch: Partial<Settings>) => {
-    setSettings((s) => ({ ...s, ...patch }));
-    // 模型/语音/密钥配置统一在管理端，客户端只保存本地展示状态（不回写后端）
-  }, []);
-
-  const updateFriendVoice = useCallback((friendId: string, voice: string, voiceLabel: string) => {
-    setFriends((list) => list.map((f) => (f.id === friendId ? { ...f, voice, voiceLabel } : f)));
-    // 本地模式：音色写回本地引擎，聊天 / 通话都立即生效
-    if (isLocalMode() && voice) {
-      void apiSetFriendVoice(friendId, voice);
-    }
-  }, []);
-
   const deleteFriend = useCallback((friendId: string) => {
     setFriends((list) => list.filter((f) => f.id !== friendId));
     setMessages((list) => list.filter((m) => m.friendId !== friendId));
@@ -1104,34 +645,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [showToast]);
 
-  const callSummary = useCallback(
-    (friendId: string, seconds: number, turns = 1) => {
-      const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-      const ss = String(seconds % 60).padStart(2, "0");
-      /* 先本地落一条，保证 UI 立刻可见 */
-      setMessages((list) => [
-        ...list,
-        {
-          id: nextId("call"),
-          friendId,
-          from: "system",
-          kind: "call",
-          text: `通话 ${mm}:${ss}｜聊了几句`,
-          time: new Date().toISOString(),
-        },
-      ]);
-      /* 后端把摘要写进聊天记录；成功后用真实数据替换这一栏 */
-      void apiSaveCallSummary(friendId, seconds, Math.max(1, turns)).then(async (ok) => {
-        if (!ok) return;
-        const fresh = await apiFetchMessages(friendId);
-        if (fresh?.length) {
-          setMessages((list) => [...list.filter((m) => m.friendId !== friendId), ...fresh]);
-        }
-      });
-    },
-    [],
-  );
-
   const value = useMemo<Store>(
     () => ({
       friends,
@@ -1140,7 +653,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       moments,
       expressions,
       profile,
-      settings,
       toast,
       typing,
       zhOpen,
@@ -1149,7 +661,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       friendById,
       sendText,
       sendVoiceBlob,
-      sendVoice,
       sendImage,
       markRead,
       toggleZh,
@@ -1167,17 +678,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       generateMoments,
       acceptRequest,
       declineRequest,
-      addDiscovered,
       practiceExpression,
       toggleMastered,
       removeExpression,
       updateProfile,
-      updateSettings,
-      updateFriendVoice,
       deleteFriend,
-      callSummary,
       reloadAll,
-      discoverPool: DISCOVER_POOL,
+      loadThread,
+      loadOlderThread,
+      threadHasMore,
+      bootError,
     }),
     [
       friends,
@@ -1186,7 +696,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       moments,
       expressions,
       profile,
-      settings,
       toast,
       typing,
       zhOpen,
@@ -1195,7 +704,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       friendById,
       sendText,
       sendVoiceBlob,
-      sendVoice,
       sendImage,
       markRead,
       toggleZh,
@@ -1211,17 +719,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       generateMoments,
       acceptRequest,
       declineRequest,
-      addDiscovered,
       practiceExpression,
       toggleMastered,
       removeExpression,
       updateProfile,
-      updateSettings,
-      updateFriendVoice,
       deleteFriend,
-      callSummary,
+      bootError,
+      loadThread,
+      loadOlderThread,
+      threadHasMore,
     ],
   );
 
-  return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
+  const domainStore = useRef<StoreApi<Store> | null>(null);
+  if (!domainStore.current) domainStore.current = createStore(() => value);
+  useLayoutEffect(() => { domainStore.current!.setState(value, true); }, [value]);
+  return <AppCtx.Provider value={domainStore.current}>{children}</AppCtx.Provider>;
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
  * 会话列表列。
  *
@@ -9,7 +11,11 @@
  */
 
 import { useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { savedScrollPosition, useScrollMemory } from "../useScrollMemory";
 import { Plus, Search } from "lucide-react";
+
+import "../styles/chat.css";
 
 import { listTime } from "../format";
 
@@ -20,7 +26,7 @@ import { listTime } from "../format";
  */
 import type { Route } from "../model";
 import { useApp } from "../store";
-import { Avatar, Icon } from "../ui";
+import { Avatar } from "../ui";
 
 export function ChatList({
   route,
@@ -29,7 +35,8 @@ export function ChatList({
   route: Route;
   navigate: (r: Route) => void;
 }) {
-  const { friends, messagesOf, typing, requests } = useApp();
+  const { friends, messagesOf, typing, bootError, reloadAll } = useApp(useShallow((state) => ({ friends: state.friends, messagesOf: state.messagesOf, typing: state.typing, bootError: state.bootError, reloadAll: state.reloadAll })));
+  const scrollRef = useScrollMemory<HTMLDivElement>("messages");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -51,6 +58,7 @@ export function ChatList({
   }, [friends, messagesOf, query]);
 
   const activeId = route.name === "chat" ? route.friendId : null;
+  const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: () => 88, overscan: 6, initialOffset: savedScrollPosition("messages") ?? 0 });
 
   return (
     <>
@@ -83,27 +91,33 @@ export function ChatList({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索好友、城市或消息"
+              aria-label="搜索好友、城市或消息"
             />
           </label>
         </div>
       ) : null}
 
-      <div className="w4-list-scroll">
-        {rows.length === 0 ? (
-          <div style={{ padding: "40px 24px", textAlign: "center", fontSize: 13, color: "var(--w-text-3)" }}>
-            没有匹配的会话
-          </div>
+      {bootError ? <div className="se-connection-error" role="alert"><span>{bootError}</span><button onClick={() => void reloadAll()}>重试</button></div> : null}
+      <div className="w4-list-scroll" ref={scrollRef}>
+        {rows.length === 0 && !query.trim() ? <div className="se-empty"><h2>还没有会话</h2><p>到发现认识一位语伴，开始第一段对话。</p><button className="w4-btn is-primary" onClick={() => navigate({ name: "discoverPeople" })}>认识语伴</button></div> : null}
+        {rows.length === 0 && query.trim() ? (
+          <div className="se-list-empty">没有匹配的会话</div>
         ) : null}
-        {rows.map(({ friend, last }) => {
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const { friend, last } = rows[item.index];
           const isTyping = typing[friend.id];
           const preview = previewOf(last, friend);
+          const active = activeId === friend.id;
           return (
             <button
               key={friend.id}
-              className={`w4-row ${activeId === friend.id ? "on" : ""}`}
+              style={{ position: "absolute", top: 0, left: 6, width: "calc(100% - 12px)", height: item.size, transform: `translateY(${item.start}px)` }}
+              className={`w4-row ${active ? "on" : ""}`}
+              aria-current={active ? "page" : undefined}
               onClick={() => navigate({ name: "chat", friendId: friend.id })}
             >
-              <Avatar friend={friend} size={40} online={friend.online} />
+              <Avatar friend={friend} size={48} online={friend.online} />
               <span className="w4-row-body">
                 <span className="w4-row-top">
                   <span className="w4-row-name">
@@ -128,6 +142,7 @@ export function ChatList({
             </button>
           );
         })}
+        </div>
       </div>
 
     </>

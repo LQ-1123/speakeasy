@@ -75,3 +75,9 @@ docs/avatar-lab/bundle.js
 
 dist/
 
+# Local verification workspaces (Windows tools may use the repository as TEMP)
+pytest-of-*/
+pip-unpack-*/
+pip-build-*/
+pip-install-*/
+

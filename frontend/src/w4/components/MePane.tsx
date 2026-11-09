@@ -1,26 +1,32 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 /**
- * 我：自己的资料、练习统计、以及去设置/表达本的入口。
- * 参考微信「我」的排布：顶部身份卡 → 分组列表。
+ * 我：自己的资料、练习入口和设置。
+ * 顶部是一张安静的身份卡（头像 / 名字 / 在练语言 / 一个编辑入口），
+ * 下面按「练习 / 语伴 / 设置」分组排成列表，不用大数字统计面板。
  */
 
 import { useState } from "react";
 import {
+  Bell,
+  BookMarked,
   ChevronRight,
-  Languages,
+  Info,
+  Palette,
   Pencil,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 
+import { haptic } from "../../theme/haptics";
 import { LANGUAGES } from "../format";
 import type { Route } from "../model";
 import { saveProfile as apiSaveProfile } from "../apiFacade";
 import { useApp } from "../store";
-import {
-  Avatar,
-  Dialog,
-} from "../ui";
+import { Avatar, Dialog } from "../ui";
+import "../styles/profile.css";
 
 /** 母语候选：中文 + 现有语言（LANGUAGES 只有在练语言，没有 zh） */
 const NATIVE_LANGUAGES: Array<{ code: string; label: string; flag: string }> = [
@@ -29,12 +35,24 @@ const NATIVE_LANGUAGES: Array<{ code: string; label: string; flag: string }> = [
 ];
 
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
-  const { profile, friends, expressions, updateProfile, settings, showToast } = useApp();
+  const { profile, friends, requests, expressions, updateProfile, showToast } = useApp(
+    useShallow((state) => ({
+      profile: state.profile,
+      friends: state.friends,
+      requests: state.requests,
+      expressions: state.expressions,
+      updateProfile: state.updateProfile,
+      showToast: state.showToast,
+    })),
+  );
   const [editOpen, setEditOpen] = useState(false);
 
   const mastered = expressions.filter((e) => e.status === "mastered").length;
   const learning = expressions.length - mastered;
-  const turns = friends.reduce((s, f) => s + f.turns, 0);
+  const age = ageOf(profile.birthday);
+
+  const metaParts = [profile.city, profile.job, age ? `${age} 岁` : ""].filter(Boolean);
+  const interests = profile.interests ?? [];
 
   return (
     <div className="w4-main">
@@ -46,80 +64,144 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
 
       <div className="w4-scroll">
         <div className="w4-me">
-          <div className="w4-me-card">
-            <Avatar src={profile.avatar} name={profile.name} size={80} round />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="w4-me-name">{profile.name}</div>
-              <div className="w4-me-sub">
-                {profile.city} · {profile.job} · {profile.level}
-                {ageOf(profile.birthday) ? ` · ${ageOf(profile.birthday)} 岁` : ""}
-              </div>
-              <div className="w4-chips" style={{ marginTop: 7 }}>
-                {profile.targets.map((t) => {
-                  const l = LANGUAGES.find((x) => x.code === t);
-                  return (
-                    <span key={t} className="w4-chip is-green">
-                      在练 {l?.label ?? t}
-                    </span>
-                  );
-                })}
-              </div>
-              {profile.interests?.length ? (
-                <div className="w4-chips" style={{ marginTop: 6 }}>
-                  {profile.interests.slice(0, 8).map((t) => (
-                    <span key={t} className="w4-chip">
-                      {t}
-                    </span>
-                  ))}
+          <header className="w4-me-hero">
+            <div className="w4-me-hero-top">
+              <span className="w4-me-avatar">
+                <Avatar src={profile.avatar} name={profile.name} size={88} round />
+              </span>
+              <div className="w4-me-identity">
+                <h1 className="w4-me-name">{profile.name}</h1>
+                {metaParts.length ? <p className="w4-me-meta">{metaParts.join(" · ")}</p> : null}
+                <div className="w4-me-chips">
+                  {profile.targets.map((code) => {
+                    const language = LANGUAGES.find((item) => item.code === code);
+                    const level = profile.levels?.[code] ?? profile.level;
+                    return (
+                      <span key={code} className="w4-me-chip is-target">
+                        {language ? `${language.flag} ${language.label}` : code}
+                        {level ? ` · ${level}` : ""}
+                      </span>
+                    );
+                  })}
                 </div>
-              ) : null}
+              </div>
             </div>
-            <button className="w4-icon-btn" onClick={() => setEditOpen(true)} aria-label="编辑资料">
-              <Pencil size={15} strokeWidth={1.8} />
-            </button>
-          </div>
 
-          <div className="w4-stats">
-            <button className="w4-stat" onClick={() => navigate({ name: "contacts" })}>
-              <div className="w4-stat-num">{friends.length}</div>
-              <div className="w4-stat-label">位语伴</div>
-            </button>
-            <button className="w4-stat" onClick={() => navigate({ name: "expressions" })}>
-              <div className="w4-stat-num">{mastered}</div>
-              <div className="w4-stat-label">条已掌握</div>
-            </button>
-            <button className="w4-stat" onClick={() => navigate({ name: "expressions" })}>
-              <div className="w4-stat-num">{learning}</div>
-              <div className="w4-stat-label">条在练</div>
-            </button>
-          </div>
-
-          <div className="w4-section">
-            <div className="w4-section-title">设置</div>
-            <div className="w4-cells">
-              <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "privacy" })}>
-                <span className="w4-cell-icon">
-                  <ShieldCheck size={15} strokeWidth={1.8} />
-                </span>
-                <span className="w4-cell-label">隐私与数据</span>
-                <ChevronRight size={15} className="w4-cell-chevron" />
-              </button>
-              <button className="w4-cell" onClick={() => navigate({ name: "settings", section: "about" })}>
-                <span className="w4-cell-icon">
-                  <Languages size={15} strokeWidth={1.8} />
-                </span>
-                <span className="w4-cell-label">关于 SpeakEasy</span>
-                <span className="w4-cell-value">2.4.0</span>
-                <ChevronRight size={15} className="w4-cell-chevron" />
+            <div className="w4-me-hero-foot">
+              <div className="w4-me-interests">
+                {interests.slice(0, 5).map((tag) => (
+                  <span key={tag} className="w4-me-chip is-soft">
+                    {tag}
+                  </span>
+                ))}
+                {interests.length > 5 ? (
+                  <span className="w4-me-chip is-soft">+{interests.length - 5}</span>
+                ) : null}
+              </div>
+              <button
+                className="w4-btn is-tonal w4-me-edit"
+                onClick={() => {
+                  haptic("selection");
+                  setEditOpen(true);
+                }}
+              >
+                <Pencil size={15} strokeWidth={1.9} />
+                编辑资料
               </button>
             </div>
-          </div>
+          </header>
 
-          <div className="w4-me-foot">
-            练习记录只存在这台设备上。
-            <br />
-            清掉浏览器数据，聊天和表达本都会一起消失。
-          </div>
+          <section className="w4-me-group" aria-label="练习">
+            <h2 className="w4-me-group-title">练习</h2>
+            <div className="w4-me-card">
+              <button className="w4-me-row" onClick={() => navigate({ name: "expressions" })}>
+                <span className="w4-me-row-icon">
+                  <BookMarked size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">表达本</span>
+                <span className="w4-me-row-value">
+                  在练 {learning} · 掌握 {mastered}
+                </span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+            </div>
+          </section>
+
+          <section className="w4-me-group" aria-label="语伴">
+            <h2 className="w4-me-group-title">语伴</h2>
+            <div className="w4-me-card">
+              <button className="w4-me-row" onClick={() => navigate({ name: "contacts" })}>
+                <span className="w4-me-row-icon">
+                  <Users size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">我的语伴</span>
+                <span className="w4-me-row-value">{friends.length} 位</span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+              <button className="w4-me-row" onClick={() => navigate({ name: "requests" })}>
+                <span className="w4-me-row-icon">
+                  <Bell size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">好友申请</span>
+                <span className="w4-me-row-value">
+                  {requests.length ? `${requests.length} 条待处理` : "暂无"}
+                </span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+            </div>
+          </section>
+
+          <section className="w4-me-group" aria-label="设置">
+            <h2 className="w4-me-group-title">设置</h2>
+            <div className="w4-me-card">
+              <button
+                className="w4-me-row"
+                onClick={() => navigate({ name: "settings", section: "notify" })}
+              >
+                <span className="w4-me-row-icon">
+                  <Bell size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">提醒</span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+              <button
+                className="w4-me-row"
+                onClick={() => navigate({ name: "settings", section: "appearance" })}
+              >
+                <span className="w4-me-row-icon">
+                  <Palette size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">外观与触感</span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+              <button
+                className="w4-me-row"
+                onClick={() => navigate({ name: "settings", section: "privacy" })}
+              >
+                <span className="w4-me-row-icon">
+                  <ShieldCheck size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">隐私与数据</span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+              <button
+                className="w4-me-row"
+                onClick={() => navigate({ name: "settings", section: "about" })}
+              >
+                <span className="w4-me-row-icon">
+                  <Info size={18} strokeWidth={1.8} />
+                </span>
+                <span className="w4-me-row-label">关于 SpeakEasy</span>
+                <span className="w4-me-row-value">4.0.0</span>
+                <ChevronRight size={16} className="w4-me-row-chevron" />
+              </button>
+            </div>
+          </section>
+
+          <p className="w4-me-foot-note">
+            <ShieldCheck size={13} strokeWidth={1.8} />
+            资料、聊天和表达都保存在你自己的账户里。
+          </p>
         </div>
       </div>
 
@@ -137,9 +219,11 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
               levels: patch.levels,
             });
             if (!ok) {
+              haptic("error");
               showToast("资料没保存成功，请稍后再试");
               return false;
             }
+            haptic("save");
             updateProfile(patch);
             showToast("资料已保存");
             /* 保存成功后再刷新，确保后端数据已落库 */
@@ -170,7 +254,7 @@ function EditProfileDialog({
     levels: Record<string, string>;
   }) => Promise<boolean>;
 }) {
-  const { profile } = useApp();
+  const { profile } = useApp(useShallow((state) => ({ profile: state.profile })));
   const [name, setName] = useState(profile.name);
   const [city, setCity] = useState(profile.city);
   const [job, setJob] = useState(profile.job);
@@ -390,11 +474,7 @@ function EditProfileDialog({
           </div>
         );
       })}
-      {saveError ? (
-        <div className="w4-field-hint" style={{ color: "#c0392b" }}>
-          {saveError}
-        </div>
-      ) : null}
+      {saveError ? <div className="w4-field-error">{saveError}</div> : null}
     </Dialog>
   );
 }

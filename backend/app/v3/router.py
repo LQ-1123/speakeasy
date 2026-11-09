@@ -88,6 +88,9 @@ async def _run(fn, *args, **kwargs):
 
 def _warm_audio(request: Request, service: V3Service, items: list[dict]) -> int:
     """把这一页 Persona 动态放进朗读预热队列（不阻塞响应）。"""
+    if getattr(request.app.state, "background_jobs", None) is not None:
+        # Production maintenance owns bounded, call-preemptible audio prewarming.
+        return 0
     cache = getattr(request.app.state, "v3_audio", None)
     if cache is None or not items:
         return 0

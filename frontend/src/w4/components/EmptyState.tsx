@@ -1,24 +1,37 @@
 "use client";
 
-/**
- * 桌面宽屏、未选中会话时的空态。
- *
- * 只用一枚浅灰的品牌剪影（声波同心圆），没有文字、没有按钮、没有底板。
- * 跟微信桌面版那种「留白中央一个淡图标」的处理一致。
- */
+import { Compass, MessageCircle } from "lucide-react";
 
-export function EmptyState() {
+import type { Route } from "../model";
+import { useApp } from "../store";
+
+/**
+ * Desktop empty state. This is the first screen a user sees on a wide display,
+ * so it carries a quiet greeting rather than a blank gray canvas.
+ */
+export function EmptyState({ navigate }: { navigate: (route: Route) => void }) {
+  const profile = useApp((state) => state.profile);
+  const hour = new Date().getHours();
+  const greeting = hour < 6 ? "夜深了" : hour < 11 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
   return (
-    <div className="w4-main">
-      <div className="w4-empty">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          className="w4-empty-logo"
-          src="/brand/empty-state.svg"
-          alt=""
-          width={140}
-          height={140}
-        />
+    <div className="w4-main w4-empty-main">
+      <div className="w4-empty-hero">
+        <span className="w4-empty-orbit" aria-hidden>
+          <i />
+          <i />
+          <MessageCircle size={28} strokeWidth={1.5} />
+        </span>
+        <p className="w4-empty-kicker">{greeting}{profile.name ? `，${profile.name}` : ""}</p>
+        <h2>挑一段对话，慢慢说。</h2>
+        <p>语音条不用赶时间。想认识新的人，也可以先去偶遇。</p>
+        <div className="w4-empty-actions">
+          <button className="w4-btn is-primary" onClick={() => navigate({ name: "discoverPeople" })}>
+            <Compass size={16} /> 偶遇一个人
+          </button>
+          <button className="w4-btn is-tonal" onClick={() => navigate({ name: "discover" })}>
+            看看动态
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -4,6 +4,9 @@ apply plugin: 'com.android.application'
 // 否则 release 回退到 debug 签名（保证本地也能产出可安装 APK）。
 def keystorePropsFile = rootProject.file("keystore.properties")
 def keystoreProps = new Properties()
+def localBuildProps = new Properties()
+if (rootProject.file("local.properties").exists()) localBuildProps.load(new FileInputStream(rootProject.file("local.properties")))
+def localValue = { key -> localBuildProps.getProperty(key) ?: System.getenv(key) ?: "" }
 if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
@@ -21,8 +24,21 @@ android {
         applicationId "com.speakeasy.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 304
-        versionName "3.0.4"
+        versionCode 410
+        versionName "4.1.0"
+        def apiBase = (project.findProperty("apiBase") ?: System.getenv("SPEAKEASY_API_BASE") ?: "https://47-104-24-236.sslip.io").replaceAll('/+$', '')
+        def apiUri = new URI(apiBase)
+        if (apiUri.scheme != 'https' || !apiUri.host || apiUri.userInfo || apiUri.rawQuery || apiUri.fragment || apiUri.path) {
+            throw new GradleException("Android API base must be an HTTPS origin without a path, query, or credentials")
+        }
+        buildConfigField "String", "API_BASE", "\"${apiBase.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        buildConfigField "String", "JPUSH_APP_KEY", "\"${localValue('JPUSH_APPKEY')}\""
+        manifestPlaceholders += [JPUSH_PKGNAME: applicationId, JPUSH_APPKEY: localValue('JPUSH_APPKEY'), JPUSH_CHANNEL: "official",
+            XIAOMI_APPID: localValue('XIAOMI_APPID'), XIAOMI_APPKEY: localValue('XIAOMI_APPKEY'),
+            OPPO_APPID: localValue('OPPO_APPID'), OPPO_APPKEY: localValue('OPPO_APPKEY'), OPPO_APPSECRET: localValue('OPPO_APPSECRET'),
+            VIVO_APPID: localValue('VIVO_APPID'), VIVO_APPKEY: localValue('VIVO_APPKEY'),
+            MEIZU_APPID: localValue('MEIZU_APPID'), MEIZU_APPKEY: localValue('MEIZU_APPKEY'),
+            HUAWEI_APPID: localValue('HUAWEI_APPID'), HONOR_APPID: localValue('HONOR_APPID')]
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -56,6 +72,7 @@ repositories {
 }
 
 dependencies {
+    implementation platform("org.jetbrains.kotlin:kotlin-bom:1.9.25")
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
@@ -65,6 +82,16 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    implementation "androidx.security:security-crypto:1.1.0-alpha06"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "cn.jiguang.sdk:jpush:6.3.0"
+    implementation "cn.jiguang.sdk:jcore:5.6.0"
+    implementation "cn.jiguang.sdk.plugin:xiaomi:6.3.0"
+    implementation "cn.jiguang.sdk.plugin:huawei:6.3.0"
+    implementation "cn.jiguang.sdk.plugin:honor:6.3.0"
+    implementation "cn.jiguang.sdk.plugin:oppo:6.3.0"
+    implementation "cn.jiguang.sdk.plugin:vivo:6.3.0"
+    implementation "cn.jiguang.sdk.plugin:meizu:6.3.0"
 }
 
 apply from: 'capacitor.build.gradle'

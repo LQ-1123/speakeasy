@@ -139,6 +139,10 @@ class DeepgramStreamer:
             return
         await self._ws.send(json.dumps({"type": "Finalize"}))
 
+    async def keepalive(self) -> None:
+        if self._ws is not None:
+            await self._ws.send(json.dumps({"type": "KeepAlive"}))
+
     async def close(self) -> None:
         if self._ws is None:
             return
@@ -168,13 +172,16 @@ class DeepgramStreamer:
                 if not text:
                     # 空结果也通知一次 metadata 进度
                     if msg.get("is_final"):
-                        yield {"type": "final", "text": ""}
+                        yield {"type": "final", "text": "", "finalized": bool(msg.get("from_finalize")),
+                               "start": float(msg.get("start") or 0), "duration": float(msg.get("duration") or 0)}
                     continue
                 if msg.get("is_final"):
                     self.final_text = text
-                    yield {"type": "final", "text": text}
+                    yield {"type": "final", "text": text, "finalized": bool(msg.get("from_finalize")),
+                           "start": float(msg.get("start") or 0), "duration": float(msg.get("duration") or 0)}
                 else:
-                    yield {"type": "partial", "text": text}
+                    yield {"type": "partial", "text": text,
+                           "start": float(msg.get("start") or 0), "duration": float(msg.get("duration") or 0)}
             elif kind == "UtteranceEnd":
                 yield {"type": "utterance_end"}
             elif kind == "Metadata":

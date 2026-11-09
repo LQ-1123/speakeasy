@@ -1,12 +1,15 @@
-﻿# SpeakEasy · 和世界聊聊天
+# SpeakEasy · 和世界聊聊天
+
+> **4.1 已上线（第二轮前端重设计）**：客户端使用 Material 3 Expressive 组件系统 + 系统动态语义色板，入口为「消息 / 通讯录 / 发现 / 我」；APK 内置同一套页面，通话由原生前台服务运行。线上 Web 已部署，当前签名 APK 为 `deliverables/SpeakEasy-v4.1.0-release.apk`。
+> 详见 [Web 重设计验收报告](docs/REDESIGN_WEB_ACCEPTANCE.md)、[Web 重设计说明](docs/REDESIGN_WEB.md)、[实施与验收说明](docs/REBUILD_ACCEPTANCE.md)、[Android 构建与推送配置](mobile/README.md)。真机连续通话和配置凭据后的厂商推送仍待验收。
 
 > 一个「AI 人物真的在生活」的社交式口语练习 App：
 > 每天生成一个有人物、有动态、有声音的小世界，先像刷朋友圈一样读和听，
 > 再和其中的人加好友、聊天、打语音电话，把英语（或其他语言）用起来。
 
 - 形态：**Web / PWA / Android APK**
-- 线上体验：<http://47.104.24.236:8000>
-- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出
+- 线上体验：<https://47-104-24-236.sslip.io>
+- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出 · Android 4.1.0
 - 文档：[V3 接口与数据模型](docs/V3_API.md) · [V3 验收清单](docs/V3_ACCEPTANCE.md) · [移动端](docs/V3_MOBILE.md) · [本地模式](docs/local-mode.md)
 
 ---

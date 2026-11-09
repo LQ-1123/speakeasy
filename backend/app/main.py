@@ -32,6 +32,8 @@ from app.routers import market_api
 from app.routers import conversations_api
 from app.routers import translate_api
 from app.v3.router import router as v3_router
+from app.v3.calls import router as calls_router
+from app.v3.client_api import router as client_router, ensure_client_schema
 from app.v3.schema import ensure_schema
 from app.v3.service import V3Service
 
@@ -46,304 +48,64 @@ STANDALONE = os.path.join(STATIC_DIR, "standalone.html")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Strict voice identity is the production default; offline fixtures may opt out.
+    os.environ.setdefault("SE_VOICE_STRICT", "1")
     settings = get_settings()
     configure_logging(settings.server.log_level, force=True)
-    log.info("=" * 68)
-    log.info("SpeakEasy 后端启动 v%s", VERSION)
-    log.info("配置: 数据目录=%s", settings.data_path)
-    log.info("LLM: base_url=%s model=%s configured=%s",
-             settings.llm.base_url, settings.llm.model, bool(settings.llm.api_key))
-    log.info("STT: backend=%s model=%s device=%s compute=%s",
-             settings.stt.backend, settings.stt.model_size, settings.stt.device, settings.stt.compute_type)
-    log.info("TTS: backend=%s device=%s", settings.tts.backend, settings.tts.device)
-    log.info("GPU: %s", {k: v for k, v in gpu_info().items() if k != "error"})
-
+    log.info("SpeakEasy backend starting v%s data=%s", VERSION, settings.data_path)
     engines = build_engines(settings)
     app.state.engines = engines
     app.state.version = VERSION
 
-    # SpeakEasy 2.0：SQLite + 记忆/社交/朋友圈服务（惰性加载，不阻塞启动）
-    from app.v2.services import build_services  # noqa: PLC0415
-
-    app.state.v2 = build_services(engines, settings.data_path)
-
-    # SpeakEasy 3.0：Persona / Post / Friendship / SocialEvent（同库，自动迁移）
-    try:
-        from app.v3.world import ensure_world  # noqa: PLC0415
-
-        ensure_schema(app.state.v2.db, seed=False)
-        # 世界生成：一次捏出「人物 + 信息流」；之后偶遇只是从这个世界里挑人
-        world = await ensure_world(app.state.v2.db, engines.llm)
-        app.state.v3 = V3Service(app.state.v2.db, engines, str(settings.data_path))
-        log.info("v3 服务就绪：world=%s social=%s", world, app.state.v3.config.public())
-
-        # 词库（捏人原料）：启动时应用一次，后台保存后也会自动重新应用
-        try:
-            from app.v3 import lexicon  # noqa: PLC0415
-
-            applied = lexicon.refresh()
-            log.info("词库已加载：%s", applied)
-        except Exception as exc:  # noqa: BLE001 - 词库有问题不能影响启动
-            log.warning("词库加载失败（用代码默认值）: %s", exc)
-
-        # 先分配每人的专属音色，再预热朗读音频（否则预合成会统一用全局参考音色）
-        try:
-            await app.state.v3.assign_fish_voices()
-        except Exception as exc:  # noqa: BLE001 - 失败不影响启动
-            log.debug("v3 Fish 音色分配失败: %s", exc)
-
-        # 朗读毫秒级：后台把信息流第一条音频预先合成并落盘，点击直接读文件
-        from app.v3.audio_cache import PersonaAudioCache  # noqa: PLC0415
-
-        app.state.v3_audio = PersonaAudioCache(
-            app.state.v2.db,
-            app.state.v2.voice,
-            os.path.join(str(settings.data_path), "v3_audio"),
-        )
-        app.state.v3_audio.start()
-        queued = app.state.v3_audio.warm(app.state.v3)
-        log.info("v3 朗读预热已排队 %d 条（后台合成，不阻塞启动）", queued)
-
-        # 每日世界：启动补今天内容，之后每天 02:00 生成；顺带 TTL 清理
-        from app.v3.daily_world import daily_loop  # noqa: PLC0415
-
-        app.state.daily_task = asyncio.create_task(
-            daily_loop(
-                app.state.v2.db,
-                engines.llm,
-                media_dir=os.path.join(str(settings.data_path), "media"),
-            ),
-            name="v3-daily-world",
-        )
-
-        # 存量人物补 Fish 专属音色（按性别+语言从音色库挑，幂等，后台跑不阻塞）
-        async def _assign_voices() -> None:
-            try:
-                count = await app.state.v3.assign_fish_voices()
-                if count:
-                    log.info("v3 Fish 音色分配完成：%d 个", count)
-            except Exception as exc:  # noqa: BLE001 - 失败不影响主流程
-                log.debug("v3 Fish 音色分配失败: %s", exc)
-
-        app.state.v3_voice_task = asyncio.create_task(
-            _assign_voices(), name="v3-fish-voices"
-        )
-
-        # Fish 语音冷启动探测：成功才把 TTS 切到 Fish（health 里 attempt_ok=true）
-        async def _probe_fish() -> None:
-            from app.voice import voice_registry  # noqa: PLC0415
-
-            for attempt, delay in enumerate((0.0, 4.0, 12.0)):
-                if delay:
-                    await asyncio.sleep(delay)
-                try:
-                    if await voice_registry.probe():
-                        log.info("Fish 语音就绪（启动探测成功，第 %d 次）", attempt + 1)
-                        return
-                except Exception as exc:  # noqa: BLE001 - 探测失败不影响启动
-                    log.debug("Fish 启动探测异常: %s", exc)
-            log.warning("Fish 启动探测未成功，暂用 Edge（冷却后首个请求会自动重试）")
-
-        app.state.fish_probe_task = asyncio.create_task(
-            _probe_fish(), name="fish-probe"
-        )
-
-        # ---- Persona 生活系统（Speech DNA / 生活事件 / 事件驱动动态）----
-        # 全部后台化、幂等、可失败降级：网页必须在这些任务跑完前就能打开。
-        from app.v3.event_posts import run_posts_cycle  # noqa: PLC0415
-        from app.v3.life_events import ensure_relationships, life_loop  # noqa: PLC0415
-        from app.v3.speech_dna import ensure_persona_dna  # noqa: PLC0415
-
-        async def _warm_persona_life() -> None:
-            """补齐 Speech DNA + 示例对话 + 人物间关系（幂等，只补缺的）。
-
-            成本控制：常驻人物走 LLM 高质量示例（一次性，每人 1 次调用）；
-            每日游客人物只用确定性示例库（0 次调用）——它们 24h 后会回收。
-            """
-            db = app.state.v2.db
-            permanent: list[dict] = []
-            guests: list[dict] = []
-            try:
-                with db._lock:  # noqa: SLF001 - 只读
-                    rows = [dict(r) for r in db.conn.execute("SELECT * FROM personas").fetchall()]
-                for row in rows:
-                    if str(row.get("lifecycle") or "permanent") == "guest":
-                        guests.append(row)
-                    else:
-                        permanent.append(row)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("读取人物列表失败（跳过表达层预热）: %s", exc)
-            try:
-                stats = await ensure_persona_dna(db, engines.llm, permanent)
-                log.info("Persona 表达层就绪（常驻）: %s", stats)
-            except Exception as exc:  # noqa: BLE001 - 缺表达层仍可聊天（会退化）
-                log.warning("Persona Speech DNA/示例生成失败（降级）: %s", exc)
-            if guests:
-                try:
-                    stats = await ensure_persona_dna(db, None, guests, use_llm=False)
-                    log.info("Persona 表达层就绪（游客，0 调用）: %s", stats)
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("游客表达层补齐失败（忽略）: %s", exc)
-            try:
-                count = ensure_relationships(db)
-                log.info("Persona 人际关系就绪：%d 条", count)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Persona 关系生成失败（忽略）: %s", exc)
-
-        app.state.persona_life_task = asyncio.create_task(
-            _warm_persona_life(), name="v3-persona-dna"
-        )
-
-        # 生活事件：规则作息 + 叙事事件 + 状态推进（每天一批，幂等）
-        # tick 默认 300s：状态推进 + 关系/情绪联动的频率；本地验收可调小。
-        # 世界节奏优先读词库（后台可调），环境变量仍可覆盖；tick 改动重启后生效
-        try:
-            from app.v3 import lexicon as _lexicon  # noqa: PLC0415
-
-            _rhythm = (_lexicon.load("rhythm") or {}).get("params") or {}
-        except Exception:  # noqa: BLE001
-            _rhythm = {}
-
-        life_tick = max(
-            5.0,
-            float(_rhythm.get("life_tick_s") or os.getenv("SE_LIFE_TICK_S", "300") or 300),
-        )
-        app.state.life_task = asyncio.create_task(
-            life_loop(app.state.v2.db, engines.llm, tick_s=life_tick), name="v3-life-events"
-        )
-
-        # 事件 → 动态：只处理最近完成的事件；刷新信息流永远不会触发这里
-        posts_tick = max(
-            60.0,
-            float(_rhythm.get("posts_tick_s") or os.getenv("SE_POSTS_TICK_S", "240") or 240),
-        )
-        posts_max = max(
-            1,
-            int(float(_rhythm.get("posts_max_events") or os.getenv("SE_POSTS_MAX_EVENTS", "4") or 4)),
-        )
-        posts_window = max(
-            1.0,
-            float(_rhythm.get("posts_since_hours") or os.getenv("SE_POSTS_SINCE_HOURS", "6") or 6),
-        )
-
-        async def _event_posts_loop() -> None:
-            while True:
-                try:
-                    await asyncio.sleep(posts_tick)
-                    stats = await run_posts_cycle(
-                        app.state.v2.db,
-                        engines.llm,
-                        max_events=posts_max,
-                        since_hours=posts_window,
-                    )
-                    if stats.get("posts"):
-                        log.info("事件驱动动态：%s", stats)
-                except asyncio.CancelledError:  # pragma: no cover
-                    raise
-                except Exception as exc:  # noqa: BLE001 - 后台失败不拖垮服务
-                    log.warning("事件动态批处理失败（下轮重试）: %s", exc)
-
-        app.state.posts_task = asyncio.create_task(
-            _event_posts_loop(), name="v3-event-posts"
-        )
-    except Exception as exc:  # noqa: BLE001 - v3 失败不阻断既有功能
-        log.exception("v3 服务初始化失败（发现页将不可用）: %s", exc)
-        app.state.v3 = None
-
-    # 会话存储（WS 连接共享）
+    from app.v2.services import build_services
+    from app.v3 import client_events
+    from app.v3 import calls
+    from app.v3.audio_cache import PersonaAudioCache
+    from app.voice.catalog import repair_persona_voices
+    from app.jobs import DurableJobQueue
+    from app.maintenance import maintenance_loop
     from app.session import SessionStore
 
+    app.state.v2 = build_services(engines, settings.data_path)
+    db = app.state.v2.db
+    ensure_schema(db, seed=False)
+    ensure_client_schema(db)
+    repair_persona_voices(db)
+    app.state.v3 = V3Service(db, engines, str(settings.data_path))
+    app.state.v3_audio = PersonaAudioCache(
+        db, app.state.v2.voice, os.path.join(str(settings.data_path), "v3_audio"))
     app.state.session_store = SessionStore(ttl_s=float(os.getenv("SESSION_TTL_S", "3600")))
+    app.state.background_jobs = DurableJobQueue(db.conn, lock=db._lock)
 
-    # 参考音频体检（只提示，不阻断）
-    try:
-        problems = engines.ref_audio.validate()
-        if problems:
-            log.warning("参考音频检查发现 %d 个问题（可用 scripts/fetch_ref_audio.py 或录音补全）:", len(problems))
-            for p in problems[:8]:
-                log.warning("  - %s", p)
-    except Exception as exc:  # pragma: no cover
-        log.warning("参考音频校验失败: %s", exc)
-
-    # 后台预热，不阻塞启动
-    warm_task: asyncio.Task | None = None
+    # No provider or world generation is awaited before serving requests.
+    tasks = [
+        asyncio.create_task(maintenance_loop(app, settings, engines, app.state.background_jobs),
+                            name="durable-maintenance"),
+        asyncio.create_task(client_events.event_worker(db, app.state.v3), name="client-events"),
+        asyncio.create_task(calls.cleanup_sessions(app), name="call-cleanup"),
+    ]
+    app.state.maintenance_task = tasks[0]
+    app.state.client_events_task = tasks[1]
     if settings.tts.prewarm or settings.stt.backend != "mock":
-        warm_task = asyncio.create_task(engines.prewarm("all"), name="prewarm")
-        app.state.warm_task = warm_task
-
-    # 音频保留策略：总量上限 2 GB，超出按最旧优先删（转写文本与记忆保留）
-    from app.v2.audio_retention import MAX_BYTES as _AUDIO_CAP  # noqa: PLC0415
-    from app.v2.audio_retention import retention_loop  # noqa: PLC0415
-
-    retention_task = asyncio.create_task(
-        retention_loop(
-            db_path=os.path.join(str(settings.data_path), "speakeasy_v2.db"),
-            audio_dir=os.path.join(str(settings.data_path), "audio"),
-            max_bytes=_AUDIO_CAP,
-        ),
-        name="audio-retention",
-    )
-
-    # 图库保留策略：过期未引用 → 缺文件行 → 超配额（最旧未引用优先），
-    # 被动态引用的图永不删除；默认 200MB / 800 张 / 45 天，可环境变量覆盖。
-    from app.admin import media_admin as _media_admin  # noqa: PLC0415
-
-    app.state.media_task = asyncio.create_task(
-        _media_admin.janitor_loop(
-            app.state.v2.db,
-            interval_s=float(os.getenv("SE_MEDIA_JANITOR_INTERVAL_S", "3600") or 3600),
-        ),
-        name="media-janitor",
-    )
-
-    log.info("就绪: http://%s:%s  (前端: / )", settings.server.host, settings.server.port)
-    log.info("=" * 68)
+        task = asyncio.create_task(engines.prewarm("all"), name="prewarm")
+        app.state.warm_task = task
+        tasks.append(task)
     try:
         yield
     finally:
-        log.info("关闭中…")
-        if warm_task and not warm_task.done():
-            warm_task.cancel()
-            try:
-                await warm_task
-            except (asyncio.CancelledError, Exception):  # noqa: B014
-                pass
-        if not retention_task.done():
-            retention_task.cancel()
-            try:
-                await retention_task
-            except (asyncio.CancelledError, Exception):  # noqa: B014
-                pass
-        v2 = getattr(app.state, "v2", None)
-        if v2 is not None:
-            try:
-                await v2.aclose()
-            except Exception as exc:  # noqa: BLE001
-                log.debug("v2 关闭失败: %s", exc)
-        v3_voice_task = getattr(app.state, "v3_voice_task", None)
-        if v3_voice_task is not None and not v3_voice_task.done():
-            v3_voice_task.cancel()
-        daily_task = getattr(app.state, "daily_task", None)
-        if daily_task is not None and not daily_task.done():
-            daily_task.cancel()
-            try:
-                await daily_task
-            except (asyncio.CancelledError, Exception):  # noqa: B014
-                pass
-        # Persona 生活系统的后台任务
-        for name in ("persona_life_task", "life_task", "posts_task", "media_task"):
-            task = getattr(app.state, name, None)
-            if task is not None and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):  # noqa: B014
-                    pass
-        audio_cache = getattr(app.state, "v3_audio", None)
-        if audio_cache is not None:
-            audio_cache.stop()
+        # Every DB-using worker stops before V2Services closes SQLite.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for call_id, runtime in list(calls.RUNTIMES.items()):
+            await calls.finish_call(app, call_id, runtime.user_id)
+        cache = app.state.v3_audio
+        cache.stop()
+        if cache._worker is not None:
+            await asyncio.gather(cache._worker, return_exceptions=True)
+        await app.state.v2.aclose()
         await engines.aclose()
-        log.info("已关闭")
+        log.info("SpeakEasy backend stopped")
 
 
 def create_app() -> FastAPI:
@@ -365,7 +127,7 @@ def create_app() -> FastAPI:
     ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_env_origins or settings.server.cors_origins,
+        allow_origins=list(dict.fromkeys([*(_env_origins or settings.server.cors_origins), "https://localhost"])),
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -380,6 +142,8 @@ def create_app() -> FastAPI:
     app.include_router(conversations_api.router)
     app.include_router(v2_router)
     app.include_router(v3_router)
+    app.include_router(calls_router)
+    app.include_router(client_router)
 
     # 管理端（控制面）：词库管理。仅本机可用，与客户端完全解耦。
     from app.admin import page_router as admin_page_router  # noqa: PLC0415

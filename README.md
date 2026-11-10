@@ -6,7 +6,6 @@
 <p align="center">
   <img src="docs/screenshots/sonder-splash.png" width="230" alt="Sonder 品牌开屏" />
   <img src="docs/screenshots/sonder-mobile.png" width="230" alt="Sonder 手机端消息页" />
-  <img src="docs/screenshots/sonder-notification.png" width="230" alt="Sonder 通知：Dynamic 图标与 AI 头像" />
 </p>
 
 > 一个「AI 人物真的在生活」的社交式口语练习 App：

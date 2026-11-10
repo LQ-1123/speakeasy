@@ -64,7 +64,7 @@ export function Rail({
           haptic("selection");
           navigate({ name: "chats" });
         }}
-        aria-label="SpeakEasy 首页"
+        aria-label="Sonder 首页"
       >
         <Sparkles size={22} strokeWidth={1.7} />
       </button>

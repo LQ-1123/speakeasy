@@ -1,7 +1,8 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
+        android:name=".SpeakEasyApp"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -20,13 +21,36 @@
             android:windowSoftInputMode="adjustNothing"
             android:enableOnBackInvokedCallback="true"
             android:exported="true">
+        </activity>
 
+        <!-- 桌面图标跟随明暗主题：两个 alias 指向同一个 Activity，LaunchIcon 只启用其一。
+             通知栏图标另外使用 Dynamic 渐变版（jpush_notification_icon），互不影响。 -->
+        <activity-alias
+            android:name=".LauncherLight"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_light"
+            android:roundIcon="@mipmap/ic_launcher_round_light"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-        </activity>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherDark"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_dark"
+            android:roundIcon="@mipmap/ic_launcher_round_dark"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".CallService"
@@ -35,6 +59,21 @@
         <receiver android:name=".PushReceiver" android:enabled="true" android:exported="false">
             <intent-filter><action android:name="cn.jpush.android.intent.RECEIVE_MESSAGE" /><category android:name="${applicationId}" /></intent-filter>
         </receiver>
+        <!-- JPush 必需：JCore 要求应用自定义一个继承 JCommonService 的 Service，
+             否则初始化时报 missing required service 且永远拿不到 registrationId。 -->
+        <service
+            android:name=".SpeakEasyPushService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":pushcore">
+            <intent-filter>
+                <action android:name="cn.jpush.android.service.JCommonService" />
+            </intent-filter>
+        </service>
+        <!-- JPush 必需：SDK 只从 AndroidManifest 读取 AppKey/Channel/PackageName。 -->
+        <meta-data android:name="JPUSH_PKGNAME" android:value="${applicationId}" />
+        <meta-data android:name="JPUSH_APPKEY" android:value="${JPUSH_APPKEY}" />
+        <meta-data android:name="JPUSH_CHANNEL" android:value="${JPUSH_CHANNEL}" />
         <meta-data android:name="com.huawei.hms.client.appid" android:value="appid=${HUAWEI_APPID}" />
         <meta-data android:name="com.hihonor.push.app_id" android:value="${HONOR_APPID}" />
         <meta-data android:name="com.vivo.push.api_key" android:value="${VIVO_APPKEY}" />
@@ -63,6 +102,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 触感反馈：NativeBridge.performHaptic 使用 Vibrator/VibrationEffect。 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 </manifest>

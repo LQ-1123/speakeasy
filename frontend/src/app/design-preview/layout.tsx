@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "SpeakEasy Design Preview",
-  description: "仅用于设计/验收的 SpeakEasy 主题与响应式预览面板。",
+  title: "Sonder Design Preview",
+  description: "仅用于设计/验收的 Sonder 主题与响应式预览面板。",
   robots: { index: false, follow: false },
 };
 

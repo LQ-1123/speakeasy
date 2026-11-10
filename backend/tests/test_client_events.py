@@ -54,8 +54,14 @@ async def test_missing_push_credentials_never_marks_delivery_sent(db, monkeypatc
     collect_events(db)
     monkeypatch.delenv('JPUSH_APP_KEY',raising=False)
     monkeypatch.delenv('JPUSH_MASTER_SECRET',raising=False)
+    from app.config import get_settings  # noqa: PLC0415
+
+    blank = get_settings().model_copy(update={'jpush_app_key': '', 'jpush_master_secret': ''})
+    monkeypatch.setattr('app.config.get_settings', lambda: blank)
     assert await dispatch_push(db)==0
-    assert db.conn.execute('SELECT push_status FROM client_events').fetchone()[0]=='pending'
+    # No credentials is a terminal state, not a retry loop: the worker marks the
+    # outbox row instead of leaving it pending forever.
+    assert db.conn.execute('SELECT push_status FROM client_events').fetchone()[0]=='unconfigured'
 
 
 @pytest.mark.asyncio

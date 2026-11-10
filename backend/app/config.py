@@ -174,6 +174,8 @@ class Settings(BaseSettings):
     data_dir: str = ""
     jpush_app_key: str = ""
     jpush_master_secret: str = ""
+    # Public origin used for absolute URLs inside push payloads (avatar large icon).
+    public_base_url: str = "https://47-104-24-236.sslip.io"
     ref_audio_dir: str = ""
     # 云端 STT：扁平 env（pydantic-settings 能直接读到；嵌套 STTSettings 字段读不到）
     stt_provider: str = ""

@@ -581,6 +581,10 @@
   .w4-app[data-mobile-view="list"] .w4-main {
     transform: translateX(104%);
     pointer-events: none;
+    /* 列表视图里主内容只是被 translateX 藏到屏幕外；如果它此时挂载，全局的
+       se-page-in 入场动画会用 translateY 覆盖隐藏位移，让详情页整屏一闪而过
+       （切换消息/通讯录 tab 时最常见）。列表视图不播放入场动画。 */
+    animation: none;
   }
 
   .w4-app[data-mobile-view="list"] .w4-listcol {

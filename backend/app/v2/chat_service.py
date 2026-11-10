@@ -577,18 +577,51 @@ class ChatService:
         friend_id: str,
         text: str,
         context: str | None = None,
+        client_message_id: str | None = None,
     ) -> dict:
         self.mark_replying(friend_id)
         try:
             friend = await asyncio.to_thread(self.db.get_friend, friend_id)
             if friend is None:
                 raise KeyError(friend_id)
+            if client_message_id:
+                existing = await asyncio.to_thread(
+                    self.db.get_message_by_client_id, friend_id, client_message_id
+                )
+                if existing is not None:
+                    # 同一客户端消息重复提交（例如未回复时退出页面又重试）：
+                    # 不再产生新消息/新回复，直接返回已有回合。
+                    return await asyncio.to_thread(self._duplicate_turn, friend, existing)
             return await self._handle_user_text(
                 friend, text, msg_type="text", context=context,
                 stt_meta={"backend": "text", "latency_ms": 0.0},
+                client_message_id=client_message_id,
             )
         finally:
             self.clear_replying(friend_id)
+
+    def _duplicate_turn(self, friend: dict, user_message: dict) -> dict:
+        """幂等命中时构造与正常回合同形的响应（包含已生成的回复）。"""
+        fid = str(friend["id"])
+        created = str(user_message.get("created_at") or "")
+        with self.db._lock:  # noqa: SLF001 - 与 DB 共用连接/锁，保持一次只读快照
+            rows = self.db.list_messages(fid, limit=60)
+        replies = [
+            row for row in rows
+            if row.get("sender") == "friend"
+            and str(row.get("created_at") or "") >= created
+        ]
+        return {
+            "user_message": user_message,
+            "friend_messages": replies,
+            "suggestion_pending": False,
+            "closeness_level": friend.get("closeness_level", 1),
+            "total_turns": friend.get("total_turns", 0),
+            "memory_updated": False,
+            "reply_language": self._reply_language(friend),
+            "stt": {"backend": "text", "latency_ms": 0.0},
+            "duplicate": True,
+        }
 
     # ------------------------------------------------------------------ #
     # 语音通话（流式：边生成边按句 TTS）
@@ -1029,6 +1062,7 @@ class ChatService:
         duration_ms: int = 0,
         context: str | None = None,
         stt_meta: dict[str, Any] | None = None,
+        client_message_id: str | None = None,
     ) -> dict:
         fid = friend["id"]
         transcript = (transcript or "").strip()
@@ -1046,6 +1080,7 @@ class ChatService:
             duration_ms=duration_ms,
             is_read=True,
             context=context,
+            client_message_id=client_message_id,
         )
 
         # 熟稔度 / 轮数

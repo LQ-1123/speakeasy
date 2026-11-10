@@ -617,13 +617,21 @@ def backfill_post_languages(db: Any) -> int:
 
 
 def sync_persona_friends(db: Any) -> int:
-    """把已加好友的 Persona 的语言/声线同步成人物当前值（幂等，每次启动都跑）。
+    """把已加好友的 Persona 语言/声线/**头像元数据**同步成人物当前值（幂等，每次启动都跑）。
 
-    保证「信息流文字 = 聊天语言 = 语音条语言」三者一致。
+    一致性保证：
+    - 信息流文字 = 聊天语言 = 语音条声音；
+    - 聊天/通讯录（``friends`` 行）= 信息流/主页/通知（persona）**同一张脸**：
+      ``avatar_seed / avatar_style / avatar_options`` 与 ``persona_avatar_meta`` 完全一致。
+      缺失部件的老人物在读取时用确定性 ``default_options`` 归一化（不调 LLM），
+      这里把同一份结果写回好友行，客户端 ``resolveAvatar`` 才能画出同一个头像。
     返回受影响的好友行数（老库没有 friendships 表时返回 0）。
     """
     with db._lock, db.conn:  # noqa: SLF001
         try:
+            from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+            from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
+
             # Persona 生活层外键：老库里的好友行也补上 persona_id（幂等）
             db.conn.execute(
                 "UPDATE friends SET persona_id = ("
@@ -659,6 +667,16 @@ def sync_persona_friends(db: Any) -> int:
                 )
                 """
             )
+            # 老人物先补确定性种子（与 backfill_avatar_seeds 同规则），好友行才能复制到同一个 seed。
+            # 放在同步好友之前，避免「world 启动时先 sync 后 backfill」导致好友行拿到空种子。
+            for persona_row in db.conn.execute(
+                "SELECT id FROM personas WHERE COALESCE(avatar_seed,'') = ''"
+            ).fetchall():
+                pid = str(persona_row["id"])
+                seed = "persona-" + (pid[2:] if pid.startswith("p_") else pid)
+                db.conn.execute(
+                    "UPDATE personas SET avatar_seed=?, avatar='' WHERE id=?", (seed, pid)
+                )
             rows = db.conn.execute(
                 "SELECT f.friend_id AS friend_id, p.* FROM friendships f"
                 " JOIN personas p ON p.id = f.persona_id"
@@ -666,16 +684,16 @@ def sync_persona_friends(db: Any) -> int:
             for row in rows:
                 persona = dict(row)
                 friend_id = str(row["friend_id"])
-                from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
-
+                avatar_meta = persona_avatar_meta(persona)
                 db.conn.execute(
                     "UPDATE friends SET avatar_url=?, avatar_seed=?, avatar_style=?, avatar_options=?"
                     " WHERE id=?",
                     (
                         persona_avatar_url(persona),
-                        str(persona.get("avatar_seed") or ""),
-                        str(persona.get("avatar_style") or ""),
-                        str(persona.get("avatar_options") or ""),
+                        str(persona.get("avatar_seed") or "").strip()
+                        or str(persona.get("id") or ""),
+                        str(avatar_meta.get("avatar_style") or ""),
+                        _json(avatar_meta.get("avatar_options") or {}),
                         friend_id,
                     ),
                 )

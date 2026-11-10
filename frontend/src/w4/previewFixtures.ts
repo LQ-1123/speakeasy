@@ -7,19 +7,24 @@ const NOW = "2026-11-09T12:00:00.000Z";
 
 const AVATARS = ["callum", "giulia", "annika", "adrian", "camila", "finn", "haruto", "ines", "jiwoo", "lin", "mei", "niamh"];
 
+/**
+ * 预览人物：gender 与真实 persona 一样是每个人自己的属性（不再用奇偶轮换）。
+ * 聊天/信息流/偶遇/通知/人物主页的预览数据都从同一份 PEOPLE 生成，
+ * 配合头像统一解析器，同一个人在所有页面拿到同一个 seed + 同一个 gender → 同一张脸。
+ */
 const PEOPLE = [
-  { name: "Callum", country: "United Kingdom", city: "London", job: "Product designer", lang: "en", age: 29, bio: "Coffee, small typography details and long walks by the canal." },
-  { name: "Giulia", country: "Italy", city: "Milan", job: "Architect", lang: "en", age: 31, bio: "I collect old postcards and overthink restaurant menus." },
-  { name: "Annika", country: "Germany", city: "Berlin", job: "Sound engineer", lang: "en", age: 27, bio: "Field recordings, flea markets, and very slow Sundays." },
-  { name: "Adrian", country: "Spain", city: "Barcelona", job: "Chef", lang: "en", age: 33, bio: "I will always tell you the best place for breakfast." },
-  { name: "Camila", country: "Brazil", city: "São Paulo", job: "Illustrator", lang: "en", age: 26, bio: "Drawing people on the metro and learning to surf badly." },
-  { name: "Finn", country: "Ireland", city: "Dublin", job: "Bookseller", lang: "en", age: 30, bio: "Ask me for a book recommendation and clear your afternoon." },
-  { name: "Haruto", country: "Japan", city: "Tokyo", job: "Ceramicist", lang: "en", age: 34, bio: "Quiet mornings, loud music, and a shelf full of mugs." },
-  { name: "Ines", country: "Portugal", city: "Lisbon", job: "Marine biologist", lang: "en", age: 28, bio: "I work with tide pools and talk about them too much." },
-  { name: "Jiwoo", country: "Korea", city: "Seoul", job: "Motion designer", lang: "en", age: 25, bio: "Making tiny animations and finding the best iced coffee." },
-  { name: "Lin", country: "China", city: "Shanghai", job: "Editor", lang: "en", age: 32, bio: "I read three books at once and finish none of them." },
-  { name: "Mei", country: "Singapore", city: "Singapore", job: "Urban planner", lang: "en", age: 30, bio: "Maps, hawker centres, and the perfect walking route." },
-  { name: "Niamh", country: "Ireland", city: "Galway", job: "Radio producer", lang: "en", age: 27, bio: "I ask too many questions for a living." },
+  { name: "Callum", gender: "male", country: "United Kingdom", city: "London", job: "Product designer", lang: "en", age: 29, bio: "Coffee, small typography details and long walks by the canal." },
+  { name: "Giulia", gender: "female", country: "Italy", city: "Milan", job: "Architect", lang: "en", age: 31, bio: "I collect old postcards and overthink restaurant menus." },
+  { name: "Annika", gender: "female", country: "Germany", city: "Berlin", job: "Sound engineer", lang: "en", age: 27, bio: "Field recordings, flea markets, and very slow Sundays." },
+  { name: "Adrian", gender: "male", country: "Spain", city: "Barcelona", job: "Chef", lang: "en", age: 33, bio: "I will always tell you the best place for breakfast." },
+  { name: "Camila", gender: "female", country: "Brazil", city: "São Paulo", job: "Illustrator", lang: "en", age: 26, bio: "Drawing people on the metro and learning to surf badly." },
+  { name: "Finn", gender: "male", country: "Ireland", city: "Dublin", job: "Bookseller", lang: "en", age: 30, bio: "Ask me for a book recommendation and clear your afternoon." },
+  { name: "Haruto", gender: "male", country: "Japan", city: "Tokyo", job: "Ceramicist", lang: "en", age: 34, bio: "Quiet mornings, loud music, and a shelf full of mugs." },
+  { name: "Ines", gender: "female", country: "Portugal", city: "Lisbon", job: "Marine biologist", lang: "en", age: 28, bio: "I work with tide pools and talk about them too much." },
+  { name: "Jiwoo", gender: "female", country: "Korea", city: "Seoul", job: "Motion designer", lang: "en", age: 25, bio: "Making tiny animations and finding the best iced coffee." },
+  { name: "Lin", gender: "female", country: "China", city: "Shanghai", job: "Editor", lang: "en", age: 32, bio: "I read three books at once and finish none of them." },
+  { name: "Mei", gender: "female", country: "Singapore", city: "Singapore", job: "Urban planner", lang: "en", age: 30, bio: "Maps, hawker centres, and the perfect walking route." },
+  { name: "Niamh", gender: "female", country: "Ireland", city: "Galway", job: "Radio producer", lang: "en", age: 27, bio: "I ask too many questions for a living." },
 ];
 
 export const PREVIEW_PROFILE = {
@@ -47,7 +52,7 @@ export function previewFriends(count = 12) {
       reply_language: person.lang,
       avatar_url: `/mock/avatars/${AVATARS[index % AVATARS.length]}.jpg`,
       avatar_seed: String(index + 1),
-      gender: index % 2 ? "female" : "male",
+      gender: person.gender,
       timezone: "Europe/London",
       age: person.age,
       bio: person.bio,
@@ -171,13 +176,14 @@ export function previewFeed(count = 6) {
         id: `persona-${(index % PEOPLE.length) + 1}`,
         nickname: person.name,
         avatar: `/mock/avatars/${AVATARS[index % AVATARS.length]}.jpg`,
+        avatar_seed: String(index + 1),
         bio: person.bio,
         interests: ["coffee", "design", "travel"],
         country: person.country,
         city: person.city,
         occupation: person.job,
         age: person.age,
-        gender: index % 2 ? "female" : "male",
+        gender: person.gender,
         language: "en",
         is_ai: true,
         ai_label: "AI",
@@ -202,13 +208,14 @@ export function previewPersona(index = 0) {
     id: `persona-${index + 1}`,
     nickname: person.name,
     avatar: `/mock/avatars/${AVATARS[index % AVATARS.length]}.jpg`,
+    avatar_seed: String(index + 1),
     bio: person.bio,
     interests: ["coffee", "design", "walking", "records"],
     country: person.country,
     city: person.city,
     occupation: person.job,
     age: person.age,
-    gender: index % 2 ? "female" : "male",
+    gender: person.gender,
     language: "en",
     is_ai: true,
     ai_label: "AI",
@@ -228,13 +235,14 @@ export function previewDiscoverNext() {
       id: "persona-5",
       nickname: person.name,
       avatar: `/mock/avatars/${AVATARS[4]}.jpg`,
+      avatar_seed: "5",
       bio: person.bio,
       interests: ["illustration", "surfing", "street food"],
       country: person.country,
       city: person.city,
       occupation: person.job,
       age: person.age,
-      gender: "female",
+      gender: person.gender,
       language: "en",
       is_ai: true,
       ai_label: "AI",
@@ -258,7 +266,7 @@ export function previewEvents() {
       scheduled_at: NOW,
       post_id: "fixture-post-1",
       payload: { persona_name: "Callum", post_excerpt: "A slow morning, good coffee…" },
-      persona: { id: "persona-1", nickname: "Callum", avatar: `/mock/avatars/callum.jpg`, bio: "Coffee and conversations", is_ai: true, ai_label: "AI" },
+      persona: { id: "persona-1", nickname: "Callum", avatar: `/mock/avatars/callum.jpg`, avatar_seed: "1", gender: "male", bio: "Coffee and conversations", is_ai: true, ai_label: "AI" },
     },
     {
       id: "fixture-event-2",
@@ -269,7 +277,7 @@ export function previewEvents() {
       scheduled_at: NOW,
       post_id: "fixture-post-2",
       payload: { persona_name: "Giulia", comment: "This is exactly the kind of morning I needed to see.", post_excerpt: "The light in the market…" },
-      persona: { id: "persona-2", nickname: "Giulia", avatar: `/mock/avatars/giulia.jpg`, bio: "Architect", is_ai: true, ai_label: "AI" },
+      persona: { id: "persona-2", nickname: "Giulia", avatar: `/mock/avatars/giulia.jpg`, avatar_seed: "2", gender: "female", bio: "Architect", is_ai: true, ai_label: "AI" },
     },
     {
       id: "fixture-event-3",
@@ -280,7 +288,7 @@ export function previewEvents() {
       scheduled_at: NOW,
       post_id: "",
       payload: { persona_name: "Ines", message: "Your note about tide pools made me smile. Want to trade small observations?" },
-      persona: { id: "persona-8", nickname: "Ines", avatar: `/mock/avatars/ines.jpg`, bio: "Marine biologist", is_ai: true, ai_label: "AI" },
+      persona: { id: "persona-8", nickname: "Ines", avatar: `/mock/avatars/ines.jpg`, avatar_seed: "8", gender: "female", bio: "Marine biologist", is_ai: true, ai_label: "AI" },
     },
   ];
 }

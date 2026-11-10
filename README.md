@@ -1,7 +1,13 @@
-# SpeakEasy · 和世界聊聊天
+# Sonder · Every life is a world
 
-> **4.1 已上线（第二轮前端重设计）**：客户端使用 Material 3 Expressive 组件系统 + 系统动态语义色板，入口为「消息 / 通讯录 / 发现 / 我」；APK 内置同一套页面，通话由原生前台服务运行。线上 Web 已部署，当前签名 APK 为 `deliverables/SpeakEasy-v4.1.0-release.apk`。
-> 详见 [Web 重设计验收报告](docs/REDESIGN_WEB_ACCEPTANCE.md)、[Web 重设计说明](docs/REDESIGN_WEB.md)、[实施与验收说明](docs/REBUILD_ACCEPTANCE.md)、[Android 构建与推送配置](mobile/README.md)。真机连续通话和配置凭据后的厂商推送仍待验收。
+> **Sonder 4.1.2 已发布**：在 4.1.1 真机 9 项问题修复的基础上，完成品牌升级——应用更名 **Sonder**、桌面图标随系统明暗切换（Light/Dark）、通知栏使用 Dynamic 渐变图标 + AI 头像、Android 12+ 品牌开屏。当前签名 APK：`deliverables/SpeakEasy-v4.1.2-release.apk`（versionCode 412 / versionName 4.1.2，签名证书不变，SHA-256 `1a33e1167370804b9b21e34e8072f0f989f57ee16f5ecbccd5c3ca2ddd92bde4`）。
+> 详见 [品牌与客户端说明](docs/BRANDING.md)、[真机问题修复与验收](docs/MOBILE_RELIABILITY_FIXES.md)、[Android 构建与推送配置](docs/MOBILE_REBUILD.md)。
+
+<p align="center">
+  <img src="docs/screenshots/sonder-splash.png" width="230" alt="Sonder 品牌开屏" />
+  <img src="docs/screenshots/sonder-mobile.png" width="230" alt="Sonder 手机端消息页" />
+  <img src="docs/screenshots/sonder-notification.png" width="230" alt="Sonder 通知：Dynamic 图标与 AI 头像" />
+</p>
 
 > 一个「AI 人物真的在生活」的社交式口语练习 App：
 > 每天生成一个有人物、有动态、有声音的小世界，先像刷朋友圈一样读和听，
@@ -9,8 +15,24 @@
 
 - 形态：**Web / PWA / Android APK**
 - 线上体验：<https://47-104-24-236.sslip.io>
-- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出 · Android 4.1.0
-- 文档：[V3 接口与数据模型](docs/V3_API.md) · [V3 验收清单](docs/V3_ACCEPTANCE.md) · [移动端](docs/V3_MOBILE.md) · [本地模式](docs/local-mode.md)
+- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出 · Android **4.1.2**
+- 文档：[品牌与客户端说明](docs/BRANDING.md) · [V3 接口与数据模型](docs/V3_API.md) · [V3 验收清单](docs/V3_ACCEPTANCE.md) · [移动端](docs/V3_MOBILE.md) · [本地模式](docs/local-mode.md)
+
+---
+
+## 界面预览
+
+桌面端「发现」信息流：像刷朋友圈一样读 AI 人物的生活，支持翻译、朗读、点赞与评论。
+
+![发现信息流（桌面端）](docs/screenshots/sonder-discover.jpg)
+
+响应式与设计系统：同一套 Material 3 Expressive 主题，在 1440 / 1024 / 768 / 390px 下保持零溢出。
+
+![Sonder Design Preview](docs/screenshots/sonder-design-preview.jpg)
+
+手机端（390px）：消息 / 通讯录 / 发现 / 我 四个 Tab，底部导航与手势返回。
+
+<p align="center"><img src="docs/screenshots/sonder-mobile.png" width="300" alt="手机端消息页" /></p>
 
 ---
 
@@ -36,7 +58,7 @@
 
 ## 1. 这个项目是什么
 
-SpeakEasy 不是「AI 聊天框 + 语音朗读」。
+Sonder 不是「AI 聊天框 + 语音朗读」。
 
 它先造一个**每天会更新、有自己生活节奏的 AI 人物世界**：人物有稳定的头像、性格、职业、城市、口音和声线，每天发几条生活动态（照片来自开放图库，带 CC 署名）。
 
@@ -52,13 +74,13 @@ SpeakEasy 不是「AI 聊天框 + 语音朗读」。
 
 传统 AI 口语产品的三个断点：
 
-| 痛点 | 常见做法 | SpeakEasy 的做法 |
+| 痛点 | 常见做法 | Sonder 的做法 |
 |---|---|---|
 | **没有「人」的感觉** | 每次打开都是同一个助手，没有生活、没有连续性 | 一个人物 = 一套固定资料 + 固定头像 + 固定 Fish 音色 + 持续动态；加好友后记忆延续 |
 | **没有「可输入的内容」** | 只能靠用户自己找话题，冷启动尴尬 | 每天生成可刷的动态世界：生活照、吐槽、旅行、咖啡、骑行……先输入再输出 |
 | **「练口语」压力太大** | 上来就对话、评分、纠错 | 从「读 + 译 + 听」这种零压力行为开始，再过渡到聊天和语音 |
 
-说到底，哑巴英语缺的不是词汇量，是**低压力、可持续、有对象感的语言输入和输出环境**。SpeakEasy 把「练」藏在「刷」和「聊」里。
+说到底，哑巴英语缺的不是词汇量，是**低压力、可持续、有对象感的语言输入和输出环境**。Sonder 把「练」藏在「刷」和「聊」里。
 
 ---
 
@@ -554,10 +576,18 @@ bash deploy/deploy_v3.sh
 .\mobile\build-apk.ps1 -Mode release -ApiBase http://47.104.24.236:8000
 
 # 装到手机
-adb install -r .\deliverables\SpeakEasy-v3.0.0-release.apk
+adb install -r .\deliverables\SpeakEasy-v4.1.2-release.apk
 ```
 
 APK 包含 Web 前端 + Capacitor 壳，网络请求指向构建时注入的 `NEXT_PUBLIC_API_BASE`，不含任何 provider Key。
+
+### Android 客户端：品牌、图标与通知（4.1.2）
+
+- **应用名**：Sonder（桌面名、任务标题、通知、网页 title / PWA manifest 全部统一；包名与原生桥 `com.speakeasy.app` / `SpeakEasyNative` 保持不变以兼容已安装数据）。
+- **桌面图标**：Light / Dark 两版自适应图标，通过两个 `activity-alias`（`LauncherLight` / `LauncherDark`）按系统明暗模式自动切换；Android 13+ 提供 `<monochrome>` 主题图标层。
+- **通知图标**：通知栏左侧使用 Dynamic 渐变版应用图标；聊天消息右侧显示发消息的 AI 头像，无头像的互动通知回退为 Dynamic 渐变图；状态栏小图标为单色 S 剪影（`jpush_notification_icon`）。
+- **开屏**：Android 12+ 系统启动图标设为透明，仅保留品牌底色；随后展示渐变夜空 + SONDER 品牌开屏（静态 HTML 内联样式，React 挂载后淡出）。
+- 更完整的设计决策、素材来源与真机验证见 [docs/BRANDING.md](docs/BRANDING.md)。
 
 ---
 
@@ -571,9 +601,11 @@ pytest backend/tests/test_v3_*.py -q
 pytest backend/tests -q
 ```
 
-- V3 测试：**78 passed**（离线运行，`SE_TTS_FISH=0`）；
+- 全量后端测试：**950 passed**（`pytest backend/tests -q`，离线运行）；
+- 前端：`tsc --noEmit` + **17 files / 109 tests**（vitest）+ `npm run build` 静态导出；
 - 验收清单：[docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md)（场景 A–AF，含截图）；
 - 接口文档：[docs/V3_API.md](docs/V3_API.md)；
+- 移动端真机问题与修复记录：[docs/MOBILE_RELIABILITY_FIXES.md](docs/MOBILE_RELIABILITY_FIXES.md)；
 - 已知历史遗留：少量 V1/V2 深链路用例依赖真实 Key/外网（如多语种 TTS），不在 V3 验收范围。
 
 ### 手机端验收要点
@@ -610,10 +642,15 @@ pytest backend/tests -q
 
 | 文档 | 内容 |
 |---|---|
+| [docs/BRANDING.md](docs/BRANDING.md) | Sonder 品牌：命名、图标（Light/Dark/Dynamic）、开屏、通知图标与真机验证 |
+| [docs/MOBILE_RELIABILITY_FIXES.md](docs/MOBILE_RELIABILITY_FIXES.md) | 真机 9 项问题、推送注册/通知头像、tab 切换、品牌升级与验收记录 |
+| [docs/MOBILE_REBUILD.md](docs/MOBILE_REBUILD.md) | Android 4.x 构建、签名、JPush/厂商推送配置与发版记录 |
 | [docs/V3_API.md](docs/V3_API.md) | V3 接口、数据模型、事件引擎、缓存与文案原则 |
 | [docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md) | V3 验收场景与截图 |
 | [docs/V3_MOBILE.md](docs/V3_MOBILE.md) | 移动端与 APK 说明 |
 | [docs/V3_PLAN.md](docs/V3_PLAN.md) | V3 实施计划 |
+| [docs/REDESIGN_WEB.md](docs/REDESIGN_WEB.md) | Web 重设计说明 |
+| [docs/REDESIGN_WEB_ACCEPTANCE.md](docs/REDESIGN_WEB_ACCEPTANCE.md) | Web 重设计验收报告 |
 | [docs/V2_GUIDE.md](docs/V2_GUIDE.md) | V2 运行 / 验收指南 |
 | [docs/local-mode.md](docs/local-mode.md) | 无服务器本地模式 |
 | [deploy/README.md](deploy/README.md) | 服务器部署细节 |

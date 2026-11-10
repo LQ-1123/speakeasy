@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 #: 地域 → 肤色（与前端 avatar.ts 的 SKIN_BY_REGION 对齐）
 SKIN_BY_REGION: dict[str, tuple[str, ...]] = {
@@ -334,16 +335,50 @@ def avatar_region(country: str) -> str:
 
 
 def persona_avatar_seed(persona: dict) -> str:
-    """Persona 的头像种子：只用 id，保证「同一个人 = 同一张脸」。"""
+    """Persona 头像 URL 的种子：只用 id，保证「同一个人 = 同一张脸」。
+
+    注意：新客户端渲染用的是接口下发的 ``avatar_seed``（与好友行同步，
+    见 ``avatar_style.persona_avatar_meta`` / ``schema.sync_persona_friends``）；
+    这里生成的是服务端 SVG 兜底 URL 的 seed，两者指向同一身份。该 URL 只给
+    老客户端/非 JS 场景用，新客户端优先 avatar_style + avatar_options。
+    """
     return str(persona.get("id") or persona.get("nickname") or "anonymous")
 
 
+def _avatar_render_tag(persona: dict) -> str:
+    """兜底 SVG URL 的版本号：头像部件变化 → URL 变化 → immutable 缓存立刻失效。
+
+    「头像更新慢」还有一层老客户端原因：``/api/v3/avatar/*.svg`` 带
+    ``Cache-Control: immutable``，avatar_options 改了但 URL 不变，浏览器会一直用旧图。
+    把渲染输入（客户端 seed / style / options）摘要进 URL，换头像即换 URL。
+    """
+    client_seed = str(persona.get("avatar_seed") or "").strip()
+    style = str(persona.get("avatar_style") or "").strip()
+    raw = persona.get("avatar_options")
+    if isinstance(raw, str):
+        options = raw
+    else:
+        try:
+            options = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            options = str(raw or "")
+    payload = "|".join((persona_avatar_seed(persona), client_seed, style, options))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+
 def persona_avatar_url(persona: dict) -> str:
-    """Persona 头像 URL（种子化 SVG，带性别/地域/年龄以保持人物属性一致）。"""
+    """Persona 头像 URL —— **只做老客户端/非 JS 场景的兜底**。
+
+    新客户端一律用 ``avatar_style + avatar_options`` 离线渲染 Avataaars
+    （见 ``avatar_style.persona_avatar_meta``），不会再出现「页面一个画风、
+    聊天另一个画风」；这个 SVG 地址画风与 Avataaars 不同，所以不能当主头像来源。
+    URL 里带 ``v=`` 渲染版本：头像部件一变 URL 就变，老客户端的图片缓存随之失效。
+    性别/地域/年龄参数与客户端渲染使用同一份 persona 字段。
+    """
     seed = persona_avatar_seed(persona)
     gender = str(persona.get("gender") or "").strip().lower()
     region = avatar_region(str(persona.get("country") or ""))
-    query = []
+    query = [f"v={_avatar_render_tag(persona)}"]
     if gender in ("male", "female"):
         query.append(f"g={gender}")
     if region:
@@ -354,8 +389,7 @@ def persona_avatar_url(persona: dict) -> str:
         age = 0
     if age:
         query.append(f"a={age}")
-    suffix = ("?" + "&".join(query)) if query else ""
-    return f"/api/v3/avatar/{seed}.svg{suffix}"
+    return f"/api/v3/avatar/{seed}.svg?" + "&".join(query)
 
 
 __all__ = ["age_band", "avatar_region", "avatar_svg", "persona_avatar_seed", "persona_avatar_url"]

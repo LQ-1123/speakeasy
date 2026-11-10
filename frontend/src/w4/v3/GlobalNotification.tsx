@@ -11,9 +11,31 @@ import { callSession } from "./callSession";
 import { useNavigation } from "../navigationStore";
 import { usePreferences } from "./preferences";
 import { notificationFor } from "./notificationPolicy";
-import { playMessageSound, playRequestSound } from "../notify";
+import {
+  alertTextFor,
+  cancelSystemNotification,
+  playMessageSound,
+  playRequestSound,
+  postSystemNotification,
+  type NativeNotificationAlert,
+} from "../notify";
 import type { ClientEvent } from "./clientEvents";
 import "../styles/notifications.css";
+
+/**
+ * 极光推送已注册时，锁屏/通知栏由 JPush 负责（带头像、消息正文与大图样式）。
+ * 此时页面隐藏也交给推送，避免本地兜底和推送各发一条造成重复通知。
+ */
+function pushHandlesBackground(): boolean {
+  try {
+    const raw = window.SpeakEasyNative?.getNotificationStatus?.();
+    if (!raw) return false;
+    const status = JSON.parse(raw) as { pushState?: string };
+    return status.pushState === "registered";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 全局通知：一条紧凑的玻璃质感横幅。
@@ -25,6 +47,8 @@ type BannerKind = "message" | "like" | "comment" | "friend_request" | "social";
 
 interface Banner {
   id: string;
+  /** Backend client-event id; shared with the JPush/local notification for cancel. */
+  eventId: string;
   kind: BannerKind;
   name: string;
   action: string;
@@ -75,6 +99,7 @@ function bannerFromEvent(event: ClientEvent, route: string): Banner {
 
   return {
     id: `${event.id}:${event.sequence}`,
+    eventId: event.id,
     kind,
     name: typeof rawName === "string" ? rawName : "",
     action: ACTION_BY_KIND[kind],
@@ -98,6 +123,7 @@ export function GlobalNotification() {
   const [dockOffset, setDockOffset] = useState(0);
   const timer = useRef<number | undefined>(undefined);
   const friends = useApp((state) => state.friends);
+  const showToast = useApp((state) => state.showToast);
 
   useEffect(() => {
     const receive = (raw: Event) => {
@@ -110,7 +136,20 @@ export function GlobalNotification() {
         Boolean(callSession.getSnapshot()),
       );
       if (!decision) return;
-      setBanner(bannerFromEvent(decision.event, decision.route));
+      const next = bannerFromEvent(decision.event, decision.route);
+      /* 页面不在前台时交给系统通知；前台只显示应用内横幅，两者不重复。 */
+      if (document.visibilityState === "hidden") {
+        /* 推送已注册：JPush 会在通知栏展示「头像 + 消息正文」，本地不再重复发。 */
+        if (pushHandlesBackground()) return;
+        const posted = postSystemNotification({
+          id: decision.event.id,
+          title: next.name || "Sonder",
+          body: next.action,
+          route: decision.route,
+        });
+        if (posted) return;
+      }
+      setBanner(next);
       if (decision.sound) {
         (decision.event.type === "message" ? playMessageSound : playRequestSound)();
       }
@@ -126,6 +165,25 @@ export function GlobalNotification() {
       window.removeEventListener("hashchange", dismiss);
     };
   }, []);
+
+  /* 原生推送/通知事件不是每个都值得弹横幅，但失败原因必须让用户看见。 */
+  useEffect(() => {
+    const onNative = (raw: Event) => {
+      const detail = ((raw as CustomEvent<Record<string, unknown>>).detail ?? {}) as Record<string, unknown>;
+      if (detail.type !== "push" && detail.type !== "notification") return;
+      const alert: NativeNotificationAlert = {
+        type: detail.type,
+        status: String(detail.status ?? ""),
+        message: typeof detail.message === "string" ? detail.message : undefined,
+      };
+      const text = alertTextFor(alert);
+      if (!text) return;
+      const good = alert.status === "granted";
+      showToast(text, good ? "success" : "error");
+    };
+    window.addEventListener("speakeasy:native", onNative);
+    return () => window.removeEventListener("speakeasy:native", onNative);
+  }, [showToast]);
 
   /* 通话最小化时，通话条在文档流顶部；量一下它的实际底边，把横幅放到下面。 */
   useEffect(() => {
@@ -156,11 +214,12 @@ export function GlobalNotification() {
   const friend = banner.friendId
     ? friends.find((item) => item.id === banner.friendId)
     : undefined;
-  const name = banner.name || friend?.name || "SpeakEasy";
+  const name = banner.name || friend?.name || "Sonder";
 
   const open = () => {
     haptic("selection");
     const route = banner.route;
+    cancelSystemNotification(banner.eventId);
     setBanner(null);
     window.location.hash = route;
   };

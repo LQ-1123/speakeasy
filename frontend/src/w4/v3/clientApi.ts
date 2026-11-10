@@ -89,19 +89,55 @@ export interface NativeCallPayload {
   token: string;
 }
 
+export interface NativeNotificationStatus {
+  /** Runtime notification permission (POST_NOTIFICATIONS on Android 13+). */
+  permission: "granted" | "denied";
+  /** NotificationManager.areNotificationsEnabled() — user can still mute the app. */
+  enabled: boolean;
+  channelReady: boolean;
+  /** Whether this build was compiled with a usable JPush app key. */
+  push: boolean;
+  pushEnabled: boolean;
+  pushState: "unconfigured" | "disabled" | "idle" | "registered" | string;
+  registrationId?: string | null;
+  /** Last observed push event, so the settings card can show a real failure. */
+  lastPushStatus?: string;
+  lastPushMessage?: string;
+  lastPushAt?: number;
+  /** JPush long-connection state (diagnostics for registration timeouts). */
+  jpushConnected?: boolean;
+  pushStopped?: boolean;
+  /** Result of the user-triggered JPush host connectivity probe. */
+  networkResult?: string;
+  networkResultAt?: number;
+  /** Build.MANUFACTURER, sent with device registration. */
+  vendor?: string;
+  sound?: boolean;
+  messages?: boolean;
+  interactions?: boolean;
+}
+
 export interface SpeakEasyNative {
   getCapabilities?: () => string;
   /** New bridge: complete light/dark ThemeSnapshot JSON. */
   getThemeSnapshot?: () => string;
   /** Legacy compatibility bridge (accent/onAccent only). */
   getTheme?: () => string;
-  performHaptic?: (type: string) => void;
+  /** Returns true when the platform actually vibrated (native, not just JS). */
+  performHaptic?: (type: string) => boolean;
   getIdentity?: () => string;
   saveIdentity?: (json: string) => void;
   startCall?: (json: string) => void;
   callAction?: (json: string) => void;
   getCallState?: () => string;
   requestPush?: () => void;
+  /** Starts the native JPush host connectivity probe (result arrives via status). */
+  probePushNetwork?: () => void;
+  /** {id,title,body,route}: local system notification; returns whether the OS accepted it. */
+  postNotification?: (json: string) => boolean;
+  getNotificationStatus?: () => string;
+  requestNotificationPermission?: () => boolean;
+  openNotificationSettings?: () => void;
   setPreferences?: (json: string) => void;
   playSound?: (kind: string) => void;
   cancelNotification?: (eventId: string) => void;

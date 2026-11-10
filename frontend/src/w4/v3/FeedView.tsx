@@ -35,7 +35,7 @@ import {
 
 import { playVoiceUrl } from "../apiFacade";
 import { useScrollMemory } from "../useScrollMemory";
-import { personaAvatarSrc } from "../avatar";
+import { resolveAvatar } from "../avatar";
 import { haptic } from "../../theme/haptics";
 
 import type { Route } from "../model";
@@ -521,15 +521,10 @@ export function FeedCard({
   // 用户动态跟随「我」的资料；AI 人物统一用客户端 Avataaars 渲染（与服务端头像二选一）
   const isUserPost = item.kind === "user_post";
   const displayName = isUserPost && myName ? myName : author.nickname;
-  const personaAvatar = isPersona
-    ? personaAvatarSrc(
-        author.avatar_seed || author.id,
-        author.avatar_style,
-        author.avatar_options,
-        author.avatar,
-      )
-    : "";
-  const displayAvatar = isUserPost ? myAvatar || author.avatar : personaAvatar || author.avatar;
+  /* AI 人物统一走 resolveAvatar（seed + style + options → Avataaars，带 LRU 缓存）；
+     用户动态跟随「我」的资料头像，不重新解析，避免发帖人换脸。 */
+  const personaAvatar = isPersona ? resolveAvatar(author) : "";
+  const displayAvatar = isUserPost ? myAvatar || "" : personaAvatar || author.avatar || "";
 
   /* 翻译 / 朗读：信息流是英语内容，翻译走 V2 的 LLM 翻译链路，
      朗读用该人物自己的声线（后端 /persona-posts/{id}/speech 合成并缓存）。 */
@@ -601,10 +596,7 @@ export function FeedCard({
           className="disc-avatar-btn"
         >
           <Avatar
-            src={
-              displayAvatar ||
-              personaAvatarSrc(author.avatar_seed || author.id, author.avatar_style, author.avatar_options, author.avatar)
-            }
+            src={displayAvatar}
             name={displayName}
             size={48}
             round

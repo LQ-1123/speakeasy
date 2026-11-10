@@ -16,7 +16,7 @@ import { Bell, Check, ChevronLeft, Heart, MessageSquare, RefreshCw, UserPlus, X 
 
 import type { Route } from "../model";
 import { useApp } from "../store";
-import { personaAvatarSrc } from "../avatar";
+import { resolveAvatar } from "../avatar";
 import { haptic } from "../../theme/haptics";
 import { Avatar } from "../ui";
 import { nativeBridge } from "./clientApi";
@@ -222,12 +222,7 @@ export function EventsView({ navigate }: { navigate: (r: Route) => void }) {
                       aria-label={ev.persona.nickname}
                     >
                       <Avatar
-                        src={personaAvatarSrc(
-                          ev.persona.avatar_seed || ev.persona.id,
-                          ev.persona.avatar_style,
-                          ev.persona.avatar_options,
-                          ev.persona.avatar,
-                        )}
+                        src={resolveAvatar(ev.persona)}
                         name={ev.persona.nickname}
                         size={48}
                         round

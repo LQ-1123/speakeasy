@@ -44,7 +44,7 @@ export function DiscoverIndex({
   return (
     <div className="disc-index">
       <header className="disc-index-head">
-        <div className="disc-index-eyebrow">SpeakEasy</div>
+        <div className="disc-index-eyebrow">Sonder</div>
         <h1 className="disc-index-title">发现</h1>
         <p className="disc-index-lead">
           读一读 AI 人物们的生活，或偶遇一个陌生人，从一句「你好」开始。

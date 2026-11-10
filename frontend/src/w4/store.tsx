@@ -20,7 +20,7 @@ import {
   type ReactNode,
 } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
-import { mergeMessages } from "./messageCache";
+import { createClientId, mergeMessages, reconcileThread } from "./messageCache";
 import { useNavigation } from "./navigationStore";
 
 
@@ -65,12 +65,16 @@ interface Store {
   profile: Profile;
   toast: Toast | null;
   typing: Record<string, boolean>;
+  /** 首次 apiLoadAll 是否已经结束（成功或失败都算）：避免深链/通知打开时先闪错误页 */
+  booted: boolean;
   /** 哪些消息/动态展开了中文（视图状态，不写进数据） */
   zhOpen: Record<string, boolean>;
   showToast: (text: string, tone?: Toast["tone"]) => void;
   messagesOf: (friendId: string) => Message[];
   friendById: (id: string) => Friend | undefined;
   sendText: (friendId: string, text: string) => void;
+  /** 重发一条发送失败的文字消息：复用原 clientId，服务端幂等不会重复落库 */
+  retryMessage: (messageId: string) => void;
   /** 真实录音发送（走后端 STT + LLM + TTS） */
   sendVoiceBlob: (
     friendId: string,
@@ -157,6 +161,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [expressions, setExpressions] = useState<Expression[]>([]);
   const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], gender: '', nativeLanguage: 'zh', levels: {}, birthday: '' });
   const [bootError, setBootError] = useState("");
+  const [booted, setBooted] = useState(false);
   /* 提示音：跟踪未读数 / 好友申请数变化 */
   const notifyReady = useRef(false);
   const lastUnread = useRef(0);
@@ -185,6 +190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const snap = await apiLoadAll().catch((error) => { setBootError(error instanceof Error ? error.message : "Unable to connect"); return null; });
       if (cancelled) return;
+      setBooted(true);
       if (!snap) return;
       setBootError("");
       setFriends(snap.friends);
@@ -288,19 +294,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void apiMarkThreadRead(friendId);
   }, []);
 
+  /* 正在 POST 的 clientId：防止同一 clientId 被并发重复提交 */
+  const inFlightSends = useRef(new Set<string>());
+  /* 同一好友 600ms 内重复提交同一句（双击/回车连发）直接忽略 */
+  const lastSend = useRef<Record<string, { text: string; at: number }>>({});
+
+  const postText = useCallback(
+    async (friendId: string, text: string, clientId: string, tempId: string) => {
+      if (inFlightSends.current.has(clientId)) return;
+      inFlightSends.current.add(clientId);
+      setTyping((state) => ({ ...state, [friendId]: true }));
+      const fresh = await apiSendText(friendId, text, clientId);
+      inFlightSends.current.delete(clientId);
+      setTyping((state) => ({ ...state, [friendId]: false }));
+      if (!fresh) {
+        /* 失败不再无限「发送中」：保留气泡并标 failed，点重试复用同一 clientId */
+        setMessages((list) =>
+          list.map((m) => (m.clientId === clientId ? { ...m, failed: true } : m)),
+        );
+        showToast("消息发送失败，点气泡旁的「重试」", "error");
+        return;
+      }
+      setMessages((list) => mergeMessages(list, fresh, [tempId]));
+      setFriends((list) => list.map((friend) => friend.id === friendId ? { ...friend, unread: 0 } : friend));
+    },
+    [showToast],
+  );
+
   const sendText = useCallback((friendId: string, text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const now = Date.now();
+    const previous = lastSend.current[friendId];
+    /* 防重入：双击发送 / 输入法回车连发同一句时不产生两条消息 */
+    if (previous && previous.text === trimmed && now - previous.at < 600) return;
+    lastSend.current[friendId] = { text: trimmed, at: now };
+
+    const clientId = createClientId();
     const tempId = nextId("pending");
-    setMessages((list) => [...list, { id: tempId, friendId, from: "me", kind: "text", text: trimmed, time: new Date().toISOString(), read: false }]);
-    setTyping((state) => ({ ...state, [friendId]: true }));
-    void apiSendText(friendId, trimmed).then((fresh) => {
-      setTyping((state) => ({ ...state, [friendId]: false }));
-      if (!fresh) { showToast("Message could not be sent. Please try again.", "error"); return; }
-      setMessages((list) => mergeMessages(list, fresh, [tempId]));
-      setFriends((list) => list.map((friend) => friend.id === friendId ? { ...friend, unread: 0 } : friend));
-    });
-  }, [showToast]);
+    setMessages((list) => [
+      ...list,
+      {
+        id: tempId,
+        clientId,
+        friendId,
+        from: "me",
+        kind: "text",
+        text: trimmed,
+        time: new Date().toISOString(),
+        read: false,
+      },
+    ]);
+    void postText(friendId, trimmed, clientId, tempId);
+  }, [postText]);
+
+  const retryMessage = useCallback((messageId: string) => {
+    const target = messages.find((m) => m.id === messageId);
+    if (!target || target.from !== "me" || !target.clientId || !target.failed) return;
+    setMessages((list) => list.map((m) => (m.id === messageId ? { ...m, failed: false } : m)));
+    lastSend.current[target.friendId] = { text: target.text, at: Date.now() };
+    void postText(target.friendId, target.text, target.clientId, target.id);
+  }, [messages, postText]);
 
   const sendVoiceBlob = useCallback(
     async (
@@ -549,10 +603,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   const reloadAll = useCallback(async () => {
+    setBooted(false);
     const snap = await apiLoadAll().catch((error) => { setBootError(error instanceof Error ? error.message : "Unable to connect"); return null; });
+    setBooted(true);
     if (!snap) return;
     setFriends(snap.friends);
-    setMessages((list) => { const ids = new Set(list.map((item) => item.id)); return [...list, ...snap.messages.filter((item) => !ids.has(item.id))]; });
+    setMessages((list) => mergeMessages(list, snap.messages));
     setRequests(snap.requests ?? []);
     setBootError("");
   }, []);
@@ -560,7 +616,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadThread = useCallback(async (friendId: string) => {
     const fresh = await queryClient.fetchQuery({ queryKey: ["thread", friendId], queryFn: () => apiFetchMessages(friendId), staleTime: 10_000 });
     if (!fresh) { showToast("Could not load conversation", "error"); return; }
-    setMessages((list) => mergeMessages(list, fresh));
+    /* 退出再进入时把本地乐观消息与服务端消息对齐：有同 clientId 的合并，没落库的标失败可重试 */
+    setMessages((list) => reconcileThread(list, fresh, friendId));
     setThreadHasMore((state) => ({ ...state, [friendId]: fresh.length >= 30 }));
   }, [showToast]);
 
@@ -655,11 +712,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profile,
       toast,
       typing,
+      booted,
       zhOpen,
       showToast,
       messagesOf,
       friendById,
       sendText,
+      retryMessage,
       sendVoiceBlob,
       sendImage,
       markRead,
@@ -698,11 +757,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profile,
       toast,
       typing,
+      booted,
       zhOpen,
       showToast,
       messagesOf,
       friendById,
       sendText,
+      retryMessage,
       sendVoiceBlob,
       sendImage,
       markRead,

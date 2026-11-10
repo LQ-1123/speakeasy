@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -10,6 +10,8 @@ __pycache__/
 # 配置与密钥
 .env
 !.env.example
+# 本机部署凭据（SSH 密码），永不入库
+scripts/.deploy-env
 
 # 模型权重（体积巨大，不入库）
 pretrained_models/
@@ -74,6 +76,9 @@ mobile/android/*.jks
 docs/avatar-lab/bundle.js
 
 dist/
+
+# 本地临时工作目录（品牌素材、安装包调试等）
+.tmp-*/
 
 # Local verification workspaces (Windows tools may use the repository as TEMP)
 pytest-of-*/

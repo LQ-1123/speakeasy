@@ -209,6 +209,7 @@ class DB:
                     duration_ms INTEGER DEFAULT 0,
                     suggestion JSON DEFAULT NULL,
                     context TEXT,
+                    client_message_id TEXT DEFAULT NULL,
                     is_read BOOLEAN DEFAULT 1,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -299,6 +300,15 @@ class DB:
             if msg_columns and "image_path" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
                 log.info("migrated messages table: added image_path column")
+            # 幂等发送：客户端消息 id（可为空；为空时唯一索引不生效）
+            if msg_columns and "client_message_id" not in msg_columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN client_message_id TEXT DEFAULT NULL")
+                log.info("migrated messages table: added client_message_id column")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_id"
+                " ON messages(friend_id, client_message_id)"
+                " WHERE client_message_id IS NOT NULL"
+            )
 
             # V3 多用户：用户动态 / 表达本归属
             um_columns = {
@@ -551,6 +561,7 @@ class DB:
         is_read: bool = True,
         context: str | None = None,
         created_at: str | None = None,
+        client_message_id: str | None = None,
     ) -> dict:
         mid = _uuid()
         row = {
@@ -564,18 +575,33 @@ class DB:
             "duration_ms": int(duration_ms or 0),
             "suggestion": _json_dumps(suggestion) if suggestion is not None else None,
             "context": context,
+            "client_message_id": client_message_id or None,
             "is_read": bool(is_read),
             "created_at": created_at or _now_iso(),
         }
         cols = list(row)
+        verb = "INSERT OR IGNORE" if client_message_id else "INSERT"
         with self._lock, self.conn:
-            self.conn.execute(
-                f"INSERT INTO messages ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+            cursor = self.conn.execute(
+                f"{verb} INTO messages ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
                 tuple(row[c] for c in cols),
             )
+            inserted = cursor.rowcount > 0
+        if client_message_id and not inserted:
+            existing = self.get_message_by_client_id(friend_id, client_message_id)
+            if existing is not None:
+                return existing
         msg = self.get_message(mid)
         assert msg is not None
         return msg
+
+    def get_message_by_client_id(self, friend_id: str, client_message_id: str) -> dict | None:
+        """按客户端幂等键找消息（同一好友下唯一）。"""
+        if not client_message_id:
+            return None
+        return self._fetch_one(
+            "messages", "friend_id=? AND client_message_id=?", (friend_id, client_message_id)
+        )
 
     def get_message(self, mid: str) -> dict | None:
         return self._fetch_one("messages", "id=?", (mid,))

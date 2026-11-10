@@ -2,7 +2,7 @@
 
 /** 所有页共用的零件。基础样式在 styles/base.css，这里只管结构。 */
 
-import { type CSSProperties, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { type CSSProperties, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -93,17 +93,12 @@ export function Icon({
 
 /* ------------------------------------------------------------------ 语音 */
 
-/** 固定伪随机波形：同一条消息每次渲染形状一致。 */
-function waveBars(seed: number, count: number): number[] {
-  const out: number[] = [];
-  let s = seed || 7;
-  for (let i = 0; i < count; i += 1) {
-    s = (s * 9301 + 49297) % 233280;
-    out.push(5 + Math.round((s / 233280) * 13));
-  }
-  return out;
-}
-
+/**
+ * 语音条：微信语音条的结构——气泡内左侧时长、右侧扬声器图标，宽度随 1–60s
+ * 从 80px 线性到 220px；整条可点，播放中扬声器图标脉冲。
+ *
+ * 不再画密集波形：定宽容器里波形 + 时长容易互相挤压，窄屏上时长会被右边缘裁切。
+ */
 export function VoiceBar({
   id,
   durationMs,
@@ -115,34 +110,33 @@ export function VoiceBar({
   playing: boolean;
   onToggle: () => void;
 }) {
-  const seed = useMemo(() => id.split("").reduce((a, c) => a + c.charCodeAt(0), 0), [id]);
-  const bars = useMemo(() => waveBars(seed, 17), [seed]);
   return (
     <button
       type="button"
       className={`w4-voice ${playing ? "is-playing" : ""}`}
       style={{ width: voiceBubbleWidth(durationMs) }}
       onClick={onToggle}
+      data-voice-id={id}
       aria-label={playing ? "暂停" : "播放语音"}
+      aria-pressed={playing}
     >
-      <span className="w4-voice-play">
+      <span className="w4-voice-dur">{durationLabel(durationMs)}</span>
+      <span className="w4-voice-spk" aria-hidden>
         {playing ? (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <rect x="2" y="1.5" width="3" height="9" rx="0.6" />
-            <rect x="7" y="1.5" width="3" height="9" rx="0.6" />
+          /* 播放中：暂停条 + 脉冲动画（CSS .is-playing） */
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <rect x="4.2" y="3" width="2.6" height="10" rx="0.9" />
+            <rect x="9.2" y="3" width="2.6" height="10" rx="0.9" />
           </svg>
         ) : (
-          <svg width="13" height="13" viewBox="0 0 12 12" fill="currentColor">
-            <path d="M2.6 1.4v9.2c0 .5.55.8.98.55l7.2-4.6a.65.65 0 000-1.1l-7.2-4.6a.65.65 0 00-.98.55z" />
+          /* 扬声器 + 两道声波：与参考图一致的简洁样式 */
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 5 6.5 8.6H3.6v6.8h2.9L11 19z" fill="currentColor" stroke="none" />
+            <path d="M15.4 8.6a5 5 0 0 1 0 6.8" />
+            <path d="M18.3 6a9 9 0 0 1 0 12" />
           </svg>
         )}
       </span>
-      <span className="w4-wave" aria-hidden>
-        {bars.map((h, i) => (
-          <i key={i} style={{ height: h }} />
-        ))}
-      </span>
-      <span className="w4-voice-dur">{durationLabel(durationMs)}</span>
     </button>
   );
 }

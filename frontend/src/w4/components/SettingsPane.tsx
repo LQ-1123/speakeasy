@@ -10,7 +10,7 @@
  * 主题偏好同时保留原有的后端 preferences 保存调用。
  */
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Bell, ChevronLeft, Info, Palette, ShieldCheck } from "lucide-react";
 
 import { haptic } from "../../theme/haptics";
@@ -20,8 +20,15 @@ import type { ThemePreference } from "../../theme/types";
 import type { Route } from "../model";
 import { Segmented, Switch } from "../ui";
 import { usePreferences } from "../v3/preferences";
-import { nativeBridge } from "../v3/clientApi";
+import { nativeBridge, type ClientPreferences, type NativeNotificationStatus } from "../v3/clientApi";
+import {
+  markPushPrompted,
+  openSystemNotificationSettings,
+  requestSystemNotificationPermission,
+  systemNotificationStatus,
+} from "../notify";
 import "../styles/profile.css";
+import "../styles/notifications.css";
 
 type SettingsSectionKey = "notify" | "appearance" | "privacy" | "about";
 
@@ -100,21 +107,155 @@ function NotifySection() {
   const save = usePreferences((state) => state.save);
   const error = usePreferences((state) => state.error);
   const native = typeof window === "undefined" ? undefined : nativeBridge();
+  const [status, setStatus] = useState<NativeNotificationStatus | null>(null);
+
+  const refresh = useCallback(() => setStatus(systemNotificationStatus()), []);
+
+  useEffect(() => {
+    refresh();
+    /* Native push events (registered / error / denied) arrive as window events;
+       without this the card keeps showing the status captured on mount. */
+    const onNative = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string }>).detail;
+      if (detail?.type === "push") refresh();
+    };
+    window.addEventListener("speakeasy:native", onNative);
+    return () => window.removeEventListener("speakeasy:native", onNative);
+  }, [refresh]);
+
+  /* Registration is asynchronous (JPush + network). Poll while waiting so a
+     success/error eventually replaces 「正在注册推送」 without a manual refresh. */
+  const waiting =
+    Boolean(status) &&
+    Boolean(status?.push) &&
+    status?.pushState !== "registered" &&
+    status?.permission === "granted" &&
+    Boolean(status?.enabled);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(refresh, 2000);
+    const stop = window.setTimeout(() => window.clearInterval(timer), 90_000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
+  }, [waiting, refresh]);
+
+  /** 开关先同步给原生壳，后端保存失败也不会让系统通知行为与界面不一致。 */
+  const syncNative = (patch: Partial<ClientPreferences>) => {
+    try {
+      native?.setPreferences?.(JSON.stringify({ ...preferences, ...patch }));
+    } catch {
+      /* older bridge */
+    }
+  };
+
+  const permissionBlocked = status ? status.permission === "denied" || !status.enabled : false;
+  const pushUnconfigured = status ? !status.push : false;
+  const pushFailed =
+    Boolean(status?.push) &&
+    status?.pushState !== "registered" &&
+    !permissionBlocked &&
+    status?.lastPushStatus === "error";
+  const statusText = !status
+    ? "当前环境不支持系统通知。"
+    : permissionBlocked
+      ? "未开启（通知权限或系统通知总开关被关闭）。"
+      : pushUnconfigured
+        ? "当前安装包未配置推送服务。"
+        : status.pushState === "registered"
+          ? "已开启，推送已注册。"
+          : pushFailed
+            ? "已开启，推送注册失败。"
+            : "已开启，正在注册推送…";
+  const hint = pushUnconfigured
+    ? "应用内提醒仍然可用；锁屏与后台提醒需要在构建时配置 JPUSH_APPKEY / JPUSH_MASTER_SECRET 并重新打包。"
+    : permissionBlocked
+      ? "在系统设置中允许通知后，锁屏和后台提醒才会出现。"
+      : pushFailed
+        ? `${status?.lastPushMessage || "推送注册失败"}（点「重新注册推送」重试，或检查网络后重试）`
+        : null;
+  /* 注册超时时最有用的诊断：极光长连接是否建立。未连接通常意味着手机网络
+     访问不到 sdk.jpush.cn（切换 Wi-Fi/移动网络或代理后再试）。 */
+  const pushDiagnostic =
+    native && status && status.push && status.pushState !== "registered"
+      ? [
+          `通道：${status.jpushConnected ? "已连接" : "未连接"}`,
+          `推送开关：${status.pushStopped ? "已停止" : "运行中"}`,
+          status.jpushConnected ? "" : "（手机可能无法访问极光服务器）",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   return (
     <section>
       <SectionHead title="提醒" desc="只在你允许的范围内推送，随时可以关掉。" />
-      {native?.requestPush ? (
-        <button
-          className="w4-settings-action"
-          onClick={() => {
-            haptic("selection");
-            native.requestPush?.();
-          }}
-        >
-          <Bell size={17} strokeWidth={1.9} />
-          开启系统通知
-        </button>
+      {native ? (
+        <div className="se-push-status">
+          <div className="se-push-status-head">
+            <strong>系统通知</strong>
+            <span className={permissionBlocked || pushUnconfigured ? "is-warn" : "is-ok"}>{statusText}</span>
+          </div>
+          {hint ? <p className="se-push-status-hint">{hint}</p> : null}
+          {pushDiagnostic ? <p className="se-push-status-hint is-diagnostic">{pushDiagnostic}</p> : null}
+          {status?.networkResult ? (
+            <p className="se-push-status-hint is-diagnostic" style={{ whiteSpace: "pre-line" }}>
+              {status.networkResult}
+            </p>
+          ) : null}
+          <div className="se-push-status-actions">
+            {permissionBlocked ? (
+              <button
+                onClick={() => {
+                  haptic("selection");
+                  openSystemNotificationSettings();
+                  refresh();
+                }}
+              >
+                去系统设置
+              </button>
+            ) : pushUnconfigured ? (
+              <button
+                onClick={() => {
+                  haptic("selection");
+                  if (!requestSystemNotificationPermission()) openSystemNotificationSettings();
+                  markPushPrompted();
+                  refresh();
+                }}
+              >
+                允许应用内通知
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  haptic("selection");
+                  native.requestPush?.();
+                  refresh();
+                }}
+              >
+                重新注册推送
+              </button>
+            )}
+            <button
+              onClick={() => {
+                haptic("selection");
+                refresh();
+              }}
+            >
+              刷新状态
+            </button>
+            <button
+              onClick={() => {
+                haptic("selection");
+                native.probePushNetwork?.();
+                window.setTimeout(refresh, 6500);
+              }}
+            >
+              网络检测
+            </button>
+          </div>
+        </div>
       ) : null}
       <SettingRow
         title="好友发来新语音"
@@ -125,6 +266,7 @@ function NotifySection() {
             on={preferences.messages}
             onChange={(messages) => {
               haptic("toggle");
+              syncNative({ messages });
               void save({ messages });
               if (messages) nativeBridge()?.requestPush?.();
             }}
@@ -140,6 +282,7 @@ function NotifySection() {
             on={preferences.interactions}
             onChange={(interactions) => {
               haptic("toggle");
+              syncNative({ interactions });
               void save({ interactions });
             }}
           />
@@ -154,6 +297,7 @@ function NotifySection() {
             on={preferences.sound}
             onChange={(sound) => {
               haptic("toggle");
+              syncNative({ sound });
               void save({ sound });
             }}
           />
@@ -274,17 +418,17 @@ function AboutSection() {
   return (
     <section>
       <SectionHead
-        title="关于 SpeakEasy"
+        title="关于 Sonder"
         desc="一款用来把「不敢开口」变成「顺口说出来」的工具。"
       />
       <div className="w4-about">
         <div className="w4-about-row">
           <span>版本</span>
-          <span>4.0.0</span>
+          <span>4.1.2</span>
         </div>
         <div className="w4-about-row">
           <span>创作者</span>
-          <span>SpeakEasy 团队</span>
+          <span>Sonder 团队</span>
         </div>
         <div className="w4-about-row">
           <span>数据</span>

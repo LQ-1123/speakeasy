@@ -14,6 +14,20 @@ from app.v3.client_api import preferences
 
 log = logging.getLogger(__name__)
 
+# A missing deployment credential is a permanent state until the process restarts
+# with keys; warn once instead of logging on every worker tick.
+_unconfigured_warned = False
+
+
+def mark_push_unconfigured(db) -> int:
+    """Move every pending outbox row to a terminal unconfigured state.
+
+    Idempotent and covers rows created before the credential check was added:
+    the worker must never spin on the same pending rows forever.
+    """
+    with db._lock, db.conn:
+        return db.conn.execute("UPDATE client_events SET push_status='unconfigured' WHERE push_status='pending'").rowcount
+
 
 def collect_events(db) -> int:
     """Transactional high-water marks: retrying collection never duplicates an event.
@@ -30,7 +44,7 @@ def collect_events(db) -> int:
             db.conn.execute("INSERT INTO client_event_state VALUES ('installed_at',?)", (now,))
             return 0
         installed = db.conn.execute("SELECT value FROM client_event_state WHERE key='installed_at'").fetchone()[0]
-        rows = db.conn.execute("""SELECT m.rowid AS source_row,m.*,f.owner_user_id,f.name FROM messages m
+        rows = db.conn.execute("""SELECT m.rowid AS source_row,m.*,f.owner_user_id,f.name,f.avatar_url FROM messages m
              JOIN friends f ON f.id=m.friend_id WHERE m.rowid>? ORDER BY m.rowid LIMIT 500""", (int(state[0]),)).fetchall()
         count = 0
         for row in rows:
@@ -38,7 +52,9 @@ def collect_events(db) -> int:
                 cursor = db.conn.execute("""INSERT OR IGNORE INTO client_events
                     (id,user_id,type,friend_id,payload,created_at,next_attempt) VALUES (?,?,'message',?,?,?,?)""",
                     ('message:'+row['id'],row['owner_user_id'],row['friend_id'],
-                     json.dumps({'name':row['name'],'text':row['transcript'][:180], 'route':'#/chat/'+row['friend_id']},ensure_ascii=False),row['created_at'],time.time()+2))
+                     json.dumps({'name':row['name'],'text':row['transcript'][:180],
+                                 'avatar':row['avatar_url'] or '',
+                                 'route':'#/chat/'+row['friend_id']},ensure_ascii=False),row['created_at'],time.time()+2))
                 count += cursor.rowcount
         if rows:
             db.conn.execute("UPDATE client_event_state SET value=? WHERE key='message_row'", (str(rows[-1]['source_row']),))
@@ -65,11 +81,17 @@ def collect_events(db) -> int:
 
 
 async def dispatch_push(db) -> int:
+    global _unconfigured_warned
     from app.config import get_settings
     settings = get_settings()
     key = (os.getenv('JPUSH_APP_KEY') or settings.jpush_app_key).strip()
     secret = (os.getenv('JPUSH_MASTER_SECRET') or settings.jpush_master_secret).strip()
     if not key or not secret:
+        marked = mark_push_unconfigured(db)
+        if not _unconfigured_warned:
+            _unconfigured_warned = True
+            log.warning('push outbox unconfigured: JPUSH_APP_KEY/JPUSH_MASTER_SECRET are missing; '
+                        '%d pending event(s) marked push_status=unconfigured', marked)
         return 0
     with db._lock:
         rows = [dict(r) for r in db.conn.execute("SELECT * FROM client_events WHERE push_status='pending' AND is_read=0 AND next_attempt<=? ORDER BY sequence LIMIT 20",(time.time(),)).fetchall()]
@@ -91,9 +113,27 @@ async def dispatch_push(db) -> int:
                 continue
             info=json.loads(event['payload'])
             title=info.get('name') or 'SpeakEasy'
-            # Do not send raw conversation contents to the lock-screen by default.
-            alert='发来一条消息' if event['type']=='message' else '有新的动态互动'
-            android={'alert':alert,'title':title,'extras':{'event_id':event['id'],'route':info.get('route','#/events')},'channel_id':'speakeasy_messages' if event['type']=='message' else 'speakeasy_social'}
+            text=(info.get('text') or '').strip()
+            # Real chat apps show the message preview. Keep it single-line and short
+            # so the collapsed notification stays readable on every OEM skin.
+            alert=text or ('发来一条消息' if event['type']=='message' else '有新的动态互动')
+            if len(alert) > 120:
+                alert = alert[:119] + '…'
+            android={'alert':alert,'title':title,'extras':{'event_id':event['id'],'route':info.get('route','#/events')},
+                     'channel_id':'speakeasy_messages' if event['type']=='message' else 'speakeasy_social'}
+            # 通知栏右侧大图：优先发信人/AI 头像；没有形象时用 Dynamic 渐变图标。
+            avatar=(info.get('avatar') or '').strip()
+            base=(os.getenv('PUBLIC_BASE_URL') or settings.public_base_url).rstrip('/')
+            if avatar.startswith('http'):
+                avatar_png=avatar
+            elif avatar:
+                avatar_png=base + avatar.replace('.svg', '.png')
+            else:
+                avatar_png=base + '/icons/brand-512.png'
+            android['large_icon']=avatar_png
+            if event['type']=='message' and text:
+                android['style']=1
+                android['big_text']=text
             if not pref['sound']:
                 android['channel_id'] += '_silent'
             request={'platform':'android','audience':{'registration_id':devices},

@@ -160,18 +160,210 @@ export function renderAvataaars(seed: string, options?: Record<string, unknown>)
   }
 }
 
-/** Persona 头像：有侧写部件就用 Avataaars，否则回落到兜底 URL */
+/* ------------------------------------------------------------------ */
+/* 统一头像解析（好友 / 人物 / 动态作者 / 好友申请 / 通知都走这里）        */
+/* ------------------------------------------------------------------ */
+
+/** 头像解析输入：friends 行 / persona / 动态作者 / 通知人物的字段并集 */
+export type AvatarRaw = {
+  /** friends 行 id 或 persona id —— 没有 avatar_seed 时的稳定兜底种子 */
+  id?: string | null;
+  /** friends 行叫 name，persona/作者叫 nickname */
+  name?: string | null;
+  nickname?: string | null;
+  gender?: string | null;
+  /** persona 用 country，friends 行用 nationality */
+  country?: string | null;
+  nationality?: string | null;
+  /** 兜底图：friends 行是 avatar_url，persona 是 avatar（服务端 SVG，只给老客户端/非 JS 场景） */
+  avatar?: string | null;
+  avatar_url?: string | null;
+  avatar_seed?: string | null;
+  avatar_style?: string | null;
+  avatar_options?: unknown;
+};
+
+const AVATAR_CACHE_LIMIT = 256;
+const AVATAR_CACHE = new Map<string, string>();
+const avatarStats = { renders: 0, hits: 0, misses: 0 };
+
+function cacheGet(key: string): string | undefined {
+  const value = AVATAR_CACHE.get(key);
+  if (value === undefined) return undefined;
+  /* LRU：命中后挪到队尾 */
+  AVATAR_CACHE.delete(key);
+  AVATAR_CACHE.set(key, value);
+  avatarStats.hits += 1;
+  return value;
+}
+
+function cacheSet(key: string, value: string): void {
+  AVATAR_CACHE.set(key, value);
+  while (AVATAR_CACHE.size > AVATAR_CACHE_LIMIT) {
+    const oldest = AVATAR_CACHE.keys().next().value;
+    if (oldest === undefined) break;
+    AVATAR_CACHE.delete(oldest);
+  }
+}
+
+/** 测试/调试用：缓存统计（renders = DiceBear 真实渲染次数） */
+export function avatarCacheStats(): {
+  renders: number;
+  hits: number;
+  misses: number;
+  cacheSize: number;
+} {
+  return { ...avatarStats, cacheSize: AVATAR_CACHE.size };
+}
+
+/** 清空缓存与统计（测试用） */
+export function clearAvatarCache(): void {
+  AVATAR_CACHE.clear();
+  avatarStats.renders = 0;
+  avatarStats.hits = 0;
+  avatarStats.misses = 0;
+}
+
+/** avatar_options 既可能是 DB 里的 JSON 字符串，也可能已经是对象 */
+export function normalizeAvatarOptions(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const out = parsed as Record<string, unknown>;
+  return Object.keys(out).length ? out : null;
+}
+
+/** 稳定序列化：部件集合相同就得到相同缓存键（不同来源的 JSON key 顺序可能不同） */
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) out[key] = canonicalJson(source[key]);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * 稳定种子：显式 avatar_seed 优先，其次 id，最后名字。
+ *
+ * 服务端保证 friend 行与 persona 的 avatar_seed 一致（见 `_friend_row_for_persona`
+ * 与 `sync_persona_friends`），所以同一个人的两种 payload 会得到同一个 seed；
+ * 老 payload 缺 avatar_seed 时退回 id，至少保证「同一份 payload 内稳定」。
+ * 预览/老数据里 persona id 可能形如 `persona-3`，而好友行 avatar_seed 就是 `3`：
+ * 这里把 `persona-<key>` 归一到 `<key>`，两种 payload 才能命中同一个缓存 key。
+ */
+export function avatarSeedOf(raw: AvatarRaw): string {
+  const explicit = String(raw.avatar_seed ?? "").trim();
+  if (explicit) return explicit;
+  const id = String(raw.id ?? "").trim();
+  if (id) return normalizeIdSeed(id);
+  const name = String(raw.name ?? raw.nickname ?? "").trim();
+  if (!name) return "";
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || name;
+}
+
+function normalizeIdSeed(id: string): string {
+  const prefixed = /^persona-(.+)$/.exec(id);
+  return prefixed ? prefixed[1] : id;
+}
+
+function avatarFallbackOf(raw: AvatarRaw): string {
+  return String(raw.avatar ?? raw.avatar_url ?? "").trim();
+}
+
+function avatarGenderOf(raw: AvatarRaw): AvatarGender {
+  const gender = String(raw.gender ?? "").trim().toLowerCase();
+  return gender === "male" || gender === "female" ? gender : "";
+}
+
+/**
+ * 统一头像解析器：好友列表、聊天、通讯录、信息流作者、人物主页、偶遇、
+ * 好友申请、通知头像全部走这一个入口。
+ *
+ * 为什么必须只有一个入口
+ * ----------------------
+ * 以前聊天的 `friend.avatar` 由 mapFriend 渲染 Avataaars，但 `assignAvatars`
+ * 又用 diceAvatar（personas 画风）把它覆盖；信息流/主页各自调 personaAvatarSrc
+ * —— 同一个人在不同页面变成两张脸，而且每次好友轮询都重新跑 DiceBear（慢、闪）。
+ *
+ * 规则（确定性、离线，不请求任何图片服务）：
+ *   1. 有 avatar_options  → Avataaars + 这组部件（服务端侧写结果，跨页面一致）
+ *   2. 有 seed/id 无部件  → friendlyAvataaarsOptions(seed, gender)，统一 Avataaars 画风
+ *   3. 连 seed 都没有     → 服务端兜底 URL（老数据）→ diceAvatar 插画兜底
+ *
+ * 缓存 key = seed + style + gender + options（+ 兜底 URL），命中返回同一个字符串：
+ * React 轮询时 `<img src>` 不变 → 不重载图片、不闪；部件变了 key 变 → 立刻更新。
+ */
+export function resolveAvatar(raw?: AvatarRaw | null): string {
+  if (!raw) return "";
+  const seed = avatarSeedOf(raw);
+  const style = String(raw.avatar_style ?? "").trim();
+  const gender = avatarGenderOf(raw);
+  const options = normalizeAvatarOptions(raw.avatar_options);
+  const fallback = avatarFallbackOf(raw);
+  const key = JSON.stringify([
+    seed,
+    style,
+    gender,
+    options ? canonicalJson(options) : null,
+    fallback,
+  ]);
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+  avatarStats.misses += 1;
+
+  let resolved = "";
+  if (seed) {
+    /* 1：有服务端侧写部件 → 直接用（跨页面 / 跨端一致） */
+    if (options) {
+      resolved = renderAvataaars(seed, options);
+      avatarStats.renders += 1;
+    }
+    /* 2：没有部件（或部件非法渲染失败）→ 确定性友好部件，仍是 Avataaars 画风 */
+    if (!resolved) {
+      resolved = renderAvataaars(seed, friendlyAvataaarsOptions(seed, gender));
+      avatarStats.renders += 1;
+    }
+  }
+  if (!resolved) resolved = fallback;
+  if (!resolved) {
+    /* 3：什么都没有才回落 personas 插画，不再把服务端 SVG 当主头像 */
+    resolved = diceAvatar(
+      seed || "anonymous",
+      gender,
+      avatarRegionOf(String(raw.country ?? raw.nationality ?? "")),
+    );
+    avatarStats.renders += 1;
+  }
+  cacheSet(key, resolved);
+  return resolved;
+}
+
+/** 兼容老调用点：persona 头像（现在统一走 resolveAvatar） */
 export function personaAvatarSrc(
   seed: string,
   style?: string,
   options?: Record<string, unknown>,
   fallback?: string,
 ): string {
-  if (style === "avataaars" && options && Object.keys(options).length > 0) {
-    const rendered = renderAvataaars(seed, options);
-    if (rendered) return rendered;
-  }
-  return fallback || "";
+  return resolveAvatar({
+    id: seed,
+    avatar_seed: seed,
+    avatar_style: style,
+    avatar_options: options,
+    avatar: fallback,
+  });
 }
 
 export function avatarRegionOf(country: string): string {

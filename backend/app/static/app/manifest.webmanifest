@@ -1,7 +1,7 @@
 {
-  "name": "SpeakEasy · 和世界聊聊天",
-  "short_name": "SpeakEasy",
-  "description": "异步语音条的 AI 语伴：捏一个外国朋友，用语音条聊天，顺手把表达变地道。",
+  "name": "Sonder · Every life is a world",
+  "short_name": "Sonder",
+  "description": "Sonder：异步语音条的 AI 语伴。捏一个外国朋友，用语音条聊天，顺手把表达变地道。",
   "id": "/",
   "start_url": "/",
   "scope": "/",

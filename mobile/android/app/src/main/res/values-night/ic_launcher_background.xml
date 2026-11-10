@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sonder 深色主题下的自适应图标底色（与图标深色版一致）。 -->
+    <color name="ic_launcher_background">#17171E</color>
+</resources>

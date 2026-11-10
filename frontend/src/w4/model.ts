@@ -88,6 +88,10 @@ export interface Message {
   time: string;
   suggestion?: Suggestion;
   read?: boolean;
+  /** 客户端生成的消息 id：把乐观消息和服务端消息对齐，避免重复发送/重复显示 */
+  clientId?: string;
+  /** 乐观消息发送失败：气泡显示「重试」，而不是永远停在「发送中」 */
+  failed?: boolean;
 }
 
 export interface MomentComment {

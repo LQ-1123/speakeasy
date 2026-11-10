@@ -1,67 +1,18 @@
-import {
-  Hct,
-  MaterialDynamicColors,
-  SchemeTonalSpot,
-  argbFromHex,
-  hexFromArgb,
-} from "@material/material-color-utilities";
-
+/**
+ * Compatibility facade for the image-theme worker.
+ *
+ * The single source of truth for seed → Material 3 palettes is
+ * `palette-from-seed.ts` (shared by the dynamic system theme and the local
+ * image theme). These wrappers keep the worker's older `dark: boolean` /
+ * `(seed, contrast)` signatures without duplicating the role/tone mapping.
+ */
+import { paletteFromSeed, palettesFromSeed } from "./palette-from-seed";
 import type { ThemeColors } from "./types";
 
-const METHODS = {
-  primary: "primary",
-  onPrimary: "onPrimary",
-  primaryContainer: "primaryContainer",
-  onPrimaryContainer: "onPrimaryContainer",
-  secondary: "secondary",
-  onSecondary: "onSecondary",
-  secondaryContainer: "secondaryContainer",
-  onSecondaryContainer: "onSecondaryContainer",
-  tertiary: "tertiary",
-  onTertiary: "onTertiary",
-  tertiaryContainer: "tertiaryContainer",
-  onTertiaryContainer: "onTertiaryContainer",
-  error: "error",
-  onError: "onError",
-  errorContainer: "errorContainer",
-  onErrorContainer: "onErrorContainer",
-  surface: "surface",
-  onSurface: "onSurface",
-  surfaceVariant: "surfaceVariant",
-  onSurfaceVariant: "onSurfaceVariant",
-  surfaceDim: "surfaceDim",
-  surfaceBright: "surfaceBright",
-  surfaceContainerLowest: "surfaceContainerLowest",
-  surfaceContainerLow: "surfaceContainerLow",
-  surfaceContainer: "surfaceContainer",
-  surfaceContainerHigh: "surfaceContainerHigh",
-  surfaceContainerHighest: "surfaceContainerHighest",
-  outline: "outline",
-  outlineVariant: "outlineVariant",
-  inverseSurface: "inverseSurface",
-  inverseOnSurface: "inverseOnSurface",
-  inversePrimary: "inversePrimary",
-  scrim: "scrim",
-  shadow: "shadow",
-  surfaceTint: "surfaceTint",
-} as const satisfies Record<keyof ThemeColors, string>;
-
 export function paletteFromSource(sourceHex: string, dark: boolean, contrast = 0): ThemeColors {
-  const scheme = new SchemeTonalSpot(Hct.fromInt(argbFromHex(sourceHex)), dark, contrast);
-  const dynamic = new MaterialDynamicColors();
-  const colors = {} as ThemeColors;
-  for (const [role, method] of Object.entries(METHODS) as Array<
-    [keyof ThemeColors, keyof MaterialDynamicColors]
-  >) {
-    const callback = dynamic[method] as unknown as () => { getArgb: (s: SchemeTonalSpot) => number };
-    colors[role] = hexFromArgb(callback().getArgb(scheme));
-  }
-  return colors;
+  return paletteFromSeed(sourceHex, dark ? "dark" : "light", contrast);
 }
 
 export function palettesFromSource(sourceHex: string, contrast = 0) {
-  return {
-    light: paletteFromSource(sourceHex, false, contrast),
-    dark: paletteFromSource(sourceHex, true, contrast),
-  };
+  return palettesFromSeed(sourceHex, contrast);
 }

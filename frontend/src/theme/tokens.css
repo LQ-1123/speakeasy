@@ -7,7 +7,12 @@
 :root {
   color-scheme: light;
 
-  /* --- fallback palette: Honor 500 Pro home wallpaper ------------------- */
+  /* --- pre-hydration fallback palette: Honor 500 Pro home wallpaper ------
+     Only painted before the bootstrap script / ThemeProvider resolve the live
+     palette. ThemeProvider.applyThemeToRoot() overwrites every --md-* role
+     (including all containers) from the current ThemeSnapshot, so a wallpaper
+     accent change recolours bubbles, pills, tags, avatar wells and banners.
+     Do not add one-off accent colours here or in component CSS. */
   --md-primary: #4c5e8b;
   --md-on-primary: #f9f8ff;
   --md-primary-container: #b9cbff;
@@ -24,6 +29,10 @@
   --md-on-error: #ffffff;
   --md-error-container: #ffdad6;
   --md-on-error-container: #93000a;
+  /* --- fixed status colours: intentionally NOT wallpaper-derived ---------
+     --md-success* marks presence/confirmed states; it must stay green even when
+     the wallpaper accent is brown/red. Everything accent-like must use the
+     --md-primary* / --md-secondary* / --md-tertiary* / surface roles above. */
   --md-success: #2e7d4f;
   --md-on-success: #ffffff;
   --md-success-container: #b7f2c8;
@@ -152,6 +161,9 @@
   --w-bubble-me-strong: color-mix(in srgb, var(--md-primary-container) 78%, var(--md-primary));
   --w-red: var(--md-error);
   --w-red-soft: var(--md-error-container);
+  /* Non-accent status colours: deliberately fixed (warnings keep their own
+     meaning when the wallpaper changes). Currently unused by w4/styles; kept as
+     a semantic alias so status UI never falls back to a raw accent colour. */
   --w-amber: #8a5a00;
   --w-amber-soft: #ffdf9e;
   --w-shadow-1: var(--shadow-1);

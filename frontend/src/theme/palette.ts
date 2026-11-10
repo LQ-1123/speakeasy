@@ -192,7 +192,7 @@ export function fallbackSnapshot(revision = 1): ThemeSnapshot {
   return makeSnapshot({
     revision,
     source: "web-fallback",
-    label: "SpeakEasy 静态主题",
+    label: "Sonder 静态主题",
     palettes: HONOR_PALETTES,
     capabilities: {
       systemSemanticRoles: false,

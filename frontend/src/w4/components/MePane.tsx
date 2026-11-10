@@ -191,8 +191,8 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
                 <span className="w4-me-row-icon">
                   <Info size={18} strokeWidth={1.8} />
                 </span>
-                <span className="w4-me-row-label">关于 SpeakEasy</span>
-                <span className="w4-me-row-value">4.0.0</span>
+                <span className="w4-me-row-label">关于 Sonder</span>
+                <span className="w4-me-row-value">4.1.2</span>
                 <ChevronRight size={16} className="w4-me-row-chevron" />
               </button>
             </div>

@@ -8,7 +8,7 @@
  */
 
 import type { Expression, Friend, Message, Moment, Profile } from "./model";
-import { avatarRegionOf, diceAvatar, profileAvatar, renderAvataaars } from "./avatar";
+import { profileAvatar, resolveAvatar } from "./avatar";
 import { clientApi } from "./v3/clientApi";
 import { queryClient } from "./queryClient";
 
@@ -27,21 +27,21 @@ export const NAME_GENDER: Record<string, "male" | "female"> = {
 };
 
 /**
- * 头像：DiceBear personas 现场生成（详见 avatar.ts）。
+ * 头像补齐（老调用点保留）：**只填空值，绝不覆盖已解析好的头像**。
  *
- * 每个人固定拿「自己 id 对应的那张插画脸」：不需要照片池，
- * 也不会出现「两个人共用一张脸」或「性别不对」的问题。
+ * 以前的实现会把 mapFriend 刚渲染好的 Avataaars data-uri 当成「老图片」，
+ * 再用 diceAvatar（personas 画风）覆盖 —— 这是「同一个人两种画风」的直接原因之一。
+ * 现在头像统一由 resolveAvatar 解析（带缓存），这里只兜底完全没有头像字段的行。
  */
 export function assignAvatars(list: Friend[]): void {
   for (const f of list) {
-    /* V3：来自 Persona 的好友自带真实插画头像（/mock/avatars/*.jpg），不要覆盖 */
-    if (f.avatar && (f.avatar.startsWith("/") || /^https?:/i.test(f.avatar))) continue;
-    const slug = (f.name || "").toLowerCase().replace(/[^a-z]/g, "");
-    const gender =
-      (f.gender === "male" || f.gender === "female")
-        ? (f.gender as "male" | "female")
-        : NAME_GENDER[slug] ?? "";
-    f.avatar = diceAvatar(f.id || f.name, gender, avatarRegionOf(f.country || ""));
+    if (f.avatar) continue;
+    f.avatar = resolveAvatar({
+      id: f.id,
+      name: f.name,
+      gender: f.gender,
+      country: f.country,
+    });
   }
 }
 
@@ -133,38 +133,25 @@ function mapFriend(raw: RawFriend): Friend {
   const turns = Number(raw.total_turns ?? 0);
   const lastAt = (raw.last_interaction_at as string) ?? null;
   const localTime = String(raw.local_time ?? "");
-  const rawAvatar = String(raw.avatar_url ?? "").trim();
-  const rawStyle = String(raw.avatar_style ?? "").trim();
-  let rawOptions: Record<string, unknown> | undefined;
-  if (raw.avatar_options) {
-    try {
-      rawOptions =
-        typeof raw.avatar_options === "string"
-          ? (JSON.parse(raw.avatar_options) as Record<string, unknown>)
-          : (raw.avatar_options as Record<string, unknown>);
-    } catch {
-      rawOptions = undefined;
-    }
-  }
-  const renderedPersonaAvatar =
-    rawStyle === "avataaars" && rawOptions && Object.keys(rawOptions).length > 0
-      ? renderAvataaars(String(raw.avatar_seed || id || name), rawOptions)
-      : "";
+  const rawAvatar = String(raw.avatar_url ?? raw.avatar ?? "").trim();
+  /* 统一解析：好友行 / 人物 payload 用同一套 seed+style+options；
+     同一个人（后端已保证 friend 行复制 persona 的 avatar 元数据）得到同一个字符串。
+     带 LRU 缓存 → 轮询时同一 key 返回同一个 data-uri，React 不重载图片、不闪不慢。 */
+  const avatar = resolveAvatar({
+    id,
+    name,
+    gender: String(raw.gender ?? ""),
+    country: String(raw.nationality ?? raw.country ?? ""),
+    avatar: rawAvatar ? (mediaUrl(rawAvatar) ?? rawAvatar) : "",
+    avatar_seed: String(raw.avatar_seed ?? ""),
+    avatar_style: String(raw.avatar_style ?? ""),
+    avatar_options: raw.avatar_options,
+  });
   return {
     id,
     name,
     gender: String(raw.gender ?? ""),
-    avatar:
-      renderedPersonaAvatar ||
-      (rawAvatar
-        ? mediaUrl(rawAvatar) ?? rawAvatar
-        : diceAvatar(
-            id || name,
-            raw.gender === "male" || raw.gender === "female"
-              ? (String(raw.gender) as "male" | "female")
-              : NAME_GENDER[(name || "").toLowerCase().replace(/[^a-z]/g, "")] ?? "",
-            avatarRegionOf(String(raw.nationality || raw.country || "")),
-          )),
+    avatar,
     city: String(raw.city ?? ""),
     country,
     flag: flagOf(country),
@@ -222,6 +209,8 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
     time: String(raw.created_at ?? new Date().toISOString()),
     read: Boolean(raw.is_read),
   };
+  /* 客户端消息 id：让乐观消息与服务端消息在同一个 clientId 下对齐（防止重复气泡/重复发送） */
+  if (raw.client_message_id) mapped.clientId = String(raw.client_message_id);
   if (typeof raw.duration_ms === "number") mapped.durationMs = raw.duration_ms;
   if (raw.audio_url) mapped.audio = mediaUrl(String(raw.audio_url));
   if (raw.image_url) mapped.image = mediaUrl(String(raw.image_url));
@@ -274,7 +263,7 @@ export function mapClientBootstrap(boot: import("./v3/clientApi").ClientBootstra
   const rawFriends = (boot.friends as RawFriend[]) ?? [];
 
   const friends = rawFriends.map(mapFriend);
-  assignAvatars(friends); // 头像整批分配（两阶段，避免抢照片）
+  assignAvatars(friends); // 只兜底没有头像字段的行；mapFriend 已统一解析好（不会被覆写）
 
   // 每位好友取最近 20 条；并发但限制在 4 个一组，避免瞬间打满
   const messages: Message[] = (boot.conversations ?? []).flatMap((conversation) => {
@@ -325,11 +314,15 @@ export function mapClientBootstrap(boot: import("./v3/clientApi").ClientBootstra
 export async function sendText(
   friendId: string,
   text: string,
+  clientMessageId?: string,
 ): Promise<Message[] | null> {
+  const payload: Record<string, unknown> = { text, context: null };
+  /* 幂等键：同一 clientMessageId 重试时后端只落一条用户消息 */
+  if (clientMessageId) payload.client_message_id = clientMessageId;
   const ok = await getJson(`${BASE}/chat/${friendId}/text`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, context: null }),
+    body: JSON.stringify(payload),
   });
   if (!ok) return null;
   const r = await getJson<{ messages?: RawMessage[] }>(

@@ -613,83 +613,111 @@
   color: color-mix(in srgb, currentColor 82%, transparent);
 }
 
-/* 语音条 */
+/* 语音条：微信式「时长在左、扬声器/声波在右」，宽度由 format.voiceBubbleWidth 控制。
+   定宽容器里不再塞密集波形：窄屏上波形 + 时长会互相挤压，时长会被右边缘裁切。 */
 .w4-voice {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
   max-width: 100%;
-  min-height: 34px;
+  min-height: 30px;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.w4-voice-play {
-  display: grid;
-  flex: none;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--md-on-surface) 7%, transparent);
-  color: var(--md-on-surface-variant);
-  transition:
-    background-color var(--dur-fast) var(--ease-standard),
-    color var(--dur-fast) var(--ease-standard),
-    transform var(--dur-press) var(--ease-standard);
+.w4-bubble.is-voice {
+  max-width: 100%;
+  padding: 9px 12px;
 }
 
-.w4-voice-play:hover {
-  background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
-  color: var(--md-on-surface);
-}
-
-.w4-voice-play:active {
-  transform: scale(0.94);
-}
-
-.w4-msg.is-me .w4-voice-play {
-  background: color-mix(in srgb, var(--md-on-primary-container) 12%, transparent);
+.w4-msg.is-me .w4-bubble.is-voice {
+  background: var(--md-primary-container);
   color: var(--md-on-primary-container);
 }
 
-.w4-wave {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  height: 22px;
-  color: currentColor;
-}
-
-.w4-wave i {
-  display: block;
-  width: 2.5px;
-  border-radius: var(--shape-full);
-  background: currentColor;
-  opacity: 0.32;
-  transition: opacity var(--dur-fast) var(--ease-standard);
-}
-
-.w4-voice.is-playing .w4-wave i {
-  opacity: 0.72;
-  animation: chat-wave 1.1s var(--ease-standard) infinite;
-}
-
-.w4-voice.is-playing .w4-wave i:nth-child(3n) {
-  animation-delay: 0.12s;
-}
-
-.w4-voice.is-playing .w4-wave i:nth-child(3n + 1) {
-  animation-delay: 0.24s;
+.w4-voice:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: var(--shape-sm);
 }
 
 .w4-voice-dur {
-  flex: none;
-  color: color-mix(in srgb, currentColor 68%, transparent);
-  font-size: var(--text-xs);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: color-mix(in srgb, currentColor 84%, transparent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.w4-voice-spk {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  color: color-mix(in srgb, currentColor 82%, transparent);
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-press) var(--ease-standard);
+}
+
+.w4-voice:hover .w4-voice-spk {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: currentColor;
+}
+
+.w4-voice:active .w4-voice-spk {
+  transform: scale(0.92);
+}
+
+/* 播放中：图标脉冲（参考微信语音条） */
+.w4-voice.is-playing .w4-voice-spk {
+  color: currentColor;
+  animation: chat-voice-pulse 1.1s var(--ease-standard) infinite;
+}
+
+@keyframes chat-voice-pulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+/* 发送失败：保留气泡并给出「重试」，不再永远停在「发送中」 */
+.w4-bubble.is-failed {
+  background: color-mix(in srgb, var(--md-error) 8%, var(--md-surface-container-high));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-error) 26%, transparent);
+}
+
+.w4-msg.is-me .w4-bubble.is-failed {
+  background: color-mix(in srgb, var(--md-error) 10%, var(--md-primary-container));
+  color: var(--md-on-primary-container);
+}
+
+.w4-mini-btn.is-retry {
+  color: var(--md-error);
+  font-weight: var(--weight-semibold);
+}
+
+.w4-msg-meta.is-failed {
+  color: var(--md-error);
 }
 
 .w4-voice-text {
@@ -914,8 +942,12 @@
 /* --------------------------------------------------------------- composer */
 
 .w4-composer {
+  position: relative;
+  z-index: 6;
   flex: none;
-  padding: 8px 16px calc(12px + var(--safe-bottom));
+  /* 键盘弹出时安全区已被 IME 覆盖：safe-bottom 与 --ime-height 不能叠加，
+     否则 composer 会被顶高（大空白）或连同键盘一起把输入框埋掉 */
+  padding: 8px 16px calc(12px + max(0px, var(--safe-bottom) - var(--ime-height, 0px)));
   background: transparent;
 }
 
@@ -2277,7 +2309,7 @@
   }
 
   .w4-composer {
-    padding: 6px 10px calc(8px + var(--safe-bottom));
+    padding: 6px 10px calc(8px + max(0px, var(--safe-bottom) - var(--ime-height, 0px)));
   }
 
   .w4-photo-sheet {
@@ -2383,5 +2415,10 @@
 
   .w4-row-preview {
     font-size: 13px;
+  }
+
+  /* 320px 上 60s 语音条要能吃下 220px：气泡列稍微放宽，避免宽度被夹到溢出 */
+  .w4-msg-col {
+    max-width: 84%;
   }
 }

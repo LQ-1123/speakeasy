@@ -12,6 +12,10 @@ import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
+import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
@@ -29,6 +33,8 @@ import java.util.Iterator;
 
 public class MainActivity extends BridgeActivity {
     private static volatile MainActivity active;
+    private static volatile boolean pageReady;
+    private static volatile boolean foreground;
     private NativeIdentityStore identities;
     private volatile JSONObject callState = new Json().put("state", "idle");
     private String themePreference = "system";
@@ -54,7 +60,10 @@ public class MainActivity extends BridgeActivity {
         webView = getBridge() == null ? null : getBridge().getWebView();
         if (webView != null) {
             webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
-            webView.setBackgroundColor(Color.TRANSPARENT);
+            /* WebView 首帧前会露底色：用品牌开屏同色，避免白屏闪一下。 */
+            boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            webView.setBackgroundColor(night ? 0xFF12131B : 0xFFF3F1FA);
             webView.addJavascriptInterface(new NativeBridge(), "SpeakEasyNative");
             webView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
@@ -65,6 +74,7 @@ public class MainActivity extends BridgeActivity {
                 @Override public void onPageFinished(WebView view, String url) {
                     super.onPageFinished(view, url);
                     if (url.startsWith("https://localhost")) {
+                        pageReady = true;
                         handleNotificationIntent(getIntent());
                         dispatchNativeEvent(MainActivity.this, "call", CallService.snapshot());
                         schedulePushDelivery();
@@ -131,9 +141,12 @@ public class MainActivity extends BridgeActivity {
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
     }
 
-    static void dispatchNativeEvent(Context context, String type, JSONObject value) {
+    static boolean isPageReady() { return pageReady && active != null; }
+    static boolean isForeground() { return foreground && active != null; }
+
+    static boolean dispatchNativeEvent(Context context, String type, JSONObject value) {
         MainActivity activity = active;
-        if (activity == null) return;
+        if (activity == null) return false;
         activity.runOnUiThread(() -> {
             Json detail = new Json().put("type", "event".equals(type) ? "call" : type);
             if ("event".equals(type)) detail.put("event", value).put("state", CallService.snapshot());
@@ -141,6 +154,7 @@ public class MainActivity extends BridgeActivity {
             else { Iterator<String> keys = value.keys(); while (keys.hasNext()) { String key = keys.next(); detail.put(key, value.opt(key)); } }
             activity.dispatch(detail);
         });
+        return true;
     }
 
     private void dispatch(JSONObject detail) {
@@ -151,8 +165,13 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void handleNotificationIntent(Intent intent) {
-        String route = intent == null ? null : intent.getStringExtra("route");
-        if (route != null && route.startsWith("#/") && route.length() < 512) {
+        if (intent == null) return;
+        String eventId = intent.getStringExtra("event_id");
+        if (eventId != null && !eventId.isEmpty()) {
+            LocalNotifications.cancel(this, eventId);
+        }
+        String route = NativePolicy.routeOr(intent.getStringExtra("route"), null);
+        if (route != null) {
             pendingRoute = route; routeAttempts = 0;
             getWindow().getDecorView().removeCallbacks(deliverRoute);
             getWindow().getDecorView().post(deliverRoute);
@@ -176,16 +195,43 @@ public class MainActivity extends BridgeActivity {
         });
     }};
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); handleNotificationIntent(intent); }
-    @Override public void onConfigurationChanged(Configuration configuration) { super.onConfigurationChanged(configuration); updateSystemBars(); dispatch(new Json().put("type", "theme")); }
-    @Override public void onResume() { super.onResume(); active = this; UpdateChecker.onResume(this); handleNotificationIntent(getIntent()); schedulePushDelivery(); }
-    @Override public void onDestroy() { if (active == this) active = null; getWindow().getDecorView().removeCallbacks(deliverRoute); getWindow().getDecorView().removeCallbacks(deliverPush); super.onDestroy(); }
+    @Override public void onConfigurationChanged(Configuration configuration) { super.onConfigurationChanged(configuration); LaunchIcon.apply(this); updateSystemBars(); dispatch(new Json().put("type", "theme")); }
+    @Override public void onResume() {
+        super.onResume();
+        active = this; foreground = true;
+        UpdateChecker.onResume(this);
+        /* Android 12+ 换壁纸后系统 accent 变化不一定有 configuration change：
+           每次回前台都让前端重新采样一次系统主题（getTheme 每次都实时读 resource）。 */
+        dispatch(new Json().put("type", "theme"));
+        handleNotificationIntent(getIntent());
+        schedulePushDelivery();
+    }
+    @Override public void onPause() { foreground = false; super.onPause(); }
+    @Override public void onDestroy() { if (active == this) { active = null; foreground = false; } getWindow().getDecorView().removeCallbacks(deliverRoute); getWindow().getDecorView().removeCallbacks(deliverPush); super.onDestroy(); }
 
     public final class NativeBridge {
         @JavascriptInterface public String getCapabilities() {
             boolean pushConfigured = PushCoordinator.available();
             return new Json().put("version", 1).put("nativeCalls", true).put("dynamicColor", Build.VERSION.SDK_INT >= 31)
+                    .put("haptics", true).put("localNotifications", true)
                     .put("push", pushConfigured).put("pushProvider", pushConfigured ? "jpush" : JSONObject.NULL)
+                    .put("pushState", PushCoordinator.state(MainActivity.this))
                     .put("identityMigration", migration).put("identityError", identityError).toString();
+        }
+        @JavascriptInterface public boolean performHaptic(String type) {
+            return vibrate(type);
+        }
+        @JavascriptInterface public String getNotificationStatus() {
+            return LocalNotifications.status(MainActivity.this);
+        }
+        @JavascriptInterface public boolean requestNotificationPermission() {
+            return LocalNotifications.requestPermission(MainActivity.this);
+        }
+        @JavascriptInterface public void openNotificationSettings() {
+            LocalNotifications.openSettings(MainActivity.this);
+        }
+        @JavascriptInterface public boolean postNotification(String json) {
+            return LocalNotifications.post(MainActivity.this, json);
         }
         @JavascriptInterface public String getTheme() {
             int accent = Build.VERSION.SDK_INT >= 31 ? getColor(dark() ? android.R.color.system_accent1_200 : android.R.color.system_accent1_600) : Color.rgb(52, 118, 93);
@@ -234,8 +280,31 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface public void callAction(String json) { if (!"idle".equals(CallService.snapshot().optString("state")) && !"ended".equals(CallService.snapshot().optString("state"))) startService(new Intent(MainActivity.this, CallService.class).setAction(CallService.ACTION_CONTROL).putExtra("json", json)); }
         @JavascriptInterface public String getCallState() { return CallService.snapshot().toString(); }
         @JavascriptInterface public void requestPush() { runOnUiThread(() -> PushCoordinator.request(MainActivity.this)); }
-        @JavascriptInterface public void cancelNotification(String eventId) { PushReceiver.cancel(MainActivity.this, eventId); }
-        @JavascriptInterface public void setPreferences(String json) { try { JSONObject value = new JSONObject(json); themePreference = value.optString("theme", "system"); if (!themePreference.matches("system|light|dark")) themePreference = "system"; getPreferences(MODE_PRIVATE).edit().putString("theme", themePreference).putBoolean("sound", value.optBoolean("sound", true)).apply(); runOnUiThread(() -> { PushCoordinator.preferences(MainActivity.this, value.optBoolean("messages", true) || value.optBoolean("interactions", true)); updateSystemBars(); dispatch(new Json().put("type", "theme").put("theme", getTheme())); }); } catch (Exception ignored) { } }
+        @JavascriptInterface public void probePushNetwork() { PushCoordinator.probeNetwork(MainActivity.this); }
+        @JavascriptInterface public void cancelNotification(String eventId) {
+            PushReceiver.cancel(MainActivity.this, eventId);
+            LocalNotifications.cancel(MainActivity.this, eventId);
+        }
+        @JavascriptInterface public void setPreferences(String json) {
+            try {
+                JSONObject value = new JSONObject(json);
+                themePreference = value.optString("theme", "system");
+                if (!themePreference.matches("system|light|dark")) themePreference = "system";
+                boolean sound = value.optBoolean("sound", true);
+                boolean messages = value.optBoolean("messages", true);
+                boolean interactions = value.optBoolean("interactions", true);
+                getPreferences(MODE_PRIVATE).edit().putString("theme", themePreference).putBoolean("sound", sound).apply();
+                LocalNotifications.prefs(MainActivity.this).edit()
+                        .putBoolean("sound", sound)
+                        .putBoolean("messages", messages)
+                        .putBoolean("interactions", interactions).apply();
+                runOnUiThread(() -> {
+                    PushCoordinator.preferences(MainActivity.this, messages || interactions);
+                    updateSystemBars();
+                    dispatch(new Json().put("type", "theme").put("theme", getTheme()));
+                });
+            } catch (Exception ignored) { }
+        }
         @JavascriptInterface public void playSound(String kind) { if (!getPreferences(MODE_PRIVATE).getBoolean("sound", true)) return; final int resource = "message".equals(kind) ? R.raw.notify_message : "request".equals(kind) ? R.raw.notify_request : "call-end".equals(kind) ? R.raw.notify_call_end : 0; if (resource == 0) return; runOnUiThread(() -> { MediaPlayer sound = MediaPlayer.create(MainActivity.this, resource); if (sound != null) { sound.setOnCompletionListener(MediaPlayer::release); sound.start(); } }); }
     }
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
@@ -247,5 +316,39 @@ public class MainActivity extends BridgeActivity {
         }
         if (request == 42) PushCoordinator.permissionResult(this, results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
         if (request == 43) { String call = pendingCall; pendingCall = null; if (call != null) new NativeBridge().startCall(call); }
+        if (request == LocalNotifications.PERMISSION_REQUEST) {
+            boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+            dispatch(new Json().put("type", "notification").put("status", granted ? "granted" : "denied"));
+            if (granted) PushCoordinator.permissionResult(this, true);
+        }
+    }
+
+    /** Platform half of the semantic haptics mapping; every failure is silent. */
+    private boolean vibrate(String type) {
+        HapticPolicy.Pattern pattern = HapticPolicy.forType(type);
+        if (pattern == null) return false;
+        try {
+            // The user-level touch feedback switch must be respected, not just the system volume.
+            if (Settings.System.getInt(getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 0) return false;
+            Vibrator vibrator;
+            if (Build.VERSION.SDK_INT >= 31) {
+                VibratorManager manager = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                vibrator = manager == null ? null : manager.getDefaultVibrator();
+            } else {
+                vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) return false;
+            if (Build.VERSION.SDK_INT >= 26) {
+                VibrationEffect effect = pattern.isWaveform()
+                        ? VibrationEffect.createWaveform(pattern.timings(), pattern.amplitudes(), -1)
+                        : VibrationEffect.createOneShot(pattern.timings()[0], pattern.amplitudes()[0]);
+                vibrator.vibrate(effect);
+            } else {
+                vibrator.vibrate(pattern.totalDurationMs());
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 }

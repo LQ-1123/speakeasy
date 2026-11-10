@@ -7,8 +7,16 @@ The Android app packages the frontend export and serves it from `https://localho
 ```powershell
 .\mobile\build-apk.ps1 -ApiBase https://your-api.example -Mode release
 cd mobile\android
-.\gradlew.bat :app:testDebugUnitTest :app:assembleRelease -PapiBase=https://your-api.example --console=plain
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug -PbuildRoot=D:/speakeasy-android-build --console=plain
 ```
+
+`testDebugUnitTest` covers the route allow-list used by notification opens and the semantic haptic mapping (`NativePolicyTest`, `HapticPolicyTest`). Verify the merged manifest before shipping:
+
+```powershell
+Select-String -Path D:\speakeasy-android-build\app\intermediates\merged_manifests\debug\processDebugManifest\AndroidManifest.xml -Pattern 'JPUSH_PKGNAME|JPUSH_APPKEY|JPUSH_CHANNEL|VIBRATE'
+```
+
+The three `meta-data` nodes are required by JPush and are declared by this app (the AAR only contributes `JPUSH_APPKEY`/`JPUSH_CHANNEL` placeholders, never `JPUSH_PKGNAME`). Without credentials they still merge with an empty value; nobody should edit these nodes out.
 
 The API must use HTTPS. `apiBase` can also come from `SPEAKEASY_API_BASE`; its default is the existing HTTPS deployment. Keep this origin the same as the frontend's `NEXT_PUBLIC_API_BASE`. No long-term token goes in a URL. Signing configuration remains in the ignored `android/keystore.properties`. Do not regenerate the signing key when shipping an upgrade.
 
@@ -41,10 +49,26 @@ MEIZU_APPKEY=
 
 Create/register this exact package ID and release certificate fingerprint in JPush and each OEM developer console; enable their push APIs and configure each OEM server credential in JPush. Huawei/Honor applications require their own app IDs and matching certificate registrations; follow vendor console instructions for any project service configuration required by the chosen SDK/account. Keep vendor configuration files and keys out of git. Do not use another package's credentials or debug signing fingerprints for the release package.
 
-With no JPush key, the APK still builds and the bridge reports `push:false`; it does not initialize JPush. With a key, `requestPush()` requests Android notification permission and initializes registration. A `speakeasy:native` push event with `registration_id` and `vendor` is emitted; the frontend registers it through `/api/v3/client/devices`. Registration is never represented as successful before an SDK registration ID exists. Notification extras use `{event_id,route}`; opens are deduplicated and routes must be internal hash paths. Account notification preferences are also enforced by the authenticated backend outbox.
+The backend that actually sends pushes also needs the JPush credentials in its ignored `.env` (never in the APK): `JPUSH_APP_KEY` (same 24-character AppKey) and `JPUSH_MASTER_SECRET` (server-only secret), then restart the `speakeasy` service. The client AppKey alone only lets the app register a device; without the server pair the outbox marks events `push_status=unconfigured` and no push leaves the server.
+
+With no JPush key, the APK still builds and the bridge reports `push:false`, `pushState:"unconfigured"`; it does not initialize JPush. With a key, `SpeakEasyApp` initialises the SDK at process start, `requestPush()` requests Android notification permission, and registration is polled for up to ~10 seconds. Exactly one `registered` event (with `registration_id` and `vendor`) is emitted per registration id; the frontend binds it through `/api/v3/client/devices`. Registration is never represented as successful before an SDK registration ID exists. Notification extras use `{event_id,route}`; opens are deduplicated and routes must be internal hash paths (allow-list in `NativePolicy.validRoute`, default `#/chats`).
+
+## Local notifications, notification status and haptics
+
+The bridge exposes four notification methods in addition to `requestPush`/`cancelNotification`:
+
+- `getNotificationStatus()` → JSON `{permission, enabled, channelReady, push, pushEnabled, pushState, registrationId, sound, messages, interactions}` observed from the OS.
+- `postNotification({id,title,body,route})` → posts a local notification for one client event. Body is restricted to generic strings; message text never reaches the lock screen. The event id is shared with JPush so local and push notifications for the same event are deduplicated and `cancelNotification(eventId)` clears both.
+- `requestNotificationPermission()` / `openNotificationSettings()` → drive the Android 13+ permission prompt and the app notification settings page.
+
+Channels (`speakeasy_messages`, `speakeasy_social` and their `_silent` variants) are created by `SpeakEasyApp` at startup. The `GlobalNotification` banner posts a local notification only while the page is hidden, so the foreground banner and a system notification never double up. Push/notification failures (`unavailable`, `denied`, `error`) surface as toasts.
+
+`performHaptic(type)` maps `selection/toggle/longPress/recordStart/recordCancel/send/save/success/error/callControl` to distinct short vibration patterns (`HapticPolicy`), honours `Settings.System.HAPTIC_FEEDBACK_ENABLED`, and never throws. The frontend falls back to `navigator.vibrate` only when no native bridge exists.
 
 ## Required device acceptance checks
 
-No physical device or OEM credentials were available during implementation. JVM tests cover origin restriction, exact back boolean handling and VAD transitions. Instrumentation tests cover encrypted storage and controlled historic-origin extraction; run on an emulator/test installation, then verify upgrading an existing signed install without clearing data. Build instrumentation with `:app:assembleDebugAndroidTest`; run `:app:connectedDebugAndroidTest` when a device is attached.
+No physical device or OEM credentials were available during implementation. JVM tests cover origin restriction, exact back boolean handling, VAD transitions, the notification route allow-list and the haptic mapping. Instrumentation tests cover encrypted storage and controlled historic-origin extraction; run on an emulator/test installation, then verify upgrading an existing signed install without clearing data. Build instrumentation with `:app:assembleDebugAndroidTest`; run `:app:connectedDebugAndroidTest` when a device is attached.
+
+Credential/device gates that a source build cannot prove: a packaged APK with real `JPUSH_APPKEY`/`JPUSH_MASTER_SECRET`, device registration binding, lock-screen delivery, notification-open routing, deduplication between JPush and local notifications, Android 13 permission denial/guidance, and vibration feel on real hardware.
 
 Before rollout, test Android 24/29/33/35/36, both navigation modes and IME; an existing-account signed upgrade; screen lock/background/UI recreation during a call; Bluetooth/wired headset changes; incoming telephone calls and audio focus recovery; mute/interruption/turn acknowledgements; offline/reconnect/20-second expiry; notification permission denial; and delivery/open/deduplication through each configured OEM channel. OEM delivery, microphone processing quality, predictive-back animation, incoming telephone behavior and device battery policies cannot be established by a successful APK compile.

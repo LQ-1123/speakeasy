@@ -22,6 +22,31 @@ public class NativePolicyTest {
         assertFalse(NativePolicy.backHandled("\"unhandled\""));
         assertFalse(NativePolicy.backHandled("\"handled\""));
     }
+    @Test public void notificationRoutesStayInsideTheInternalHashRouter() {
+        assertTrue(NativePolicy.validRoute("#/chat/friend-1"));
+        assertTrue(NativePolicy.validRoute("#/chats"));
+        assertTrue(NativePolicy.validRoute("#/contacts/f_01"));
+        assertTrue(NativePolicy.validRoute("#/contacts"));
+        assertTrue(NativePolicy.validRoute("#/discover"));
+        assertTrue(NativePolicy.validRoute("#/discover/people"));
+        assertTrue(NativePolicy.validRoute("#/persona/p_1"));
+        assertTrue(NativePolicy.validRoute("#/events"));
+        assertTrue(NativePolicy.validRoute("#/expressions"));
+        assertTrue(NativePolicy.validRoute("#/me"));
+        assertTrue(NativePolicy.validRoute("#/settings"));
+        assertTrue(NativePolicy.validRoute("#/settings/notify"));
+        assertTrue(NativePolicy.validRoute("#/requests"));
+        assertFalse("the old push default was not a real page", NativePolicy.validRoute("#/messages"));
+        assertFalse(NativePolicy.validRoute("https://evil.example/#/chat/x"));
+        assertFalse(NativePolicy.validRoute("#/chat/../settings"));
+        assertFalse(NativePolicy.validRoute("#/chat/.."));
+        assertFalse(NativePolicy.validRoute("#/chat/"));
+        assertFalse(NativePolicy.validRoute("#/"));
+        assertFalse(NativePolicy.validRoute(null));
+        assertEquals("#/chats", NativePolicy.routeOr("#/messages", "#/chats"));
+        assertEquals("#/events", NativePolicy.routeOr("#/events", "#/chats"));
+        assertNull(NativePolicy.routeOr("https://evil.example", null));
+    }
     @Test public void vadEndsAnUtteranceOnceAfterSilenceAndRequiresSustainedVoice() {
         NativePolicy.Vad vad = new NativePolicy.Vad();
         for (int i = 0; i < 3; i++) assertEquals(0, vad.frame(1200, 20));

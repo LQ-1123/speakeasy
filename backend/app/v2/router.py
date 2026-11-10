@@ -70,6 +70,10 @@ class DiscoverBody(BaseModel):
 class TextTurnBody(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     context: str | None = None
+    # 幂等键：客户端为一次发送生成，重试/页面切换后重复提交同一 id 不会重复落库
+    client_message_id: str | None = Field(
+        default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
 
 
 class ExpressionBody(BaseModel):
@@ -1439,7 +1443,9 @@ async def chat_voice(
 async def chat_text(request: Request, friend_id: str, body: TextTurnBody) -> dict:
     services = _services(request)
     try:
-        result = await services.chat.handle_text(friend_id, body.text, body.context)
+        result = await services.chat.handle_text(
+            friend_id, body.text, body.context, client_message_id=body.client_message_id
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="好友不存在") from None
     except ValueError as exc:

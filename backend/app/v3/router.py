@@ -1,4 +1,4 @@
-﻿"""SpeakEasy V3 REST 路由（``/api/v3``）。
+"""SpeakEasy V3 REST 路由（``/api/v3``）。
 
 与 V2 的关系
 ------------
@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 from typing import Any, Literal
 
@@ -363,6 +364,37 @@ async def avatar(seed: str, g: str = "", r: str = "", a: int | None = None):
             "X-Avatar-Seed": seed,
         },
     )
+
+
+@router.get("/avatar/{seed}.png")
+async def avatar_png(seed: str, g: str = "", r: str = "", a: int | None = None, size: int = 192):
+    """PNG 版头像，给系统推送通知栏当大图标用（极光只接受位图 URL）。
+
+    与 SVG 版同一套确定性画法；结果按参数缓存，避免每次推送重复栅格化。
+    """
+    size = max(64, min(size, 512))
+    try:
+        png = await asyncio.to_thread(_avatar_png_cached, seed, g, r, a, size)
+    except ImportError as exc:  # pragma: no cover - deployment dependency
+        raise HTTPException(status_code=503, detail="PNG avatar renderer unavailable") from exc
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Avatar-Seed": seed,
+        },
+    )
+
+
+@functools.lru_cache(maxsize=512)
+def _avatar_png_cached(seed: str, g: str, r: str, a: int | None, size: int) -> bytes:
+    from app.v3.avatar import avatar_svg  # noqa: PLC0415
+
+    svg = avatar_svg(seed, gender=g, region=r, age=a)
+    import cairosvg  # noqa: PLC0415
+
+    return cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=size, output_height=size)
 
 
 @router.get("/discover/next")

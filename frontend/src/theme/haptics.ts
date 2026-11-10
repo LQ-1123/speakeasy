@@ -35,6 +35,24 @@ const NATIVE_TYPE: Record<HapticType, string> = {
   callControl: "callControl",
 };
 
+/**
+ * Browser/PWA fallback. Android maps the same actions to real vibration patterns
+ * through NativeBridge.performHaptic; a mobile browser may expose navigator.vibrate.
+ * Durations mirror the native patterns so the feel stays consistent.
+ */
+const WEB_PATTERN: Record<HapticType, number | number[]> = {
+  selection: 8,
+  toggle: 12,
+  longPress: 22,
+  recordStart: 16,
+  recordCancel: [12, 40, 12],
+  send: 10,
+  save: 14,
+  success: [10, 60, 16],
+  error: [34, 70, 34],
+  callControl: 18,
+};
+
 const MIN_GAP_MS = 70;
 let lastAt = 0;
 let lastType: HapticType | null = null;
@@ -44,10 +62,20 @@ function enabled(): boolean {
   return themeStore.getSnapshot().settings.haptics;
 }
 
+function webHaptic(type: HapticType): boolean {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return false;
+  try {
+    return navigator.vibrate(WEB_PATTERN[type]) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Semantic haptics. One action maps to exactly one call; continuous gestures are
- * debounced. The browser adapter deliberately does not vibrate — it only records
- * events for the preview panel. Android will implement `performHaptic`.
+ * debounced. The Android bridge reports whether the OS actually vibrated
+ * (system haptics off / no vibrator => false). Without a native bridge the
+ * browser vibrate API is used when available (mobile PWA).
  */
 export function haptic(type: HapticType, options?: { force?: boolean }): boolean {
   if (!enabled()) return false;
@@ -58,19 +86,23 @@ export function haptic(type: HapticType, options?: { force?: boolean }): boolean
 
   const native = nativeBridge();
   let performed = false;
+  let nativeHandled = false;
   if (native?.performHaptic) {
     try {
-      native.performHaptic(NATIVE_TYPE[type]);
-      performed = true;
+      performed = native.performHaptic(NATIVE_TYPE[type]) === true;
+      nativeHandled = true;
     } catch {
       performed = false;
     }
   }
+  /* Only fall back when the platform has no native implementation at all — never
+     bypass an Android user who turned system touch feedback off. */
+  if (!nativeHandled) performed = webHaptic(type);
 
   const event: HapticEvent = {
     type,
     at: now,
-    platform: performed ? "android" : "web",
+    platform: nativeHandled ? "android" : "web",
     performed,
   };
   history.push(event);

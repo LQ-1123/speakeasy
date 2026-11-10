@@ -13,14 +13,14 @@ import { useShallow } from "zustand/react/shallow";
  * 偶遇、动态、通话）在 store.tsx 里模拟。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Compass, MessageCircle, UserRound, UsersRound } from "lucide-react";
 
 import "./styles/base.css";
 import "./styles/shell.css";
 
 import type { Route, Section } from "./model";
-import { backRoute, parseRoute as parseHashRoute, routeToHash as serializeRoute, sectionOf as routeSection } from "./navigation";
+import { isInternalNotificationRoute, routeToHash, sectionOf as routeSection } from "./navigation";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
 import { CallPanel } from "./v3/CallPanel";
@@ -28,7 +28,7 @@ import { installPlatform } from "./v3/platform";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { haptic } from "../theme/haptics";
 import { AppProvider, useApp } from "./store";
-import { closeTopOverlay, useNavigation } from "./navigationStore";
+import { backToParent, closeTopOverlay, navigateTo, syncFromHash, useNavigation } from "./navigationStore";
 import { usePreferences } from "./v3/preferences";
 import { PushOptIn } from "./v3/PushOptIn";
 import { GlobalNotification } from "./v3/GlobalNotification";
@@ -63,8 +63,6 @@ if (typeof window !== "undefined" && isPreviewMode()) {
 }
 
 export const sectionOf = routeSection;
-function parseRoute(): Route { return parseHashRoute(typeof window === "undefined" ? "" : window.location.hash); }
-const routeToHash = serializeRoute;
 
 const TAB_ITEMS: Array<{ key: Section; label: string; icon: React.ReactNode; route: Route }> = [
   { key: "chats", label: "消息", icon: <MessageCircle size={21} strokeWidth={1.8} />, route: { name: "chats" } },
@@ -73,39 +71,124 @@ const TAB_ITEMS: Array<{ key: Section; label: string; icon: React.ReactNode; rou
   { key: "me", label: "我", icon: <UserRound size={21} strokeWidth={1.8} />, route: { name: "me" } },
 ];
 
+const MOBILE_QUERY = "(max-width: 959.98px)";
+
+/** 首帧就用 matchMedia 判定布局，避免「先桌面双栏 → 再切手机单栏」的跳帧。 */
+function prefersMobileLayout(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(MOBILE_QUERY).matches
+  );
+}
+
+/** store 还没提供 booted 字段时的兜底超时：绝不停在空白占位页。 */
+const BOOT_PLACEHOLDER_TIMEOUT_MS = 5000;
+
+/** bootstrap 未完成时的中性占位：不渲染任何依赖数据的路由页面（避免闪「会话不存在」/空列表）。 */
+function BootPlaceholder() {
+  return (
+    <div className="w4-root" style={{ height: "100%" }}>
+      <div className="w4-app" data-mobile-view="list" data-nav-placeholder="boot">
+        <div className="w4-centered" style={{ height: "100%", width: "100%" }}>
+          <div className="se-muted-text" role="status" aria-live="polite">
+            正在加载…
+          </div>
+        </div>
+      </div>
+      <PushOptIn />
+      <GlobalNotification />
+    </div>
+  );
+}
+
+
 function Shell() {
-  const { toast, requests, friends } = useApp(useShallow((state) => ({ toast: state.toast, requests: state.requests, friends: state.friends })));
+  const { toast, requests, friends, booted, bootError, friendCount } = useApp(
+    useShallow((state) => {
+      /* chat-ui 在 store 里加 booted 之前，这里按可选字段读取；缺失时走回退启发式。 */
+      const optional = state as unknown as { booted?: unknown };
+      return {
+        toast: state.toast,
+        requests: state.requests,
+        friends: state.friends,
+        bootError: state.bootError,
+        friendCount: state.friends.length,
+        booted: typeof optional.booted === "boolean" ? optional.booted : null,
+      };
+    }),
+  );
   const route = useNavigation((state) => state.route);
-  const setRoute = useNavigation((state) => state.setRoute);
-  const [mobile, setMobile] = useState(false);
+  /** 移动端首帧就用 matchMedia，避免先渲染桌面双栏再切手机单栏的跳帧。 */
+  const [mobile, setMobile] = useState(prefersMobileLayout);
 
   useEffect(() => {
     void usePreferences.getState().load();
   }, []);
 
+  /* 品牌开屏（静态 HTML 注入，见 app/layout.tsx）：React 挂载后淡出。 */
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 959.98px)");
+    (window as unknown as { __hideSonderSplash?: () => void }).__hideSonderSplash?.();
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
     const update = () => setMobile(mq.matches);
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
 
+  /* URL 是唯一事实来源：只处理「外部」hash 变化（浏览器前进/后退、通知、深链）。
+     程序内导航统一走 navigationStore.navigateTo，避免 hash 赋值 + setRoute 各写一次。 */
   useEffect(() => {
-    const onHash = () => setRoute(parseRoute());
+    const onHash = () => {
+      const hash = window.location.hash;
+      /* 与原生通知白名单对齐：非法 hash 不导航，恢复当前路由的 URL（防注入/误跳）。 */
+      if (hash && !isInternalNotificationRoute(hash)) {
+        window.history.replaceState(null, "", routeToHash(useNavigation.getState().route));
+        return;
+      }
+      syncFromHash();
+    };
     window.addEventListener("hashchange", onHash);
     if (!window.location.hash) window.history.replaceState(null, "", "#/chats");
+    syncFromHash();
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const navigate = useCallback((next: Route) => {
     haptic("selection");
-    window.location.hash = routeToHash(next);
-    setRoute(next);
+    return navigateTo(next);
   }, []);
 
-  const back = useCallback(() => navigate(backRoute(route)), [route, navigate]);
+  const back = useCallback(() => {
+    haptic("selection");
+    return backToParent();
+  }, []);
 
+  /* bootstrap 完成前不渲染依赖数据的路由页：深链/通知打开时先中性占位，
+     避免首帧闪「会话不存在」/空会话列表。chat-ui 负责加载数据本身。 */
+  const [bootTimeout, setBootTimeout] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setBootTimeout(true), BOOT_PLACEHOLDER_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const fallbackSettled = friendCount > 0 || Boolean(bootError) || bootTimeout;
+  /* 只锁存「曾经完成过一次 bootstrap」：后续 reloadAll（加好友后刷新）即使把
+     booted 临时置回 false，也不会把整个界面换成占位页。 */
+  const [settledOnce, setSettledOnce] = useState(false);
+  useEffect(() => {
+    if (booted === true || bootTimeout || (booted === null && fallbackSettled)) {
+      setSettledOnce(true);
+    }
+  }, [booted, bootTimeout, fallbackSettled]);
+  const bootSettled = settledOnce;
+
+  /* 系统返回键：监听只安装一次，回调通过 ref 读取最新导航函数，
+     避免路由每变一次就重建监听（旧实现会短暂丢失 native 事件）。 */
+  const backRef = useRef(back);
+  backRef.current = back;
   useEffect(() => {
     const teardown = installPlatform(() => {
       if (closeTopOverlay()) return true;
@@ -114,13 +197,12 @@ function Shell() {
       if (close) { close.click(); return true; }
       const legacy = (window as unknown as { w4HandleBack?: () => string }).w4HandleBack;
       if (legacy?.() === "handled") return true;
-      const next = backRoute(route);
-      if (routeToHash(next) === routeToHash(route)) return false;
-      back();
-      return true;
+      /* true/false 语义不变：真的发生了导航才吞掉系统返回，否则交给原生兜底。 */
+      const result = backRef.current();
+      return result.routeChanged || result.history !== "none";
     });
     return teardown;
-  }, [route, back]);
+  }, []);
 
   const unread = friends.reduce((sum, f) => sum + f.unread, 0);
   const section = sectionOf(route);
@@ -225,6 +307,9 @@ function Shell() {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }, [listW]);
+
+  /* 所有 hooks 已执行完，再决定是否显示 bootstrap 占位（避免 hooks 顺序变化）。 */
+  if (!bootSettled) return <BootPlaceholder />;
 
   const dataView = mobile && !listIndex ? "main" : "list";
 

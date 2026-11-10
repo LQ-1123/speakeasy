@@ -1,7 +1,8 @@
 "use client";
 
 import { nativeBridge } from "../w4/v3/clientApi";
-import { honorSnapshot, makeSnapshot, validateSnapshot } from "./palette";
+import { makeSnapshot, normalizeHex, validateSnapshot } from "./palette";
+import { palettesFromSeed } from "./palette-from-seed";
 import type { ThemeCapabilities, ThemeSnapshot } from "./types";
 
 export interface SystemThemeRead {
@@ -51,16 +52,22 @@ export function readSystemThemeSnapshot(): SystemThemeRead {
     const legacy = JSON.parse(native.getTheme?.() || "{}") as {
       accent?: string;
       onAccent?: string;
-      primaryContainer?: string;
-      onPrimaryContainer?: string;
+      dark?: boolean;
     };
-    if (legacy.accent) {
-      return {
-        snapshot: legacyThemeToSnapshot(legacy, capabilities),
-        capabilities,
-        complete: false,
-      };
+    const accent = normalizeHex(legacy.accent);
+    if (!accent) {
+      // The bridge cannot read the wallpaper accent right now (or the shell
+      // never exposed it). Return no snapshot: ThemeStore keeps the palette it
+      // already has (e.g. the stored warm-brown wallpaper palette) instead of
+      // resetting it to the Honor light-blue fixture. Fresh installs already
+      // start from honorSnapshot(), so nothing regresses for them.
+      return { snapshot: null, capabilities, complete: false };
     }
+    return {
+      snapshot: legacyThemeToSnapshot(accent, capabilities),
+      capabilities,
+      complete: false,
+    };
   } catch {
     /* No usable system theme. */
   }
@@ -90,44 +97,43 @@ export function installSystemThemeListener(onChange: () => void): () => void {
   };
 }
 
+/**
+ * Android 12+ only exposes the wallpaper accent through the legacy bridge
+ * (`getTheme()` → `{ accent, onAccent, dark, insets }`). Patching that accent
+ * onto the Honor fixture left every container role (bubbles, tab pill, tags,
+ * avatar wells, notification banner) stuck on the old light blue.
+ *
+ * Expand the single accent into the complete M3 light + dark palette instead:
+ * `primary`, `primaryContainer`, `secondaryContainer`, `surfaceTint`, … all
+ * follow the wallpaper hue, while `on*` roles keep their paired contrast.
+ * `onAccent` / container overrides are intentionally not copied from the bridge:
+ * they are single-mode values and would break the derived dark palette; the
+ * complete native palette stays on the `getThemeSnapshot()` path above.
+ *
+ * Only called with a validated accent (see readSystemThemeSnapshot): a missing
+ * or malformed accent must yield no snapshot, never a fallback palette, so a
+ * transiently unreadable bridge cannot overwrite a stored wallpaper theme with
+ * the Honor light-blue fixture.
+ */
 function legacyThemeToSnapshot(
-  raw: {
-    accent?: string;
-    onAccent?: string;
-    primaryContainer?: string;
-    onPrimaryContainer?: string;
-  },
+  accent: string,
   capabilities: Partial<ThemeCapabilities>,
 ): ThemeSnapshot {
-  const base = honorSnapshot(1);
-  const light = { ...base.palettes.light };
-  const dark = { ...base.palettes.dark };
-  if (raw.accent) {
-    light.primary = raw.accent;
-    light.primaryContainer = raw.primaryContainer ?? light.primaryContainer;
-    dark.primary = raw.accent;
-  }
-  if (raw.onAccent) {
-    light.onPrimary = raw.onAccent;
-    dark.onPrimary = raw.onAccent;
-  }
-  if (raw.primaryContainer) {
-    light.primaryContainer = raw.primaryContainer;
-    dark.primaryContainer = raw.primaryContainer;
-  }
-  if (raw.onPrimaryContainer) {
-    light.onPrimaryContainer = raw.onPrimaryContainer;
-    dark.onPrimaryContainer = raw.onPrimaryContainer;
-  }
+  const palettes = palettesFromSeed(accent);
   return makeSnapshot({
     revision: 1,
     source: "android-system",
     label: "Android 系统配色",
-    palettes: { light, dark },
+    palettes,
     capabilities: {
       ...capabilities,
       systemSemanticRoles: false,
     },
-    meta: { note: "legacy getTheme() compatibility path" },
+    meta: {
+      sourceColor: accent,
+      // The bridge supplied one accent; the remaining roles are M3-derived.
+      completeness: "partial",
+      note: "Android 12+ 仅提供壁纸 accent；已按 M3 TonalSpot 推导完整亮/暗语义色板",
+    },
   });
 }

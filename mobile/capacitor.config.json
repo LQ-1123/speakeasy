@@ -1,6 +1,6 @@
 {
   "appId": "com.speakeasy.app",
-  "appName": "SpeakEasy",
+  "appName": "Sonder",
   "webDir": "www",
   "server": {
     "androidScheme": "https",

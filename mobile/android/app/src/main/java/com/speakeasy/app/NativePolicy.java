@@ -20,6 +20,47 @@ final class NativePolicy {
     }
     private static int port(URI uri) { return uri.getPort() == -1 ? 443 : uri.getPort(); }
     static boolean backHandled(String result) { return "true".equals(result); }
+
+    /**
+     * Internal hash routes only. Mirrors the frontend router's top-level names so
+     * a push payload cannot navigate to an arbitrary URL or an unknown page.
+     */
+    static boolean validRoute(String route) {
+        if (route == null) return false;
+        String value = route.trim();
+        if (!value.startsWith("#/") || value.length() > 512) return false;
+        String path = value.substring(2);
+        if (path.isEmpty() || path.indexOf('\\') >= 0 || path.indexOf(' ') >= 0) return false;
+        String[] parts = path.split("/", -1);
+        if (parts.length == 0 || parts.length > 2) return false;
+        for (String part : parts) {
+            if (part.isEmpty() && parts.length > 1) return false;
+            if (".".equals(part) || "..".equals(part)) return false;
+        }
+        String head = parts[0];
+        if ("chat".equals(head) || "persona".equals(head)) {
+            return parts.length == 2 && parts[1].matches("[A-Za-z0-9_%.~-]{1,128}");
+        }
+        if ("contacts".equals(head)) {
+            return parts.length == 1 || parts[1].matches("[A-Za-z0-9_%.~-]{1,128}");
+        }
+        if ("settings".equals(head)) {
+            return parts.length == 1 || parts[1].matches("[a-z-]{1,32}");
+        }
+        if ("discover".equals(head)) {
+            return parts.length == 1 || "people".equals(parts[1]);
+        }
+        if ("chats".equals(head) || "events".equals(head) || "expressions".equals(head)
+                || "me".equals(head) || "requests".equals(head)) {
+            return parts.length == 1;
+        }
+        return false;
+    }
+
+    static String routeOr(String route, String fallback) {
+        return validRoute(route) ? route.trim() : fallback;
+    }
+
     static final class ReplyGate {
         private boolean awaitingReply;
         void utteranceSent() { awaitingReply = true; }

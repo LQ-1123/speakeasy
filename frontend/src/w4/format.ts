@@ -33,15 +33,24 @@ export function dayOf(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
+/** 时长标签：至少 1 秒，60 秒进到 1:00，避免出现 0:60。 */
 export function durationLabel(ms = 0): string {
-  const s = Math.max(1, Math.round(ms / 1000));
-  return `0:${String(s).padStart(2, "0")}`;
+  const total = Math.min(3599, Math.max(1, Math.round(ms / 1000)));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** 语音条宽度随长度变化（微信/WhatsApp 的老做法）。 */
+/** 语音秒数（1–60s，超出夹紧）：宽度与文案共用的稳定口径。 */
+export function voiceSeconds(ms = 0): number {
+  const s = Number.isFinite(ms) ? ms / 1000 : 0;
+  return Math.min(60, Math.max(1, s));
+}
+
+/** 语音条宽度随长度线性变化：1s → 80px，60s → 220px（微信/WhatsApp 的老做法）。 */
 export function voiceBubbleWidth(ms = 0): number {
-  const s = Math.min(60, Math.max(1, ms / 1000));
-  return Math.round(118 + (s / 60) * 140);
+  const s = voiceSeconds(ms);
+  return Math.round(80 + ((s - 1) / 59) * 140);
 }
 
 export function initial(name: string): string {

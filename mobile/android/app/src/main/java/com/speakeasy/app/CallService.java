@@ -84,7 +84,7 @@ public final class CallService extends Service {
                 if (callId.equals(config.optString("callId"))) { publish(state.optString("state")); return START_NOT_STICKY; }
                 throw new IllegalStateException("Another call is already active");
             }
-            callId = config.getString("callId"); origin = config.getString("apiOrigin"); socketPath = config.getString("wsPath"); friendName = config.optString("friendName", "SpeakEasy"); friendId = config.optString("friendId");
+            callId = config.getString("callId"); origin = config.getString("apiOrigin"); socketPath = config.getString("wsPath"); friendName = config.optString("friendName", "Sonder"); friendId = config.optString("friendId");
             if (!origin.equals(BuildConfig.API_BASE)) throw new SecurityException("Unconfigured API origin");
             NativePolicy.socketUrl(origin, socketPath, callId);
             identity = new NativeIdentityStore(this).read();
@@ -108,7 +108,7 @@ public final class CallService extends Service {
         PendingIntent content = PendingIntent.getActivity(this, 31, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 32, new Intent(this, CallService.class).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(friendName).setContentText("SpeakEasy call in progress").setOngoing(true).setOnlyAlertOnce(true)
+                .setContentTitle(friendName).setContentText("Sonder call in progress").setOngoing(true).setOnlyAlertOnce(true)
                 .setCategory(NotificationCompat.CATEGORY_CALL).setContentIntent(content).addAction(0, "End call", stop).build();
         ServiceCompat.startForeground(this, 31, notification, Build.VERSION.SDK_INT >= 30 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK : 0);
     }

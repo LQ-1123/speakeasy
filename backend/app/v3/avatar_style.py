@@ -272,20 +272,36 @@ def sanitize_options(options: dict) -> dict:
 
 
 def persona_avatar_meta(persona: dict) -> dict:
-    """给 API 用的头像元数据（style + 部件）；老数据没有则返回空。"""
+    """给 API 用的头像元数据（style + 部件），**所有接口必须走这里**。
+
+    为什么要在读取时归一化
+    ----------------------
+    ``personas.avatar_options`` 是后补的列：种子人物、老库、刚生成的 LLM 人物都可能还没有值。
+    如果接口对缺失值直接返回 ``{}``，客户端就会各自回落到 personas 插画 / 服务端 SVG，
+    同一个人在不同页面变成两种画风。这里对缺失值用确定性 ``default_options(persona)``
+    补齐（不调用 LLM、不写库、同一人物永远同一组部件），让所有 payload 的
+    ``avatar_style + avatar_options`` 一致；而好友行由 ``schema.sync_persona_friends``
+    按同一份 meta 同步，保证 friend 与 persona 渲染出同一张脸。
+    """
     style = str(persona.get("avatar_style") or "").strip()
-    raw = str(persona.get("avatar_options") or "").strip()
+    raw = persona.get("avatar_options")
     options: dict = {}
-    if raw:
+    if isinstance(raw, dict):
+        options = raw
+    elif isinstance(raw, str) and raw.strip():
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 options = parsed
         except (ValueError, TypeError):
             options = {}
-    if not style or not options:
+    if not options:
+        # 确定性兜底：不依赖 LLM、不写库，老数据也能立刻和客户端 Avataaars 对上
+        options = default_options(persona)
+    cleaned = sanitize_options(options)
+    if not cleaned:
         return {"avatar_style": "", "avatar_options": {}}
-    return {"avatar_style": style, "avatar_options": sanitize_options(options)}
+    return {"avatar_style": style or STYLE_ID, "avatar_options": cleaned}
 
 
 __all__ = [

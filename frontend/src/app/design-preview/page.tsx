@@ -381,7 +381,7 @@ export default function DesignPreviewPage() {
         <div className="preview-brand">
           <span className="preview-logo">S</span>
           <div>
-            <h1>SpeakEasy Design Preview</h1>
+            <h1>Sonder Design Preview</h1>
             <p>Material 3 Expressive · 系统动态配色 · Web 验收面板</p>
           </div>
         </div>

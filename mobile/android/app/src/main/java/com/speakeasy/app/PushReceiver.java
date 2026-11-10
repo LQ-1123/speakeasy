@@ -2,63 +2,93 @@ package com.speakeasy.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.util.Log;
+
+import androidx.core.app.NotificationManagerCompat;
+
+import cn.jpush.android.api.JPushInterface;
 import cn.jpush.android.api.NotificationMessage;
 import cn.jpush.android.service.JPushMessageReceiver;
+
 import org.json.JSONObject;
 
+/**
+ * JPush message/lifecycle receiver.
+ *
+ * <p>All dedupe state lives in {@link PushEvents} so the "seen / arrived /
+ * displayed / read" decisions share one key scheme. Opens navigate through the
+ * same internal-route whitelist as local notifications.</p>
+ */
 public final class PushReceiver extends JPushMessageReceiver {
-    private static String eventId(NotificationMessage message) {
-        try { return new JSONObject(message.notificationExtras).optString("event_id", message.msgId == null ? "" : message.msgId); }
-        catch (Exception failure) { return message.msgId == null ? "" : message.msgId; }
+    private static final String TAG = "SpeakEasyPush";
+
+    private static String eventId(Context context, NotificationMessage message) {
+        try {
+            String id = new JSONObject(message.notificationExtras).optString("event_id", "");
+            if (!id.isEmpty() && id.length() <= 512) return id;
+        } catch (Exception ignored) { }
+        return message.msgId == null ? "" : message.msgId;
     }
+
+    /**
+     * Called by JPush before it displays a notification. When the app is in the
+     * foreground the in-app banner is the single surface, so the system
+     * notification is suppressed; read events never reappear.
+     */
     @Override public boolean isNeedShowNotification(Context context, NotificationMessage message, String content) {
-        String id = eventId(message);
+        String id = eventId(context, message);
         if (id.isEmpty()) return true;
-        android.content.SharedPreferences events = context.getSharedPreferences("push_events", Context.MODE_PRIVATE);
-        synchronized (PushReceiver.class) {
-            if (events.getBoolean("seen:" + id, false) || events.getBoolean("read:" + id, false)) return false;
-            if (events.getAll().size() > 1024) events.edit().clear().apply();
-            events.edit().putBoolean("seen:" + id, true).putInt("notification:" + id, message.notificationId).apply();
-        }
-        return true;
+        if (MainActivity.isForeground()) return false;
+        return PushEvents.claimDisplay(context, id, message.notificationId);
     }
+
     @Override public void onNotifyMessageArrived(Context context, NotificationMessage message) {
-        String id = eventId(message);
+        String id = eventId(context, message);
         if (id.isEmpty()) return;
-        android.content.SharedPreferences events = context.getSharedPreferences("push_events", Context.MODE_PRIVATE);
-        synchronized (PushReceiver.class) {
-            int previous = events.getInt("arrived:" + id, -1);
-            if (events.getBoolean("read:" + id, false) || (previous != -1 && previous != message.notificationId)) {
-                cn.jpush.android.api.JPushInterface.clearNotificationById(context, message.notificationId); return;
+        try {
+            int previous = PushEvents.arrivedId(context, id);
+            if (PushEvents.isRead(context, id) || (previous != -1 && previous != message.notificationId)) {
+                JPushInterface.clearNotificationById(context, message.notificationId);
+                return;
             }
-            events.edit().putInt("arrived:" + id, message.notificationId).putInt("notification:" + id, message.notificationId).apply();
+            PushEvents.markArrived(context, id, message.notificationId);
+        } catch (Throwable failure) {
+            Log.w(TAG, "arrived handling failed: " + failure);
         }
     }
-    static void cancel(Context context, String id) {
-        if (id == null || id.isEmpty() || id.length() > 512) return;
-        android.content.SharedPreferences events = context.getSharedPreferences("push_events", Context.MODE_PRIVATE);
-        int notification = events.getInt("notification:" + id, -1);
-        events.edit().putBoolean("read:" + id, true).apply();
-        if (notification != -1) cn.jpush.android.api.JPushInterface.clearNotificationById(context, notification);
-    }
+
     @Override public void onRegister(Context context, String registrationId) {
-        PushCoordinator.event(context, "registered", "", registrationId);
+        PushCoordinator.registered(context, registrationId);
     }
+
     @Override public void onNotifyMessageOpened(Context context, NotificationMessage message) {
         try {
             JSONObject extra = new JSONObject(message.notificationExtras);
-            String id = extra.optString("event_id", message.msgId);
-            android.content.SharedPreferences seen = context.getSharedPreferences("push_events", Context.MODE_PRIVATE);
-            if (!id.isEmpty() && seen.getBoolean(id, false)) return;
-            if (!id.isEmpty()) {
-                if (seen.getAll().size() > 256) seen.edit().clear().apply();
-                seen.edit().putBoolean(id, true).apply();
-            }
-            String route = extra.optString("route", "#/messages");
-            if (!route.startsWith("#/") || route.length() > 512) route = "#/messages";
-            Intent open = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    .putExtra("route", route).putExtra("event_id", id);
+            String id = extra.optString("event_id", message.msgId == null ? "" : message.msgId);
+            int notificationId = PushEvents.isRead(context, id) ? -1 : PushEvents.markRead(context, id);
+            if (notificationId > 0) JPushInterface.clearNotificationById(context, notificationId);
+            if (message.notificationId > 0) JPushInterface.clearNotificationById(context, message.notificationId);
+            if (!id.isEmpty()) LocalNotifications.cancel(context, id);
+            String route = NativePolicy.routeOr(extra.optString("route", ""), "#/chats");
+            Intent open = new Intent(context, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra("route", route)
+                    .putExtra("event_id", id);
             context.startActivity(open);
-        } catch (Exception ignored) { }
+        } catch (Exception failure) {
+            Log.w(TAG, "open handling failed: " + failure);
+        }
+    }
+
+    /** Clears any JPush notification for an event id and marks it read. */
+    static void cancel(Context context, String id) {
+        if (id == null || id.isEmpty() || id.length() > 512) return;
+        try {
+            int notification = PushEvents.markRead(context, id);
+            if (notification > 0) JPushInterface.clearNotificationById(context, notification);
+            if (NotificationManagerCompat.from(context).areNotificationsEnabled()) LocalNotifications.cancel(context, id);
+        } catch (Throwable failure) {
+            Log.w(TAG, "cancel failed: " + failure);
+        }
     }
 }

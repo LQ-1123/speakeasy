@@ -272,7 +272,8 @@ class V3Service:
             "nickname": persona["nickname"],
             # avatar 是兜底 URL（老客户端/封面用）；新客户端优先用 avatar_style + avatar_options
             "avatar": persona_avatar_url(persona),
-            "avatar_seed": persona.get("avatar_seed", ""),
+            # 缺 avatar_seed 的老人物退回 id，保证客户端种子稳定（与好友行同步规则一致）
+            "avatar_seed": str(persona.get("avatar_seed") or "").strip() or str(persona["id"]),
             **persona_avatar_meta(persona),
             "bio": persona["bio"],
             "interests": persona["interests"],
@@ -350,7 +351,7 @@ class V3Service:
             "id": persona["id"],
             "nickname": persona["nickname"],
             "avatar": persona_avatar_url(persona),
-            "avatar_seed": persona.get("avatar_seed", ""),
+            "avatar_seed": str(persona.get("avatar_seed") or "").strip() or str(persona["id"]),
             **persona_avatar_meta(persona),
             "bio": persona["bio"],
             "personality": persona["personality"],
@@ -476,8 +477,12 @@ class V3Service:
         author_type = str(row["author_type"] if "author_type" in keys else "user") or "user"
         author_pid = str(row["author_persona_id"] if "author_persona_id" in keys else "") or ""
         if author_type == "persona" and author_pid:
+            from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+            from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
+
             author = pmap.get(author_pid) or {}
             nickname = str(author.get("nickname") or "AI 人物")
+            meta = persona_avatar_meta(author) if author else {"avatar_style": "", "avatar_options": {}}
             return {
                 "id": row["id"],
                 "content": row["content"],
@@ -488,9 +493,10 @@ class V3Service:
                     "persona_id": author_pid,
                     "is_ai": True,
                     "ai_label": "AI 人物",
-                    "avatar_seed": str(author.get("avatar_seed") or author_pid),
-                    "avatar_style": str(author.get("avatar_style") or ""),
-                    "avatar_options": author.get("avatar_options") or {},
+                    # 评论作者头像与人物主页/聊天同源：同一个 seed + 同一组部件
+                    "avatar": persona_avatar_url(author) if author else "",
+                    "avatar_seed": str(author.get("avatar_seed") or "").strip() or author_pid,
+                    **meta,
                 },
             }
         return {
@@ -1114,6 +1120,9 @@ class V3Service:
 
     @staticmethod
     def _friendship_public(friendship: dict | None, pmap: dict | None = None) -> dict | None:
+        from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+        from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
+
         if not friendship:
             return None
         persona = (pmap or {}).get(str(friendship.get("persona_id"))) or {}
@@ -1128,7 +1137,11 @@ class V3Service:
             "persona": {
                 "id": persona.get("id"),
                 "nickname": persona.get("nickname", ""),
-                "avatar": persona.get("avatar", ""),
+                "avatar": persona_avatar_url(persona) if persona else "",
+                "avatar_seed": (
+                    str(persona.get("avatar_seed") or "").strip() or str(persona.get("id") or "")
+                ) if persona else "",
+                **(persona_avatar_meta(persona) if persona else {"avatar_style": "", "avatar_options": {}}),
                 "is_ai": True,
             } if persona else None,
         }
@@ -1144,6 +1157,14 @@ class V3Service:
         bio = str(persona.get("bio") or "")
         lang = str(persona.get("language") or "en").strip().lower()
         from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
+        from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
+
+        # 头像一致性：好友行**直接复制 persona 的头像元数据**（seed 不再拼接姓名），
+        # 并在这里就把缺失的 style/options 归一化成确定性部件 —— 这样
+        # /api/v2/friends 与 /api/v3/personas/* 拿到的是同一套 seed+style+options，
+        # 客户端 resolveAvatar 才会把同一个人画成同一张脸。
+        avatar_meta = persona_avatar_meta(persona)
+        avatar_seed = str(persona.get("avatar_seed") or "").strip() or str(persona["id"])
 
         # Speech DNA 里的口头禅 → 好友行的 speech_quirks：
         # 老 UI 的「说话方式」区块读的就是这一列，不填会显示成空块。
@@ -1163,10 +1184,10 @@ class V3Service:
 
         return {
             "name": name,
-            "avatar_seed": f"{persona['id']}-{name[:2].lower()}",
+            "avatar_seed": avatar_seed,
             "avatar_url": persona_avatar_url(persona),
-            "avatar_style": str(persona.get("avatar_style") or ""),
-            "avatar_options": str(persona.get("avatar_options") or ""),
+            "avatar_style": str(avatar_meta.get("avatar_style") or ""),
+            "avatar_options": json.dumps(avatar_meta.get("avatar_options") or {}, ensure_ascii=False),
             "archetype_id": str(persona.get("archetype_id") or ""),
             "voice_id": str(persona.get("voice_id") or ""),
             "fish_voice_id": str(persona.get("fish_voice_id") or ""),
@@ -1299,6 +1320,22 @@ class V3Service:
         pmap = self._persona_map()
         persona = pmap.get(str(row["persona_id"])) or {}
         payload = _loads(row["payload"], {})
+        if persona:
+            # 通知头像必须和人物主页/信息流作者**逐字段同源**（含 gender/country：
+            # 客户端 resolveAvatar 用 gender 选发型池，缺了就会同 seed 不同脸）。
+            persona_public = self._persona_brief(persona)
+        else:
+            persona_public = {
+                "id": row["persona_id"],
+                "nickname": "AI 人物",
+                "avatar": "",
+                "avatar_seed": str(row["persona_id"]),
+                "avatar_style": "",
+                "avatar_options": {},
+                "bio": "",
+                "is_ai": True,
+                "ai_label": "AI 人物",
+            }
         return {
             "id": row["id"],
             "type": row["event_type"],
@@ -1308,14 +1345,7 @@ class V3Service:
             "scheduled_at": row["scheduled_at"],
             "post_id": row["post_id"],
             "payload": payload,
-            "persona": {
-                "id": persona.get("id", row["persona_id"]),
-                "nickname": persona.get("nickname", "AI 人物"),
-                "avatar": persona.get("avatar", ""),
-                "bio": persona.get("bio", ""),
-                "is_ai": True,
-                "ai_label": "AI 人物",
-            },
+            "persona": persona_public,
         }
 
     def _existing_events(self, user_id: str, post_id: str) -> list[dict]:

@@ -14,7 +14,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { savedScrollPosition, useScrollMemory } from "../useScrollMemory";
+import { isNearBottom, isScrollingUp } from "../useScrollMemory";
 import {
   Camera,
   Image as ImageIcon,
@@ -137,6 +137,7 @@ export function ChatPane({
     typing,
     markRead,
     sendText,
+    retryMessage,
     sendVoiceBlob,
     sendImage,
     zhOpen,
@@ -148,7 +149,7 @@ export function ChatPane({
     translateAll,
     showToast,
     deleteFriend,
-  } = useApp(useShallow((state) => ({ friends: state.friends, friendById: state.friendById, loadThread: state.loadThread, messagesOf: state.messagesOf, typing: state.typing, markRead: state.markRead, sendText: state.sendText, sendVoiceBlob: state.sendVoiceBlob, sendImage: state.sendImage, zhOpen: state.zhOpen, toggleZh: state.toggleZh, translateMessage: state.translateMessage, toggleShownText: state.toggleShownText, saveSuggestion: state.saveSuggestion, dismissSuggestion: state.dismissSuggestion, translateAll: state.translateAll, showToast: state.showToast, deleteFriend: state.deleteFriend })));
+  } = useApp(useShallow((state) => ({ friends: state.friends, friendById: state.friendById, loadThread: state.loadThread, messagesOf: state.messagesOf, typing: state.typing, markRead: state.markRead, sendText: state.sendText, retryMessage: state.retryMessage, sendVoiceBlob: state.sendVoiceBlob, sendImage: state.sendImage, zhOpen: state.zhOpen, toggleZh: state.toggleZh, translateMessage: state.translateMessage, toggleShownText: state.toggleShownText, saveSuggestion: state.saveSuggestion, dismissSuggestion: state.dismissSuggestion, translateAll: state.translateAll, showToast: state.showToast, deleteFriend: state.deleteFriend })));
 
   const friend = friendById(friendId);
   const msgs = messagesOf(friendId);
@@ -217,10 +218,15 @@ export function ChatPane({
     setInfoOpen(true);
   };
 
-  const scrollRef = useScrollMemory<HTMLDivElement>(`thread:${friendId}`);
-  const initialThreadPosition = useRef(savedScrollPosition(`thread:${friendId}`));
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const [messageListOffset, setMessageListOffset] = useState(0);
+  /* 是否跟随新消息贴底：进入会话 / 自己发消息 / 输入框聚焦时强制贴底，用户上翻后取消 */
+  const stickToBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const scrollRafRef = useRef<number | null>(null);
+  const suppressScrollRef = useRef(0);
+  const scheduleScrollRef = useRef<() => void>(() => undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recTimer = useRef<number | null>(null);
   const recStart = useRef(0);
@@ -270,11 +276,6 @@ export function ChatPane({
       mqDesk.removeEventListener("change", updateDesk);
     };
   }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && initialThreadPosition.current === undefined) el.scrollTop = el.scrollHeight;
-  }, [msgs.length, isTyping, friendId]);
 
   useEffect(() => {
     setInfoOpen(wide);
@@ -399,6 +400,9 @@ export function ChatPane({
     const text = draft.trim();
     if (!pendingImage && !text) return;
     haptic("send");
+    /* 发送后一定回到底部：刚发出的气泡要在输入框正上方可见 */
+    stickToBottomRef.current = true;
+    scheduleScrollRef.current();
     if (pendingImage) {
       void sendImage(friendId, pendingImage, text);
       clearPendingImage();
@@ -510,6 +514,114 @@ export function ChatPane({
     return () => observer.disconnect();
   }, [friendId, Boolean(friend)]);
 
+  /* ------------------------------------------------------------ 贴底滚动 */
+  /* 进入会话/切好友、首次加载完成、自己发消息、输入框聚焦、键盘弹出时都滚到最新；
+     用户主动上翻后不强行贴底，除非又自己发消息。 */
+
+  /* 好友数据还没到时会先渲染「会话不存在」占位：等真正渲染出滚动容器再挂监听/首次贴底 */
+  const paneReady = Boolean(friend);
+  const lastMessageId = msgs.length ? msgs[msgs.length - 1].id : "";
+  const lastMessageMine = msgs.length > 0 && msgs[msgs.length - 1].from === "me";
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    /* 程序化滚动期间把「用户上翻」判定静音一段时间，避免自己滚到底反被当成用户操作 */
+    suppressScrollRef.current = performance.now() + 500;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const scroller = scrollRef.current;
+      if (!scroller) return;
+      if (msgs.length > 0) {
+        try {
+          /* 虚拟列表：先把最后一条滚进视口（含 scrollMargin 修正），再兜底滚到底 */
+          messageVirtualizer.scrollToIndex(msgs.length - 1, { align: "end" });
+        } catch {
+          /* 还没测量完时忽略，下一帧兜底 */
+        }
+      }
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+        lastScrollTopRef.current = el.scrollTop;
+      });
+    });
+  }, [messageVirtualizer, msgs.length]);
+
+  scheduleScrollRef.current = scheduleScrollToBottom;
+
+  /* 切换好友/进入会话：一律从最新消息开始，不沿用上一个会话的滚动位置 */
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    const frame = requestAnimationFrame(() => scheduleScrollRef.current());
+    /* 等 loadThread 回来 + 图片/字体完成布局，再补一次 */
+    const late = window.setTimeout(() => {
+      if (stickToBottomRef.current) scheduleScrollRef.current();
+    }, 240);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(late);
+    };
+  }, [friendId, paneReady]);
+
+  /* 消息列表变化（含首次加载完成）、对方正在输入、列表偏移变化：贴底时跟随 */
+  useLayoutEffect(() => {
+    if (stickToBottomRef.current) scheduleScrollRef.current();
+  }, [msgs.length, lastMessageId, isTyping, messageListOffset, paneReady]);
+
+  /* 用户滚动：明显上翻就停止跟随；贴底时才继续跟随 */
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    lastScrollTopRef.current = scroller.scrollTop;
+    const onScroll = () => {
+      const top = scroller.scrollTop;
+      const previous = lastScrollTopRef.current;
+      lastScrollTopRef.current = top;
+      if (isScrollingUp(previous, top)) {
+        stickToBottomRef.current = false;
+        return;
+      }
+      /* 程序化贴底滚动会经过中间位置，窗口内不据此判定用户意图 */
+      if (performance.now() < suppressScrollRef.current) return;
+      stickToBottomRef.current = isNearBottom(scroller);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    /* 键盘弹出/收起（visualViewport）与 --ime-height 驱动的容器高度变化 → 贴底时重新滚到最新 */
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scheduleScrollRef.current();
+    });
+    observer.observe(scroller);
+    const viewport = window.visualViewport;
+    const onViewport = () => {
+      if (stickToBottomRef.current) scheduleScrollRef.current();
+    };
+    viewport?.addEventListener("resize", onViewport);
+    viewport?.addEventListener("scroll", onViewport);
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+      viewport?.removeEventListener("resize", onViewport);
+      viewport?.removeEventListener("scroll", onViewport);
+    };
+  }, [paneReady]);
+
+  /* 自己发消息 → 强制贴底（即使之前翻到了上面） */
+  useEffect(() => {
+    if (!lastMessageMine) return;
+    stickToBottomRef.current = true;
+    scheduleScrollRef.current();
+  }, [lastMessageId, lastMessageMine]);
+
+  /* 聚焦输入框：键盘弹出后仍让最新消息可见 */
+  const handleComposerFocus = useCallback(() => {
+    stickToBottomRef.current = true;
+    scheduleScrollRef.current();
+    window.setTimeout(() => {
+      if (stickToBottomRef.current) scheduleScrollRef.current();
+    }, 260);
+  }, []);
+
   if (!friend) {
     return (
       <div className="w4-main">
@@ -578,7 +690,8 @@ export function ChatPane({
               {hasOlder ? <button className="se-load-older" disabled={loadingOlder} onClick={async () => {
                 const node = scrollRef.current;
                 const height = node?.scrollHeight || 0;
-                initialThreadPosition.current = node?.scrollTop || 0;
+                /* 加载更早消息时保持视野不动：上翻状态由 scroll 监听自然取消，不强制贴底 */
+                stickToBottomRef.current = false;
                 setLoadingOlder(true);
                 await loadOlderThread(friendId);
                 setLoadingOlder(false);
@@ -615,6 +728,7 @@ export function ChatPane({
                         saveSuggestion(m.id);
                       }}
                       onDismiss={() => dismissSuggestion(m.id)}
+                      onRetry={() => retryMessage(m.id)}
                       onZoom={setZoom}
                       onLongPress={(pos) =>
                         setMsgMenu({ message: m, x: pos.x, y: pos.y })
@@ -663,6 +777,7 @@ export function ChatPane({
                     rows={1}
                     value={draft}
                     placeholder={`跟 ${friend.name} 说点什么`}
+                    onFocus={handleComposerFocus}
                     onChange={(e) => {
                       setDraft(e.target.value);
                       const el = e.target;
@@ -670,7 +785,8 @@ export function ChatPane({
                       el.style.height = `${Math.min(132, el.scrollHeight)}px`;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      /* 输入法组词中的回车 / 按住回车的 repeat 不发送 */
+                      if (e.key === "Enter" && !e.shiftKey && !e.repeat && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         send();
                       }
@@ -839,6 +955,7 @@ export function ChatPane({
                       rows={1}
                       value={draft}
                       placeholder={`跟 ${friend.name} 说点什么`}
+                      onFocus={handleComposerFocus}
                       onChange={(e) => {
                         setDraft(e.target.value);
                         const el = e.target;
@@ -846,7 +963,8 @@ export function ChatPane({
                         el.style.height = `${Math.min(132, el.scrollHeight)}px`;
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        /* 输入法组词中的回车 / 按住回车的 repeat 不发送 */
+                        if (e.key === "Enter" && !e.shiftKey && !e.repeat && !e.nativeEvent.isComposing) {
                           e.preventDefault();
                           send();
                         }
@@ -1071,6 +1189,7 @@ function MessageRow({
   onToggleText,
   onSave,
   onDismiss,
+  onRetry,
   onZoom,
   onLongPress,
   onAvatarClick,
@@ -1086,6 +1205,7 @@ function MessageRow({
   onToggleText: () => void;
   onSave: () => void;
   onDismiss: () => void;
+  onRetry: () => void;
   onZoom: (src: string) => void;
   onLongPress?: (pos: { x: number; y: number }) => void;
   onAvatarClick?: () => void;
@@ -1176,7 +1296,7 @@ function MessageRow({
         <div className="w4-bubble-row">
           <div className="w4-bubble-stack">
           <div
-            className={`w4-bubble ${isImage ? "is-image" : ""} ${readable ? "is-readable" : ""} ${readable && playing ? "is-reading" : ""}`}
+            className={`w4-bubble ${isImage ? "is-image" : ""} ${isVoice ? "is-voice" : ""} ${message.failed ? "is-failed" : ""} ${readable ? "is-readable" : ""} ${readable && playing ? "is-reading" : ""}`}
             title={readable ? "单击朗读 · 长按或右键翻译" : clockTime(message.time)}
             role={readable ? "button" : undefined}
             tabIndex={readable ? 0 : undefined}
@@ -1276,9 +1396,14 @@ function MessageRow({
               {zhShown ? "收起翻译" : "翻译"}
             </button>
           ) : null}
-          <span className="w4-msg-meta">
+          {mine && message.failed ? (
+            <button className="w4-mini-btn is-retry" onClick={onRetry} title="重新发送（不会重复）">
+              重试
+            </button>
+          ) : null}
+          <span className={`w4-msg-meta${mine && message.failed ? " is-failed" : ""}`}>
             {clockTime(message.time)}
-            {mine ? (message.read ? " · 已读" : " · 发送中") : ""}
+            {mine ? (message.failed ? " · 发送失败" : message.read ? " · 已读" : " · 发送中") : ""}
           </span>
         </div>
       </div>

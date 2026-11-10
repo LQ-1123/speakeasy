@@ -16,7 +16,7 @@ import { Check, ChevronLeft, MessageCircle, X } from "lucide-react";
 
 import type { Route } from "../model";
 import { useApp } from "../store";
-import { personaAvatarSrc } from "../avatar";
+import { resolveAvatar } from "../avatar";
 import { haptic } from "../../theme/haptics";
 import { Avatar } from "../ui";
 import {
@@ -260,12 +260,7 @@ export function PersonaProfileView({
               <section className="disc-profile-hero" aria-label={`${profile.nickname} 的资料`}>
                 <div className="disc-profile-avatar">
                   <Avatar
-                    src={personaAvatarSrc(
-                      profile.avatar_seed || profile.id,
-                      profile.avatar_style,
-                      profile.avatar_options,
-                      profile.avatar,
-                    )}
+                    src={resolveAvatar(profile)}
                     name={profile.nickname}
                     size={132}
                     round

@@ -656,6 +656,7 @@ pytest backend/tests -q
 | [docs/TEEN_MODE.md](docs/TEEN_MODE.md) | 青少年模式：监护绑定、60 分钟/30 分钟提醒/宵禁、HTTP 与实时通道门禁、推送抑制、AI 身份披露 |
 | [docs/PERSONALIZATION.md](docs/PERSONALIZATION.md) | 个性化世界：统一标签 ID/多语言、推荐快照游标与 20% 探索、生成批次恢复、过期清理与人物供给 |
 | [docs/ADS.md](docs/ADS.md) | 商业合作：管理台品牌/活动/素材/分配、聊天与动态投放、频控与原子预留、事件与留痕 |
+| [docs/PROMPTS.md](docs/PROMPTS.md) | Prompt 控制台：A–H 模块、可改写边界、与酒馆（SillyTavern）文风/角色卡的对应与迁移步骤 |
 | [docs/local-mode.md](docs/local-mode.md) | 无服务器本地模式 |
 | [deploy/README.md](deploy/README.md) | 服务器部署细节 |
 

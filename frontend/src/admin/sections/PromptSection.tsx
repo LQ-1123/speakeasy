@@ -275,6 +275,30 @@ function trimmedLines(trimmed: unknown): string[] {
 /* 分区                                                                        */
 /* -------------------------------------------------------------------------- */
 
+/** 从酒馆（SillyTavern）预设 JSON 中抽取「文风」草稿，供「角色文风」模块使用。 */
+function extractTavernStyle(raw: string): { text: string; count: number; error?: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return { text: "", count: 0, error: "不是合法 JSON" };
+  }
+  const container = data as { prompts?: unknown };
+  const list = Array.isArray(data) ? data : Array.isArray(container?.prompts) ? container.prompts : null;
+  if (!list) return { text: "", count: 0, error: "没找到 prompts 数组（请粘贴酒馆预设 JSON）" };
+  const entries = list.filter(
+    (entry): entry is { content: string; identifier?: string; name?: string; enabled?: boolean } =>
+      Boolean(entry) &&
+      typeof (entry as { content?: unknown }).content === "string" &&
+      String((entry as { content: string }).content).trim() !== "" &&
+      (entry as { enabled?: boolean }).enabled !== false,
+  );
+  const styleLike = /style|文风|main|jailbreak|author|writer|narrat/i;
+  const picked = entries.filter((entry) => styleLike.test(`${entry.identifier ?? ""} ${entry.name ?? ""}`));
+  const chosen = (picked.length > 0 ? picked : entries).map((entry) => entry.content.trim());
+  return { text: chosen.join("\n\n"), count: chosen.length };
+}
+
 export default function PromptSection() {
   const queryClient = useQueryClient();
   const { toasts, push } = useToasts();
@@ -285,6 +309,10 @@ export default function PromptSection() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [selectedKey, setSelectedKey] = useState("");
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  /** 「角色文风」的酒馆预设导入面板 */
+  const [styleImportOpen, setStyleImportOpen] = useState(false);
+  const [styleImportText, setStyleImportText] = useState("");
+  const [styleImportInfo, setStyleImportInfo] = useState("");
   const [saveIssues, setSaveIssues] = useState<string[]>([]);
   const [clearOpen, setClearOpen] = useState(false);
   const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<PromptTemplate | null>(null);
@@ -797,6 +825,56 @@ export default function PromptSection() {
                       mono
                       placeholder="留空 = 不覆盖（回到原文）；这里写的就是这个模块最终会注入的文案"
                     />
+
+                    {selectedModule.key === "style" ? (
+                      <div className="admin-col" style={{ gap: 6, marginTop: 10 }}>
+                        <div className="admin-row" style={{ gap: 8, flexWrap: "wrap" }}>
+                          <Button size="sm" onClick={() => setStyleImportOpen((value) => !value)}>
+                            {styleImportOpen ? "收起酒馆导入" : "从酒馆预设导入文风"}
+                          </Button>
+                          <span className="admin-muted" style={{ fontSize: 11 }}>
+                            支持 SillyTavern 预设 JSON，提取 style/main 等条目；{"{{char}}"}/{"{{user}}"} 会替换成角色名/用户昵称
+                          </span>
+                        </div>
+                        {styleImportOpen ? (
+                          <>
+                            <TextArea
+                              value={styleImportText}
+                              onChange={(value) => setStyleImportText(value)}
+                              rows={6}
+                              mono
+                              placeholder='粘贴酒馆预设 JSON，例如 {"prompts":[{"identifier":"style","content":"...","enabled":true}]}'
+                            />
+                            <div className="admin-row" style={{ flexWrap: "wrap" }}>
+                              <Button
+                                size="sm"
+                                disabled={!styleImportText.trim()}
+                                onClick={() => {
+                                  const result = extractTavernStyle(styleImportText);
+                                  if (result.error) {
+                                    setStyleImportInfo(`导入失败：${result.error}`);
+                                    return;
+                                  }
+                                  if (!result.text) {
+                                    setStyleImportInfo("没有可用的文风条目（enabled 且 content 非空）。");
+                                    return;
+                                  }
+                                  setDraft("style", result.text);
+                                  setStyleImportInfo(
+                                    `已提取 ${result.count} 条，共 ${result.text.length} 字符；超过 900 字会被截断，确认后点「保存改写」。`,
+                                  );
+                                }}
+                              >
+                                解析并填入
+                              </Button>
+                              {styleImportInfo ? (
+                                <span className="admin-muted" style={{ fontSize: 11 }}>{styleImportInfo}</span>
+                              ) : null}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     <div className="admin-row" style={{ marginTop: 8 }}>
                       <span className="admin-muted">

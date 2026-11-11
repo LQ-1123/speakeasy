@@ -34,6 +34,7 @@ TEXT_KEYS = [
     "global",
     "language",
     "character_card",
+    "style",
     "scenario",
     "user_persona",
     "relationship_memory",
@@ -44,7 +45,15 @@ TEXT_KEYS = [
 ]
 
 #: 通话模式的注入顺序（精简）
-CALL_KEYS = ["global", "character_card", "scenario", "language", "behavior", "author_note"]
+CALL_KEYS = [
+    "global",
+    "character_card",
+    "style",
+    "scenario",
+    "language",
+    "behavior",
+    "author_note",
+]
 
 
 @pytest.fixture()

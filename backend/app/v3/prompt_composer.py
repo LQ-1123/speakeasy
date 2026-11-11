@@ -44,13 +44,35 @@ from app.v3 import first_message as first_message_mod
 log = get_logger(__name__)
 
 #: Prompt 版本号（团队后续可比较；改动模块契约/顺序时递增）
-PROMPT_VERSION = "sonder-prompt-3.2.0"
+PROMPT_VERSION = "sonder-prompt-3.3.0"
 
 #: 版本登记表（管理端 /prompt/versions 用；至少当前版本 + 历史占位）
 PROMPT_VERSIONS: list[dict[str, Any]] = [
     {
         "version": PROMPT_VERSION,
         "status": "current",
+        "released": "2026-11-12",
+        "notes": (
+            "新增「角色文风」模块（可改写，吸收酒馆/SillyTavern 风格文本）；"
+            "支持 {{char}}/{{user}} 宏；沿用 A–H 模块化与反模板化。"
+        ),
+        "modules": [
+            "global",
+            "language",
+            "character_card",
+            "style",
+            "scenario",
+            "user_persona",
+            "relationship_memory",
+            "examples",
+            "opening",
+            "behavior",
+            "author_note",
+        ],
+    },
+    {
+        "version": "sonder-prompt-3.2.0",
+        "status": "history",
         "released": "2026-11-10",
         "notes": "A–H 模块化 Prompt Composer；反模板化；用户画像动态化；first_message 开场。",
         "modules": [
@@ -1329,11 +1351,24 @@ def _build_author_note(ctx: _Context) -> PromptModule:
     )
 
 
+#: 角色文风（可改写）：默认空，只有运营在 Prompt 控制台填写后才注入。
+#: 用来承接「酒馆/SillyTavern」这类外部文风预设里抽出来的 style 文本。
+MAX_STYLE_CHARS = 900
+
+
+def _build_style(ctx: _Context) -> PromptModule:
+    """角色文风占位模块：内容完全来自运营改写（``module_overrides["style"]``）。"""
+    return PromptModule(
+        key="style", layer="B", title="角色文风", text="", source="persona", enabled=False
+    )
+
+
 #: A–H 注入顺序（文字/图片模式）。**顺序即契约**：前端调试面板依赖它。
 TEXT_MODULE_SPEC: tuple[tuple[str, str, str, Any, str], ...] = (
     ("global", "A", "平台基础规则", _build_global, "global"),
     ("language", "A", "语言规则", _build_language, "persona"),
     ("character_card", "B", "结构化角色卡", _build_character_card, "persona"),
+    ("style", "B", "角色文风", _build_style, "persona"),
     ("scenario", "C", "此刻生活与既有事实", _build_scenario, "plan"),
     ("user_persona", "F", "用户画像（动态资料）", _build_user_persona, "profile"),
     ("relationship_memory", "G", "关系与共同记忆", _build_relationship_memory, "memory"),
@@ -1347,6 +1382,7 @@ TEXT_MODULE_SPEC: tuple[tuple[str, str, str, Any, str], ...] = (
 CALL_MODULE_SPEC: tuple[tuple[str, str, str, Any, str], ...] = (
     ("global", "A", "平台基础规则（通话版）", _build_global, "global"),
     ("character_card", "B", "角色卡（通话版）", _build_character_card, "persona"),
+    ("style", "B", "角色文风（通话版）", _build_style, "persona"),
     ("scenario", "C", "此刻生活（通话版）", _build_scenario, "plan"),
     ("language", "A", "语言规则（通话版）", _build_language, "persona"),
     ("behavior", "H", "本轮行为（通话版）", _build_behavior, "plan"),
@@ -1409,6 +1445,18 @@ def _apply_budget(modules: list[PromptModule], *, budget: int, ctx: _Context) ->
     if _size(modules) > budget:
         # opening 只在「还没有任何聊天历史」时才有用，第二优先级
         _drop_module("opening")
+    if _size(modules) > budget:
+        # 角色文风是运营手填的，超预算时先压缩再考虑丢
+        module = _find(modules, "style")
+        if module is not None and module.enabled and module.text:
+            base = _size(modules) - len(module.text) - 2
+            allowed = budget - base
+            if allowed >= 200:
+                _set_text(module, _clip(module.text, allowed))
+                trimmed.append("style:trimmed")
+            else:
+                _set_text(module, "")
+                trimmed.append("style:dropped")
     if _size(modules) > budget:
         # 生活事实细节：先丢「最近动态/计划」等细节，保留「身边的人」关系块
         module = _find(modules, "scenario")
@@ -1578,6 +1626,32 @@ def _saved_overrides(db: Any, friend: Mapping[str, Any] | None, mode: str) -> di
     return {key: text for key, text in saved.items() if key in allowed}
 
 
+def _style_override_text(ctx: _Context, text: str) -> str:
+    """角色文风改写：长度上限 + 支持酒馆常用宏（{{char}} / {{user}} / <bot> / <user>）。"""
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    body = _clip(body, MAX_STYLE_CHARS)
+    char_name = str((ctx.friend or {}).get("name") or "").strip()
+    user_name = ""
+    try:
+        from app.v3.security import current_user_id  # noqa: PLC0415
+
+        if ctx.db is not None:
+            profile = ctx.db.get_profile(user_id=current_user_id()) or {}
+            user_name = str(profile.get("nickname") or "").strip()
+    except Exception:  # noqa: BLE001 - 拿不到昵称就保留宏原文
+        user_name = ""
+    if char_name:
+        body = body.replace("{{char}}", char_name).replace("<bot>", char_name)
+    if user_name:
+        body = body.replace("{{user}}", user_name).replace("<user>", user_name)
+    # 预览/后台没有绑定用户时也别把宏原样喂给模型
+    body = body.replace("{{char}}", "TA").replace("<bot>", "TA")
+    body = body.replace("{{user}}", "你").replace("<user>", "你")
+    return body
+
+
 def _compose_modules(ctx: _Context, overrides: dict[str, str]) -> list[PromptModule]:
     spec = CALL_MODULE_SPEC if ctx.is_call else TEXT_MODULE_SPEC
     modules: list[PromptModule] = []
@@ -1598,6 +1672,8 @@ def _compose_modules(ctx: _Context, overrides: dict[str, str]) -> list[PromptMod
             )
         if key in overrides:
             override_text = str(overrides[key] or "")
+            if key == "style":
+                override_text = _style_override_text(ctx, override_text)
             _set_text(module, override_text)
         modules.append(module)
     # 未知 key 的覆盖：忽略（不动态新增模块，避免破坏 A–H 顺序契约）

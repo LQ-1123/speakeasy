@@ -102,6 +102,34 @@ def test_override_does_not_leak_into_other_personas(db):
     assert _module_text(composed, "character_card") != "小林的专属"
 
 
+def test_style_module_is_empty_until_written(db):
+    """「角色文风」默认不注入任何东西。"""
+    composed = _compose(db)
+    style = composed.module("style")
+    assert style is not None
+    assert style.enabled is False
+    assert style.text == ""
+
+
+def test_style_override_supports_tavern_macros(db):
+    """酒馆风格文本里的 {{char}} 要替换成角色名，而不是原样喂给模型。"""
+    marker = "用短句叙述，{{char}} 说话慢，偶尔停顿。"
+    prompt_overrides.replace(db, "p_test", "text", {"style": marker})
+
+    composed = _compose(db)
+    style = _module_text(composed, "style")
+    assert "小林" in style
+    assert "{{char}}" not in style
+    assert "<bot>" not in style
+    assert style.startswith("用短句叙述")
+
+
+def test_style_override_is_mode_scoped(db):
+    """文字模式写文风，不影响通话模式（除非通话也单独写）。"""
+    prompt_overrides.replace(db, "p_test", "text", {"style": "文字模式专属文风"})
+    assert _module_text(_compose(db, "call"), "style") == ""
+
+
 def test_explicit_override_wins_for_preview(db):
     """管理端"改完先预览"：显式传入的临时覆盖要盖过已保存的。"""
     prompt_overrides.replace(db, "p_test", "text", {"character_card": "已保存的版本"})

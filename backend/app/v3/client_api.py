@@ -13,12 +13,20 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from app.v3.calls import require_user
+from app.v3 import teen
+from app.v3.calls import minor_gate, require_user
 from app.v2.router import _message_public, _expression_public
 from app.v2.timeutil import local_state
 
 router = APIRouter(prefix="/api/v3/client", tags=["client"])
-DEFAULT_PREFERENCES = {"messages": True, "interactions": True, "sound": True, "theme": "system"}
+DEFAULT_PREFERENCES = {
+    "messages": True,
+    "interactions": True,
+    "sound": True,
+    "theme": "system",
+    # 合作推荐（广告）默认关闭：只有成年且主动开启的用户才可能看到
+    "ads": False,
+}
 EVENT_TICKETS: dict[str, tuple[str, float]] = {}
 DDL = """
 CREATE TABLE IF NOT EXISTS client_preferences(user_id TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -50,6 +58,7 @@ class PreferencePatch(BaseModel):
     interactions: bool | None = None
     sound: bool | None = None
     theme: Literal["system", "light", "dark"] | None = None
+    ads: bool | None = None
 
 
 @router.get("/preferences")
@@ -107,6 +116,7 @@ def bootstrap_data(db, user):
 @router.get('/bootstrap')
 async def bootstrap(request: Request):
     user = await require_user(request)
+    minor_gate(request.app.state.v2.db, user, feature="feed")
     return await asyncio.to_thread(bootstrap_data, request.app.state.v2.db, user)
 
 
@@ -135,6 +145,7 @@ async def register_device(body: DeviceIn, request: Request):
 @router.post('/event-ticket')
 async def event_ticket(request: Request):
     user = await require_user(request)
+    minor_gate(request.app.state.v2.db, user, feature="feed")
     now = time.time()
     for key, (_, expiry) in list(EVENT_TICKETS.items()):
         if expiry < now:
@@ -172,6 +183,13 @@ async def event_socket(ws: WebSocket):
             await ws.close(code=4401)
         return
     db = ws.app.state.v2.db
+    # 青少年模式：事件流属于"主动内容"，建连前再判一次（ticket 可能在允许时段签发）。
+    try:
+        teen.enforce(db, user, feature="feed")
+    except PermissionError as exc:
+        with contextlib.suppress(Exception):
+            await ws.close(code=4003, reason=f"minor:{exc}"[:120])
+        return
     try:
         await ws.send_json({'type':'ready','sequence':cursor})
         while True:

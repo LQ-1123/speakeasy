@@ -32,6 +32,8 @@ import { backToParent, closeTopOverlay, navigateTo, syncFromHash, useNavigation 
 import { usePreferences } from "./v3/preferences";
 import { PushOptIn } from "./v3/PushOptIn";
 import { GlobalNotification } from "./v3/GlobalNotification";
+import { AuthGate } from "./v3/AuthGate";
+import { TeenGate } from "./v3/TeenGate";
 import { installAudioBus } from "./audioBus";
 import { installApiIdentity } from "./v3/api";
 import { Icon } from "./ui";
@@ -50,6 +52,7 @@ import { RequestsPane } from "./components/RequestsPane";
 import { EmptyState } from "./components/EmptyState";
 import { FeedView } from "./v3/FeedView";
 import { EventsView } from "./v3/EventsView";
+import { Onboarding } from "./v3/Onboarding";
 import { PersonaProfileView } from "./v3/PersonaProfileView";
 import { installPreviewAdapter, isPreviewMode, previewVariant } from "./previewAdapter";
 import { PreviewBridge } from "./previewBridge";
@@ -104,7 +107,7 @@ function BootPlaceholder() {
 
 
 function Shell() {
-  const { toast, requests, friends, booted, bootError, friendCount } = useApp(
+  const { toast, requests, friends, booted, bootError, friendCount, profile } = useApp(
     useShallow((state) => {
       /* chat-ui 在 store 里加 booted 之前，这里按可选字段读取；缺失时走回退启发式。 */
       const optional = state as unknown as { booted?: unknown };
@@ -114,6 +117,7 @@ function Shell() {
         friends: state.friends,
         bootError: state.bootError,
         friendCount: state.friends.length,
+        profile: state.profile,
         booted: typeof optional.booted === "boolean" ? optional.booted : null,
       };
     }),
@@ -311,6 +315,22 @@ function Shell() {
   /* 所有 hooks 已执行完，再决定是否显示 bootstrap 占位（避免 hooks 顺序变化）。 */
   if (!bootSettled) return <BootPlaceholder />;
 
+  /* 首次引导闸门：bootstrap 结束后，后端明确说「资料还没完成」才用全屏 Onboarding
+     取代整个 w4-app（不渲染底部 Tab / 侧栏 / 通知卡）。
+     - 只有 === false 才展示：undefined 表示还不知道（未完成 bootstrap / fixture），
+       提前渲染会闪一下引导页；
+     - bootError 时保持现有界面：离线不强迫用户填资料；
+     - 设计验收 iframe（?preview=1）的 profile 是 fixture，必须跳过引导。 */
+  const showOnboarding = !bootError && !isPreviewMode() && profile.setupCompleted === false;
+
+  if (showOnboarding) {
+    return (
+      <div className="w4-root" style={{ height: "100%" }}>
+        <Onboarding />
+      </div>
+    );
+  }
+
   const dataView = mobile && !listIndex ? "main" : "list";
 
   return (
@@ -419,11 +439,11 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <AppProvider>
           <Shell />
+          <AuthGate />
+          <TeenGate />
           {preview ? <PreviewBridge variant={previewVariant()} /> : null}
         </AppProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );
 }
-
-/** 本地模式首次进入：三步上手引导 */

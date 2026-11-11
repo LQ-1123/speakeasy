@@ -150,6 +150,12 @@ def snapshot(services: Any) -> dict[str, Any]:
         out["deepgram"] = deepgram_status()
     except Exception as exc:  # noqa: BLE001
         out["deepgram"] = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+    try:
+        from app.v3 import push_config  # noqa: PLC0415
+
+        out["jpush"] = push_config.status()
+    except Exception as exc:  # noqa: BLE001
+        out["jpush"] = {"configured": False, "error": f"{type(exc).__name__}: {exc}"}
     out["client_locked"] = str(os.getenv("ALLOW_KEY_EDIT", "0")).strip().lower() not in (
         "1",
         "true",
@@ -371,6 +377,85 @@ async def test_deepgram(services: Any) -> dict[str, Any]:
     return await _probe_deepgram(deepgram_key())
 
 
+# --------------------------------------------------------------------------- #
+# JPush 推送
+# --------------------------------------------------------------------------- #
+async def save_jpush(services: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """保存 JPush 的 AppKey / MasterSecret。
+
+    空值 = 不修改；``__CLEAR__`` = 清除管理台保存的值（.env / 环境变量仍生效）。
+    **先验证再落盘**：密钥错的话推送会静默失败（只在日志里看到 401），
+    所以这里用一次真实鉴权请求确认，失败不保存。
+    """
+    from app.v3 import push_config  # noqa: PLC0415
+
+    app_key = payload.get("app_key")
+    master_secret = payload.get("master_secret")
+
+    clearing = str(app_key or "") == "__CLEAR__" or str(master_secret or "") == "__CLEAR__"
+    if clearing:
+        if not push_config.save_runtime("", ""):
+            return {"ok": False, "issues": ["清除 data/jpush_config.json 失败"]}
+        return {"ok": True, "jpush": push_config.status(), "verified": None}
+
+    stored = push_config.runtime()
+    # 留空表示沿用已保存的值（界面上密钥是脱敏显示的，不能要求重输）
+    next_key = str(app_key).strip() if isinstance(app_key, str) and app_key.strip() else stored["app_key"]
+    next_secret = (
+        str(master_secret).strip()
+        if isinstance(master_secret, str) and master_secret.strip()
+        else stored["master_secret"]
+    )
+    if not next_key or not next_secret:
+        return {"ok": False, "issues": ["AppKey 与 MasterSecret 都需要填写"]}
+    if len(next_key) < 16 or len(next_secret) < 16:
+        return {"ok": False, "issues": ["AppKey / MasterSecret 看起来不完整（一般 24 / 40 位）"]}
+
+    verified = await _probe_jpush(next_key, next_secret)
+    if not verified.get("ok") and not payload.get("force"):
+        return {
+            "ok": False,
+            "verified": verified,
+            "issues": ["鉴权失败，未保存：" + str(verified.get("message"))],
+        }
+    if not push_config.save_runtime(next_key, next_secret):
+        return {"ok": False, "issues": ["写入 data/jpush_config.json 失败"]}
+    return {"ok": True, "jpush": push_config.status(), "verified": verified}
+
+
+async def test_jpush(services: Any) -> dict[str, Any]:
+    """用当前生效的凭据做一次鉴权探测。"""
+    from app.v3 import push_config  # noqa: PLC0415
+
+    creds = push_config.effective()
+    if not creds["app_key"] or not creds["master_secret"]:
+        return {"ok": False, "message": "JPush 未配置（AppKey / MasterSecret 都为空）"}
+    return await _probe_jpush(creds["app_key"], creds["master_secret"])
+
+
+async def _probe_jpush(app_key: str, master_secret: str) -> dict[str, Any]:
+    """打一次 JPush 只读接口确认凭据有效。
+
+    用 ``GET /v3/devices/{registration_id}`` 而不是真发推送：发推送会给真实用户
+    弹通知，运营点「测试连接」不该产生副作用。
+    """
+    import base64  # noqa: PLC0415
+
+    import httpx  # noqa: PLC0415
+
+    token = base64.b64encode(f"{app_key}:{master_secret}".encode()).decode()
+    url = "https://api.jpush.cn/v3/devices/0"  # 不存在的 id，用来只看鉴权结果
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Basic {token}"})
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+    # 401/403 = 凭据无效；其它状态（含 404/400）说明鉴权通过了
+    if resp.status_code in (401, 403):
+        return {"ok": False, "status": resp.status_code, "message": "AppKey 或 MasterSecret 无效"}
+    return {"ok": True, "status": resp.status_code, "message": "鉴权通过"}
+
+
 async def test_stt(services: Any) -> dict[str, Any]:
     from app.voice.stt_config import verify_config as verify_stt_config  # noqa: PLC0415
 
@@ -385,10 +470,12 @@ async def test_stt(services: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "save_jpush",
     "save_llm",
     "save_stt",
     "save_tts",
     "snapshot",
+    "test_jpush",
     "test_llm",
     "test_stt",
     "test_tts",

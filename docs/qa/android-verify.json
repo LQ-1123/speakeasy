@@ -1,0 +1,92 @@
+{
+    "kind":  "android-apk-verification",
+    "generated_at":  "2026-11-10T19:27:24.5614705+08:00",
+    "apk":  "deliverables\\SpeakEasy-v4.2.0-release.apk",
+    "versionName":  "4.2.0",
+    "versionCode":  420,
+    "sha256":  "779f36f5ce9bc774999a37a158bdaec3d3c886ef1a5b5c3984473e4b665aad83",
+    "size_bytes":  15086185,
+    "signing":  {
+                    "scheme":  "v2",
+                    "cert_sha256":  "fac7e179e0365593908c632b2e4b71b87a6bfa6e66aa8fd86a33a416658369b1",
+                    "same_as_previous_release":  true,
+                    "cert_dn":  "CN=SpeakEasy, OU=Dev, O=SpeakEasy, L=Shanghai, ST=Shanghai, C=CN"
+                },
+    "api_base":  "https://47-104-24-236.sslip.io",
+    "static_check":  {
+                         "secret_leak_present":  false,
+                         "lan_ip_present":  false,
+                         "localhost_endpoint_present":  false,
+                         "prod_domain_present":  true,
+                         "report":  "artifacts/qa-reports/apk-inspect.json"
+                     },
+    "device":  {
+                   "abi":  "x86_64",
+                   "android_release":  "16",
+                   "api_level":  36,
+                   "model":  "Android Emulator (AVD sonder42)",
+                   "resolution":  "1080x2400"
+               },
+    "checks":  [
+                   {
+                       "detail":  "adb install -r: Success",
+                       "ok":  true,
+                       "name":  "APK 安装成功"
+                   },
+                   {
+                       "detail":  "am start -W Status=ok TotalTime=3297ms",
+                       "ok":  true,
+                       "name":  "启动成功（cold start）"
+                   },
+                   {
+                       "detail":  "versionCode=420 versionName=4.2.0",
+                       "ok":  true,
+                       "name":  "包版本正确"
+                   },
+                   {
+                       "detail":  "artifacts/android-verify/01-launch.png",
+                       "ok":  true,
+                       "name":  "WebView 内首次引导 Step1 显示"
+                   },
+                   {
+                       "detail":  "05-step2.png",
+                       "ok":  true,
+                       "name":  "WebView 内 Step2 目标语言+分语言水平"
+                   },
+                   {
+                       "detail":  "06-step3.png",
+                       "ok":  true,
+                       "name":  "WebView 内 Step3 兴趣+纠错偏好"
+                   },
+                   {
+                       "detail":  "生产 user_profiles 由 83 → 90 且全部 setup_completed",
+                       "ok":  true,
+                       "name":  "完成建档写入生产 API"
+                   },
+                   {
+                       "detail":  "07-main-after-onboarding.png",
+                       "ok":  true,
+                       "name":  "进入主界面（消息/通讯录/发现/我）"
+                   },
+                   {
+                       "detail":  "366 条人物动态（真实 LLM 内容）09-discover.png",
+                       "ok":  true,
+                       "name":  "发现页加载生产动态"
+                   },
+                   {
+                       "detail":  "AndroidE2E · 英语 能聊几句 11-me-retry.png",
+                       "ok":  true,
+                       "name":  "「我」页显示建档昵称与水平"
+                   },
+                   {
+                       "detail":  "force-stop + 重新冷启动 10-relaunch.png",
+                       "ok":  true,
+                       "name":  "杀进程重启后不再出现引导"
+                   },
+                   {
+                       "detail":  "logcat 无 FATAL/AndroidRuntime",
+                       "ok":  true,
+                       "name":  "无崩溃/FATAL 日志"
+                   }
+               ]
+}

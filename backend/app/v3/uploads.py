@@ -9,10 +9,12 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+from typing import Any
 
 from PIL import Image, ImageOps
 
 from app.logging_utils import get_logger
+from app.v3.media_access import register_uploaded_asset
 
 log = get_logger(__name__)
 
@@ -30,8 +32,16 @@ def user_hash(user_id: str) -> str:
     return hashlib.sha1(("user:" + (user_id or "local")).encode("utf-8")).hexdigest()[:12]
 
 
-def save_user_image(raw: bytes, user_id: str, uploads_root: str) -> dict:
-    """保存一张用户图片，返回 {url,width,height,bytes}。"""
+def save_user_image(
+    raw: bytes, user_id: str, uploads_root: str, *, db: Any | None = None
+) -> dict:
+    """保存一张用户图片，返回 {url,width,height,bytes}。
+
+    多用户隔离：落盘后顺手在 ``media_assets`` 里登记归属（kind=``post_image``）。
+    登记是**尽力而为**的，失败不影响上传；``db`` 省略时由
+    :func:`app.v3.media_access.register_uploaded_asset` 从数据目录定位应用库
+    （``/api/v3/media/upload`` 路由目前没传 db 句柄，后续可由接线方显式传入）。
+    """
     if not raw:
         raise UploadError("图片内容为空")
     if len(raw) > MAX_BYTES:
@@ -66,8 +76,16 @@ def save_user_image(raw: bytes, user_id: str, uploads_root: str) -> dict:
     if not os.path.exists(path):
         image.save(path, "WEBP", quality=QUALITY, method=4)
     log.info("用户图片已保存 %s (%dx%d)", path, image.width, image.height)
+    url = f"/uploads/{user_hash(user_id)}/{filename}"
+    # 多用户隔离：登记 owner（相对 /uploads/ 的路径，含 per-user 目录，避免同图去重串号）
+    register_uploaded_asset(
+        uploads_root,
+        user_id,
+        f"{user_hash(user_id)}/{filename}",
+        db=db,
+    )
     return {
-        "url": f"/uploads/{user_hash(user_id)}/{filename}",
+        "url": url,
         "width": image.width,
         "height": image.height,
         "bytes": os.path.getsize(path),

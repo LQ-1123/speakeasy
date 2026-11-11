@@ -1,0 +1,178 @@
+{
+  "kind": "local-web-compat-verification",
+  "scenario": "compat",
+  "generated_at": "2026-11-10T19:14:53.433787+08:00",
+  "base": "https://47-104-24-236.sslip.io",
+  "duration_s": 7.0,
+  "checks_total": 26,
+  "checks_passed": 26,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "Step1 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step1 昵称输入存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step1 母语选择存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 选中英语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 选中德语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 德语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 英语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step2 德语水平设为「刚开始」",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "Step3 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:47"
+    },
+    {
+      "name": "兼容性：新用户建档完成",
+      "ok": true,
+      "detail": {
+        "onboarding": false,
+        "app": true,
+        "device_key": "\"c72809f944da1218c463ef73e10306ee\"",
+        "identity": "{\"user_id\":\"u_e1bf9f3400b1492e9ed71b68a2bbc7a2\",\"token\":\"18e56d19dbc6127ea9c4029494c809e36963d636ca6c1674\",\"display_name\":\"\",\"device_key\":\"c72809f944da1218c463e",
+        "text": "消息 | 通讯录 | 发现 | 我 | 消息 | 还没有会话 |  | 到发现认识一位语伴，开始第一段对话。 |  | 认识语伴 |  | 晚上好，CompatE2E |  | 挑一段对话，慢慢说。 |  | 语音条不用赶时间。想认识新的人，也可以先去偶遇。 |  | 偶遇一个人 | 看看动态"
+      },
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：发现动态流可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：动态流有内容",
+      "ok": true,
+      "detail": 10,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：动态统计可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：人物主页可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：人物主页含首条开场消息",
+      "ok": true,
+      "detail": "I'm on a quest for the best coffee in Manchester. Current sc",
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：人物动态可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：朋友圈可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：翻译接口可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：头像生成可用",
+      "ok": true,
+      "detail": 200,
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：动态朗读（TTS）可用",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "len": 57094
+      },
+      "at": "2026-11-10T19:14:48"
+    },
+    {
+      "name": "兼容性：发现页可渲染",
+      "ok": true,
+      "detail": "消息\n通讯录\n发现\n我\nSONDER\n发现\n\n读一读 AI 人物们的生活，或偶遇一个陌生人，从一句「你好」开始。\n\n动态\nAI 人物们此刻在做什么\n偶遇一个人\n每次一位，先听听 TA 的声音\n通知\n点赞、评论和好友申请\n\nAI 人物的互动由",
+      "at": "2026-11-10T19:14:50"
+    },
+    {
+      "name": "兼容性：人物主页可渲染",
+      "ok": true,
+      "detail": "消息\n通讯录\n发现\n我\nAdrian\nAI 人物主页\nAI\nAdrian\n🇬🇧\nAI 人物\n30 岁 · Photographer · Manchester · United Kingdom\n母语 英语\n\nSlow mornings, second-hand books and a kettle that never ",
+      "at": "2026-11-10T19:14:53"
+    },
+    {
+      "name": "兼容性：首条开场消息已由 API 提供",
+      "ok": true,
+      "detail": "I'm on a quest for the best coffee in Manchester. Current sc",
+      "at": "2026-11-10T19:14:53"
+    },
+    {
+      "name": "兼容性：无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:14:53"
+    },
+    {
+      "name": "[compat] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:14:53"
+    }
+  ]
+}

@@ -87,6 +87,18 @@ async def _run(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+async def _teen_gate(request: Request, user_id: str, *, persona_id: str = "") -> None:
+    """信息流入口的青少年分龄门禁。
+
+    只做判定，不改任何业务数据：拒绝时由 :func:`app.v3.teen.enforce_request`
+    抛 ``HTTPException(403, detail="minor:<reason>")``。``SE_AGE_GATE=0``（默认）或
+    local/设备身份/adult 账号直接放行，既有链路行为不变。
+    """
+    from app.v3 import teen  # noqa: PLC0415 - 局部导入，避免启动期循环依赖
+
+    await teen.enforce_request(request, user_id, feature="feed", persona_id=persona_id)
+
+
 def _warm_audio(request: Request, service: V3Service, items: list[dict]) -> int:
     """把这一页 Persona 动态放进朗读预热队列（不阻塞响应）。"""
     if getattr(request.app.state, "background_jobs", None) is not None:
@@ -202,6 +214,7 @@ async def get_feed(
     limit: int = Query(default=FEED_PAGE, ge=1, le=40),
     user_id: str = Depends(bind_current_user),
 ) -> dict:
+    await _teen_gate(request, user_id)
     service = _v3(request)
     data = await _run(service.feed, user_id, cursor=cursor, limit=limit)
     # 毫秒级朗读：本页动态立刻进后台合成队列，用户点「朗读」时文件通常已就绪
@@ -216,6 +229,7 @@ async def get_feed(
 async def feed_summary(
     request: Request, user_id: str = Depends(bind_current_user)
 ) -> dict:
+    await _teen_gate(request, user_id)
     return await _run(_v3(request).feed_summary, user_id)
 
 
@@ -241,6 +255,7 @@ async def list_personas(
     offset: int = Query(default=0, ge=0),
     user_id: str = Depends(bind_current_user),
 ) -> dict:
+    await _teen_gate(request, user_id)
     service = _v3(request)
     items = await _run(service.list_personas, limit=limit, offset=offset)
     return {"items": items}
@@ -250,6 +265,7 @@ async def list_personas(
 async def get_persona(
     request: Request, persona_id: str, user_id: str = Depends(bind_current_user)
 ) -> dict:
+    await _teen_gate(request, user_id, persona_id=persona_id)
     service = _v3(request)
     profile = await _run(service.persona_profile, persona_id, user_id)
     if profile is None:
@@ -266,6 +282,7 @@ async def get_persona_posts(
     limit: int = Query(default=12, ge=1, le=40),
     user_id: str = Depends(bind_current_user),
 ) -> dict:
+    await _teen_gate(request, user_id, persona_id=persona_id)
     service = _v3(request)
     if await _run(service.persona_by_id, persona_id) is None:
         raise HTTPException(status_code=404, detail="人物不存在")
@@ -286,6 +303,10 @@ class ProfileIn(BaseModel):
     native_language: str | None = None
     level: str | None = None
     levels: dict[str, str] | None = None
+    #: 沟通偏好：natural / occasional / improve（非法值服务端忽略）
+    communication_preference: str | None = None
+    #: 首次建档最后一步：True = 校验必填并标记完成；False 仅供测试/重置
+    complete_setup: bool | None = None
 
 
 @router.put("/profile")
@@ -294,23 +315,49 @@ async def update_profile(
     body: ProfileIn,
     user_id: str = Depends(bind_current_user),
 ) -> dict:
-    """更新个人资料：昵称/目标语言/生日/城市/职业/兴趣标签（兴趣进 fact_sheet）。"""
+    """更新个人资料：昵称/目标语言/生日/城市/职业/兴趣标签（兴趣进 fact_sheet）。
+
+    首次建档最后一步带 ``complete_setup=true``：必填字段缺失返回 400
+    （``detail.code == "profile_incomplete"`` + ``missing`` 列表），且不会标记完成；
+    成功返回 ``{"profile": ..., "setup": {...}}``（老客户端只读 ``profile``，兼容）。
+    """
     service = _v3(request)
-    profile = await _run(
-        service.update_profile_fields,
-        nickname=body.nickname,
-        targets=body.target_languages,
-        birthday=body.birthday,
-        city=body.city,
-        job=body.job,
-        gender=body.gender,
-        interests=body.interests,
-        native_language=body.native_language,
-        level=body.level,
-        levels=body.levels,
-        user_id=user_id,
-    )
-    return {"profile": profile}
+    try:
+        await _run(
+            service.update_profile_fields,
+            nickname=body.nickname,
+            targets=body.target_languages,
+            birthday=body.birthday,
+            city=body.city,
+            job=body.job,
+            gender=body.gender,
+            interests=body.interests,
+            native_language=body.native_language,
+            level=body.level,
+            levels=body.levels,
+            communication_preference=body.communication_preference,
+            complete_setup=body.complete_setup,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("profile_incomplete:"):
+            missing = [item for item in message.split(":", 1)[1].split(",") if item]
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "profile_incomplete", "missing": missing},
+            ) from exc
+        raise
+    return await _run(service.profile_state, user_id=user_id)
+
+
+@router.get("/profile")
+async def get_profile(
+    request: Request, user_id: str = Depends(bind_current_user)
+) -> dict:
+    """读取个人资料 + 首次建档状态（换设备登录也按 user_id 读到已有状态）。"""
+    service = _v3(request)
+    return await _run(service.profile_state, user_id=user_id)
 
 
 @router.post("/media/upload")
@@ -408,6 +455,7 @@ async def discover_next(
     世界生成（人物 + 信息流一次性生成）发生在服务启动/首次初始化阶段，
     见 docs/V3_API.md「世界生成」。
     """
+    await _teen_gate(request, user_id)
     service = _v3(request)
     data = await _run(service.discover_next, user_id, language=language)
     if data is None:
@@ -545,6 +593,7 @@ async def remove_persona_friend(
 async def list_friendships(
     request: Request, user_id: str = Depends(bind_current_user)
 ) -> dict:
+    await _teen_gate(request, user_id)
     return await _run(_v3(request).list_friendships, user_id)
 
 
@@ -565,6 +614,7 @@ async def my_posts(
 async def create_post(
     request: Request, body: UserPostIn, user_id: str = Depends(bind_current_user)
 ) -> dict:
+    await _teen_gate(request, user_id)
     service = _v3(request)
     try:
         post = await _run(
@@ -655,6 +705,7 @@ async def list_events(
     limit: int = Query(default=50, ge=1, le=100),
     user_id: str = Depends(bind_current_user),
 ) -> dict:
+    await _teen_gate(request, user_id)
     service = _v3(request)
     return await _run(service.list_events, user_id, unread_only=unread_only, limit=limit)
 

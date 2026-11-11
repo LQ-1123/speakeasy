@@ -28,6 +28,7 @@ from typing import Any, Iterable
 
 from app.logging_utils import get_logger
 from app.v3 import social_engine as engine
+from app.v3 import taxonomy
 from app.v3.identity import LOCAL_USER_ID, current_user_id
 from app.v3.social_engine import SocialConfig
 
@@ -42,6 +43,38 @@ VISIBILITIES = ("public", "friends", "private")
 
 #: 好友申请过期时间
 FRIEND_REQUEST_TTL_S = 7 * 24 * 3600
+
+
+def _rhythm_snapshot() -> dict[str, Any]:
+    """调试快照里的世界节奏参数（与维护循环**同源**）。
+
+    取值统一走 ``lexicon.rhythm_params()``（环境变量 > 词库文件 > 代码默认），
+    避免出现"界面显示一套、主循环按另一套跑"的不可见不一致。
+    读失败时回落到代码默认，保证快照接口永不 500。
+    """
+    try:
+        from app.v3 import lexicon  # noqa: PLC0415
+
+        rhythm = lexicon.rhythm_params()
+    except Exception:  # noqa: BLE001 - 快照接口不应因词库异常而失败
+        rhythm = {}
+    return {
+        "life_tick_s": float(rhythm.get("life_tick_s", 300.0)),
+        "posts_tick_s": float(rhythm.get("posts_tick_s", 240.0)),
+        "posts_max_events": int(rhythm.get("posts_max_events", 4)),
+        "posts_since_hours": float(rhythm.get("posts_since_hours", 6.0)),
+        "event_posts_per_day": int(rhythm.get("event_posts_per_day", 8)),
+    }
+
+#: 首次建档（Onboarding）必填字段（顺序即 ``setup.missing`` 的返回顺序）
+PROFILE_REQUIRED_FIELDS = ("nickname", "native_language", "target_languages")
+
+#: 资料昵称的默认占位值：等于它视为「还没填」（与 ``app.v2.db._DEFAULT_PROFILE`` 一致）
+PROFILE_DEFAULT_NICKNAME = "Traveler"
+
+#: 学习沟通偏好（前端文案：Just chat naturally. / Correct me occasionally. /
+#: Help me improve my expressions.）；服务端只认这三个值，其余忽略。
+COMMUNICATION_PREFERENCES = ("natural", "occasional", "improve")
 
 
 def _now() -> datetime:
@@ -106,23 +139,40 @@ def _clean_user_media(media: Iterable[str] | None) -> list[str]:
 
 
 def _clean_user_tags(tags: Iterable[str] | None) -> list[str]:
-    """标签：去 #、去空白、限长、去重、限量。"""
-    out: list[str] = []
-    for raw in tags or []:
-        tag = str(raw or "").strip().lstrip("#").strip()
-        if not tag:
-            continue
-        tag = tag[:USER_TAG_MAX_LEN]
-        if tag not in out:
-            out.append(tag)
-        if len(out) >= USER_TAGS_MAX:
-            break
-    return out
+    """动态标签 → 统一标签体系里的**稳定 ID**（去 #、别名归一、去重、限量）。
+
+    写入数据库的永远是稳定 ID（``coffee`` / ``cycling``）；未知自定义标签保留为
+    ``custom:<slug>``（见 :mod:`app.v3.taxonomy`），显示名由前端用 ``labels_map`` 下发。
+    """
+    return taxonomy.canonical_tags(tags, limit=USER_TAGS_MAX)
 
 
 def _clean(value: Any, limit: int = 2000) -> str:
     text = " ".join(str(value or "").split())
     return text[:limit].strip()
+
+
+def _profile_missing(profile: dict) -> list[str]:
+    """首次建档必填字段的缺失列表（只列必填，顺序见 ``PROFILE_REQUIRED_FIELDS``）。
+
+    - ``nickname``：空字符串或仍是默认占位 ``Traveler`` → 未填；
+    - ``native_language``：空 → 未填；
+    - ``target_languages``：空列表/全是空串 → 未填。
+    """
+    missing: list[str] = []
+    nickname = str(profile.get("nickname") or "").strip()
+    if not nickname or nickname == PROFILE_DEFAULT_NICKNAME:
+        missing.append("nickname")
+    if not str(profile.get("native_language") or "").strip():
+        missing.append("native_language")
+    targets = [
+        str(item).strip()
+        for item in (profile.get("target_languages") or [])
+        if str(item).strip()
+    ]
+    if not targets:
+        missing.append("target_languages")
+    return missing
 
 
 # --------------------------------------------------------------------------- #
@@ -267,6 +317,16 @@ class V3Service:
         from app.v3.avatar import persona_avatar_url  # noqa: PLC0415
         from app.v3.avatar_style import persona_avatar_meta  # noqa: PLC0415
 
+        # 空聊天页要展示「人物会怎么先开口」：确定性、零 LLM；失败返回空串不阻塞接口
+        try:
+            from app.v3.first_message import first_message  # noqa: PLC0415
+
+            first_line = first_message(
+                persona, language=str(persona.get("language") or "en")
+            )
+        except Exception:  # noqa: BLE001 - 开场文案失败不影响人物列表
+            first_line = ""
+
         return {
             "id": persona["id"],
             "nickname": persona["nickname"],
@@ -283,6 +343,8 @@ class V3Service:
             "age": persona["age"],
             "gender": persona["gender"],
             "language": persona["language"],
+            # 第一次开口的风格样例（前端空聊天页可直接展示；不写库、不改消息表）
+            "first_message": first_line,
             "is_ai": True,
             "ai_label": "AI 人物",
         }
@@ -303,6 +365,23 @@ class V3Service:
         profile["post_count"] = int(row["n"]) if row else 0
         profile["posts"] = self.persona_posts(persona_id, user_id=uid, limit=30)
         profile["relations"] = self._persona_relations(persona_id)
+        # 空聊天页展示「TA 会怎么先开口」：与列表 payload 同源（确定性、零 LLM）；
+        # 额外按当前用户在该目标语言上的水平选长短池，避免给入门用户看长句开场。
+        try:
+            from app.v3.first_message import first_message as _first_message  # noqa: PLC0415
+
+            level = ""
+            try:
+                fact = (self.db.get_profile(user_id=uid) or {}).get("fact_sheet") or {}
+                levels = (fact.get("language_profile") or {}).get("levels") or {}
+                level = str(levels.get(str(persona.get("language") or "en")) or "")
+            except Exception:  # noqa: BLE001 - 资料读不到就按默认长度
+                level = ""
+            profile["first_message"] = _first_message(
+                persona, language=str(persona.get("language") or "en"), level=level
+            )
+        except Exception:  # noqa: BLE001 - 开场文案失败不影响人物主页
+            profile["first_message"] = ""
         return profile
 
     def _persona_relations(self, persona_id: str, *, limit: int = 3) -> list[dict]:
@@ -532,11 +611,17 @@ class V3Service:
         likes = details["likes"]
         comments = details["comments"]
         author_id = row["user_id"]
+        try:
+            from app.v3.media_access import signed_media_list  # noqa: PLC0415
+
+            media_items = signed_media_list(self.db, viewer_id, _loads(row["media"], []))
+        except Exception:  # noqa: BLE001 - 签名失败退回原 URL
+            media_items = _loads(row["media"], [])
         return {
             "kind": "user_post",
             "id": post_id,
             "content": row["content"],
-            "media": _loads(row["media"], []),
+            "media": media_items,
             "tags": _loads(row["tags"], []),
             "visibility": row["visibility"],
             "created_at": row["created_at"],
@@ -644,14 +729,24 @@ class V3Service:
         with self.lock:
             if persona_ids:
                 marks = ",".join("?" for _ in persona_ids)
+                # 多用户隔离：人物动态是共享内容，评论按「评论者」隔离：
+                # - 真人评论（author_type='user'）只给本人看；
+                # - 针对某个用户的 AI 回复（author_type='persona' 且 user_id 非空）也只给本人看；
+                # - 世界级 AI 评论（author_type='persona' 且 user_id=''，由
+                #   event_posts._insert_comment 写入，见 event_posts.py:1119-1131）属于共享世界，
+                #   人人可见，否则人物的公开互动会凭空消失。
+                # comment_count 与 comments 必须同一口径，避免计数泄露他人评论。
+                visible = "(user_id=? OR (author_type='persona' AND user_id=''))"
                 for row in self.conn.execute(
-                    f"SELECT post_id,COUNT(*) AS n FROM persona_post_comments WHERE post_id IN ({marks}) GROUP BY post_id",
-                    persona_ids,
+                    f"SELECT post_id,COUNT(*) AS n FROM persona_post_comments"
+                    f" WHERE post_id IN ({marks}) AND {visible} GROUP BY post_id",
+                    [*persona_ids, user_id],
                 ):
                     details[row["post_id"]]["comment_count"] = int(row["n"])
                 for row in self.conn.execute(
                     f"SELECT * FROM (SELECT c.*,ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at,id) rn "
-                    f"FROM persona_post_comments c WHERE post_id IN ({marks})) WHERE rn<=2", persona_ids,
+                    f"FROM persona_post_comments c WHERE post_id IN ({marks}) AND {visible}) WHERE rn<=2",
+                    [*persona_ids, user_id],
                 ):
                     details[row["post_id"]]["comments"].append(row)
                 for row in self.conn.execute(
@@ -660,6 +755,9 @@ class V3Service:
                 ):
                     details[row["post_id"]]["liked"] = True
             if user_ids:
+                # 用户动态这条路径：feed()/list_user_posts() 只会传入本人的帖子，
+                # 因此这里的点赞/评论天然属于「我的帖子」，可保留 AI 人物的点赞与评论；
+                # 真人之间不提供互相点赞/评论的写入口，不会有他人评论混进来。
                 marks = ",".join("?" for _ in user_ids)
                 for row in self.conn.execute(
                     f"SELECT * FROM (SELECT l.*,ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at) rn "
@@ -674,65 +772,97 @@ class V3Service:
         return details
 
     def feed(self, user_id: str | None = None, *, cursor: str | None = None, limit: int = FEED_PAGE) -> dict:
+        """个性化推荐流：快照游标分页（详见 :mod:`app.v3.recommend`）。
+
+        - 无 cursor / cursor 非法 / 快照过期 → 新建快照（**不报错**，对老客户端也安全）；
+        - 有 cursor → 按 ``snap:<id>:<offset>`` 读同一份快照，翻页顺序稳定、不重不漏；
+        - 条目字段与旧实现完全一致：人物动态仍走 ``_persona_post_public``、
+          本人动态仍走 ``_user_post_public``，互动明细仍批量走 ``_batch_feed_details``。
+        """
+        from app.v3 import recommend  # noqa: PLC0415 - 延迟导入，避免模块级循环依赖
+
         uid = user_id or current_user_id()
         limit = max(1, min(int(limit), MAX_FEED_PAGE))
-        fetch_n = limit + 1
 
-        from app.v3.daily_world import iso as _iso, now_local as _now_local  # noqa: PLC0415
-
-        now_iso = _iso(_now_local())
-        # 只推荐「在练语言」的人物动态（用户自己的动态不受限）
-        try:
-            profile = self.db.get_profile(user_id=uid) or {}
-            targets = [str(x) for x in (profile.get("target_languages") or []) if str(x).strip()]
-        except Exception:  # noqa: BLE001
-            targets = []
-        lang_clause = ""
-        if targets:
-            lang_clause = " AND language IN (" + ",".join("?" * len(targets)) + ")"
-
-        p_sql = (
-            "SELECT * FROM persona_posts WHERE visibility='public'"
-            " AND EXISTS (SELECT 1 FROM personas p WHERE p.id=persona_posts.persona_id AND p.status='active')"
-            " AND (expires_at='' OR expires_at>?)" + lang_clause
-        )
-        u_sql = ("SELECT * FROM user_posts WHERE (visibility='public' OR user_id=?)")
-        p_params: list[Any] = [now_iso, *targets]
-        u_params: list[Any] = [uid]
+        snapshot: dict | None = None
+        offset = 0
         if cursor:
-            ts, _, cid = str(cursor).partition("|")
-            clause = " AND (created_at < ? OR (created_at = ? AND id < ?))"
-            p_sql += clause
-            u_sql += clause
-            p_params += [ts, ts, cid]
-            u_params += [ts, ts, cid]
-        p_sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        u_sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        p_params.append(fetch_n)
-        u_params.append(fetch_n)
+            try:
+                loaded = recommend.load_snapshot(self.db, uid, cursor)
+            except Exception as exc:  # noqa: BLE001 - 快照损坏也不应 500
+                log.warning("读取信息流快照失败，重建: %s", exc)
+                loaded = None
+            if loaded:
+                snapshot, offset = loaded
+                offset = max(0, int(offset))
+        if snapshot is None:
+            snapshot = recommend.build_snapshot(self.db, uid)
+            offset = 0
 
+        items = list(snapshot.get("items") or [])
+        consumed = max(0, min(limit, len(items) - offset))
+        page_items = items[offset:offset + consumed]
+        next_offset = offset + consumed
+        next_cursor = (
+            recommend.make_cursor(snapshot["id"], next_offset)
+            if next_offset < len(items)
+            else ""
+        )
+
+        # 按快照顺序回表取整行（帖子可能已被删除：跳过，但游标偏移仍按快照推进）
+        persona_ids = [i["id"] for i in page_items if i["kind"] == "persona_post"]
+        user_ids = [i["id"] for i in page_items if i["kind"] == "user_post"]
+        rows: dict[tuple[str, str], Any] = {}
         with self.lock:
-            p_rows = self.conn.execute(p_sql, tuple(p_params)).fetchall()
-            u_rows = self.conn.execute(u_sql, tuple(u_params)).fetchall()
+            if persona_ids:
+                marks = ",".join("?" for _ in persona_ids)
+                for row in self.conn.execute(
+                    f"SELECT * FROM persona_posts WHERE id IN ({marks})", tuple(persona_ids)
+                ):
+                    rows[("persona_post", str(row["id"]))] = row
+            if user_ids:
+                marks = ",".join("?" for _ in user_ids)
+                # 多用户隔离：本人动态只查本人的（快照归属已校验，这里再兜一层）
+                for row in self.conn.execute(
+                    f"SELECT * FROM user_posts WHERE id IN ({marks}) AND user_id=?",
+                    (*user_ids, uid),
+                ):
+                    rows[("user_post", str(row["id"]))] = row
 
-        merged: list[tuple[str, str, dict]] = []
+        page = [
+            (item["kind"], rows[(item["kind"], item["id"])])
+            for item in page_items
+            if (item["kind"], item["id"]) in rows
+        ]
+        details = self._batch_feed_details(page, uid)
         friends, pending = self._friendship_sets(uid)
-        for row in p_rows:
-            merged.append((row["created_at"], row["id"], "persona_post", row))
-        for row in u_rows:
-            merged.append((row["created_at"], row["id"], "user_post", row))
-        merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        page = merged[:limit]
-        next_cursor = f"{page[-1][0]}|{page[-1][1]}" if len(merged) > limit and page else ""
-        details = self._batch_feed_details([(item[2], item[3]) for item in page], uid)
         output = []
-        for _created, _post_id, kind, row in page:
+        for kind, row in page:
             if kind == "persona_post":
                 output.append(self._persona_post_public(
                     row, uid, friends=friends, pending=pending, details=details[row["id"]]
                 ))
             else:
-                output.append(self._user_post_public(row, uid, details[row["id"]]))
+                output.append(self._user_post_public(row, uid, details=details[row["id"]]))
+        # 已看登记：翻到即算看过（幂等；下一页读同一份快照，排序不受影响）
+        try:
+            recommend.mark_seen(self.db, uid, page_items)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("登记信息流已看失败（忽略）: %s", exc)
+        # 商业合作（广告）只在个人推荐流混排：服务端负责资格/频控/间距与原子预留；
+        # 任何异常都不影响信息流本身。
+        try:
+            from app.v3 import ads  # noqa: PLC0415
+
+            sponsored = ads.try_feed_ad(
+                self.db, user_id=uid, page_offset=offset, items_in_page=len(output)
+            )
+            if sponsored:
+                slot = int(sponsored.get("slot") or 0)
+                item = {key: value for key, value in sponsored.items() if key != "slot"}
+                output.insert(max(0, min(slot, len(output))), item)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("信息流广告插入失败（忽略）: %s", exc)
         return {"items": output, "next_cursor": next_cursor}
 
     def feed_summary(self, user_id: str) -> dict:
@@ -838,14 +968,8 @@ class V3Service:
     PROFILE_TAG_LEN = 16
 
     def _clean_profile_tags(self, tags: Any) -> list[str]:
-        out: list[str] = []
-        for raw in tags or []:
-            tag = str(raw or "").strip().lstrip("#").strip()[: self.PROFILE_TAG_LEN]
-            if tag and tag not in out:
-                out.append(tag)
-            if len(out) >= self.PROFILE_TAG_MAX:
-                break
-        return out
+        """兴趣标签 → 稳定 ID（与人物/动态/广告共用同一套分类）。"""
+        return taxonomy.canonical_tags(tags, limit=self.PROFILE_TAG_MAX)
 
     def update_profile_fields(
         self,
@@ -860,9 +984,24 @@ class V3Service:
         native_language: str | None = None,
         level: str | None = None,
         levels: dict[str, str] | None = None,
+        communication_preference: str | None = None,
+        complete_setup: bool | None = None,
         user_id: str | None = None,
     ) -> dict:
-        """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。"""
+        """合并更新个人资料；城市/职业/兴趣写进 fact_sheet（与 V2 记忆一致）。
+
+        首次建档（Onboarding）：
+        - ``communication_preference`` 只接受 ``natural`` / ``occasional`` /
+          ``improve``，非法值忽略（不覆盖已保存的偏好、不报错）；
+        - ``complete_setup=True`` 先校验**合并后**的必填字段（nickname /
+          native_language / target_languages），齐全时在**同一次**
+          ``db.update_profile`` 调用里写入 ``profile_setup_completed_at``，
+          保证「资料落库」与「标记完成」同时成功；仅当当前为空时写，重复调用
+          不改变首次完成时间；
+          缺字段抛 ``ValueError("profile_incomplete:<missing>")``（路由映射 400），
+          此时不写库，所以失败不会显示成已完成；
+        - ``complete_setup=False`` 仅用于测试/重置（清空完成状态），不对普通用户暴露。
+        """
         uid = user_id or current_user_id()
         try:
             profile = self.db.get_profile(user_id=uid) or {}
@@ -878,6 +1017,10 @@ class V3Service:
                 fact = {}
         fact = dict(fact) if isinstance(fact, dict) else {}
         fact_profile = dict(fact.get("profile") or {})
+        if nickname:
+            # 用户主动填写的昵称同步进 fact_sheet：否则历史默认占位 "Traveler"
+            # 会一直盖住真实昵称（User Persona / 记忆展示都会读这里）。
+            fact_profile["nickname"] = str(nickname)[:40]
         if city is not None:
             fact_profile["city"] = str(city)[:40]
         if job is not None:
@@ -899,6 +1042,28 @@ class V3Service:
             }
             lang_profile["levels"] = cleaned_levels
             fact["language_profile"] = lang_profile
+        if communication_preference is not None:
+            preference = str(communication_preference).strip().lower()
+            # 非法值忽略（保持已经保存的偏好不变）
+            if preference in COMMUNICATION_PREFERENCES:
+                fact["communication_preference"] = preference
+
+        # 合并后的最终资料：用于建档必填校验（与实际写入的字段保持一致）
+        merged = {
+            "nickname": str(nickname)[:40] if nickname else str(profile.get("nickname") or ""),
+            "native_language": (
+                str(native_language)[:12]
+                if native_language
+                else str(profile.get("native_language") or "")
+            ),
+            "target_languages": (
+                list(targets)[:3] if targets else list(profile.get("target_languages") or [])
+            ),
+        }
+        if complete_setup is True:
+            missing = _profile_missing(merged)
+            if missing:
+                raise ValueError("profile_incomplete:" + ",".join(missing))
 
         kwargs: dict[str, Any] = {"fact_sheet": fact}
         if nickname:
@@ -909,6 +1074,13 @@ class V3Service:
             kwargs["birthday"] = str(birthday)[:20]
         if native_language:
             kwargs["native_language"] = str(native_language)[:12]
+        if complete_setup is True:
+            # 只在首次完成时写时间：重复提交（刷新/换设备后重试）不改变首次完成时间
+            if not str(profile.get("profile_setup_completed_at") or "").strip():
+                kwargs["profile_setup_completed_at"] = _iso()
+        elif complete_setup is False:
+            # 测试/重置专用：清除完成状态（普通用户界面不暴露）
+            kwargs["profile_setup_completed_at"] = ""
         try:
             profile_row = self.db.update_profile(user_id=uid, **kwargs) or {}
             if nickname:
@@ -921,17 +1093,55 @@ class V3Service:
             log.warning("更新个人资料失败: %s", exc)
             return {}
 
-    def _user_interests(self) -> set[str]:
-        """读取当前用户 fact_sheet 里的兴趣标签（小写）。"""
-        try:
-            profile = self.db.get_profile() or {}
-            fact = profile.get("fact_sheet") or {}
-            if isinstance(fact, str):
-                import json  # noqa: PLC0415
+    def profile_state(self, user_id: str | None = None) -> dict:
+        """当前用户资料 + 首次建档状态。
 
+        返回 ``{"profile": {...}, "setup": {"completed": bool, "completed_at": str,
+        "missing": [...]}}``；前端据此决定是否展示引导（不依赖 localStorage）。
+
+        ``interest_labels`` 是**新增**字段（additive，不删旧字段）：兴趣稳定 ID →
+        ``{"zh": 显示名, "en": 显示名, "known": bool}``，前端不必自己维护映射。
+        """
+        uid = user_id or current_user_id()
+        try:
+            profile = self.db.get_profile(user_id=uid) or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("读取个人资料失败: %s", exc)
+            profile = {}
+        completed_at = str(profile.get("profile_setup_completed_at") or "").strip()
+        interest_ids = self._interest_ids(profile)
+        return {
+            "profile": profile,
+            "setup": {
+                "completed": bool(completed_at),
+                "completed_at": completed_at,
+                "missing": _profile_missing(profile),
+            },
+            "interest_labels": taxonomy.labels_map(interest_ids),
+        }
+
+    @staticmethod
+    def _interest_ids(profile: dict) -> list[str]:
+        """资料 dict → 兴趣稳定 ID 列表（兼容 fact_sheet 为 JSON 字符串的老数据）。"""
+        fact = (profile or {}).get("fact_sheet") or {}
+        if isinstance(fact, str):
+            try:
                 fact = json.loads(fact)
-            tags = fact.get("interests") if isinstance(fact, dict) else None
-            return {str(t).strip().lower() for t in (tags or []) if str(t).strip()}
+            except ValueError:
+                fact = {}
+        tags = fact.get("interests") if isinstance(fact, dict) else None
+        return taxonomy.canonical_tags(tags)
+
+    def _user_interests(self) -> set[str]:
+        """读取**当前用户** fact_sheet 里的兴趣（稳定标签 ID）。
+
+        旧实现 ``self.db.get_profile()`` 不传 user_id，会退化成 ``current_user_id()``
+        的默认值/``local``，多用户下读到的是别人的兴趣；这里显式传当前用户，
+        并统一走 :mod:`app.v3.taxonomy`（「咖啡」/``coffee``/``espresso`` 视为同一兴趣）。
+        """
+        try:
+            profile = self.db.get_profile(user_id=current_user_id()) or {}
+            return set(self._interest_ids(profile))
         except Exception:  # noqa: BLE001
             return set()
 
@@ -1047,15 +1257,17 @@ class V3Service:
         user_interests = self._user_interests()
 
         def _rank(p: dict) -> tuple:
-            tags = {str(t).strip().lower() for t in (p.get("interests") or [])}
+            # 兴趣统一按稳定 ID 比较（人物侧也可能是「咖啡 / coffee」等自由文本）
+            tags = set(taxonomy.canonical_tags(p.get("interests") or []))
             overlap = len(tags & user_interests)
             return (-overlap, hashlib.sha256(f"{uid}:{day}:{p['id']}".encode("utf-8")).hexdigest())
 
         unseen = sorted(unseen, key=_rank)
         persona = unseen[0]
+        # 展示仍然用人物原始标签文案，匹配用稳定 ID（前端不需要感知 taxonomy）
         match_tags = [
             t for t in (persona.get("interests") or [])
-            if str(t).strip().lower() in user_interests
+            if taxonomy.canonical_tag(t) in user_interests
         ][:3]
         with self.lock, self.conn:
             self.conn.execute(
@@ -1940,11 +2152,11 @@ class V3Service:
                 not in ("0", "false", "no", "off"),
                 "dna_llm": str(os.getenv("SE_DNA_LLM", "1")).strip().lower()
                 not in ("0", "false", "no", "off"),
-                "life_tick_s": _env_float("SE_LIFE_TICK_S", 300.0),
-                "posts_tick_s": _env_float("SE_POSTS_TICK_S", 240.0),
-                "posts_max_events": int(_env_float("SE_POSTS_MAX_EVENTS", 4.0)),
-                "posts_since_hours": _env_float("SE_POSTS_SINCE_HOURS", 6.0),
-                "event_posts_per_day": int(_env_float("SE_EVENT_POSTS_PER_DAY", 8.0)),
+                # 节奏参数统一从 lexicon.rhythm_params() 取：它按
+                # "环境变量 > 词库文件 > 代码默认" 解析，与维护循环真正用的值同源。
+                # 以前这里直接读 SE_*，导致「界面显示 300s、实际主循环按词库跑」
+                # 这种看不出来的不一致。
+                **_rhythm_snapshot(),
                 "comment_backfill": str(os.getenv("SE_COMMENT_BACKFILL", "1")).strip().lower()
                 not in ("0", "false", "no", "off"),
             },

@@ -911,7 +911,9 @@ class MemoryManager:
         # 长度、是否提问、是否热情由 system prompt 里的 [This turn] 行为指令决定
         # （见 app.v3.persona_context / app.v3.behavior），否则所有人物都会变成客服腔。
         lines.append(
-            "[Rules] Stay 100% in character as a real human: never say you are an AI, a model or a bot. "
+            "[Rules] Stay in character in voice and style, but be honest about what you are: "
+            "you are an AI companion, not a real human. If the user asks whether you are an AI, "
+            "a model or a bot, say so plainly and warmly — never claim to be a real person. "
             "Follow the length and question policy given by the [This turn] directive — do not "
             "default to a short reply plus a question every single time. No markdown, no bullet "
             "lists, no grammar explanations, no emoji spam."

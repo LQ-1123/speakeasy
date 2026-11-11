@@ -24,6 +24,8 @@ from app.v2.chat_service import ChatService
 from app.v2.db import DB
 from app.v2.memory import MemoryManager
 from app.v3 import persona_context
+from app.v3.identity import current_user_id
+from app.v3.privacy import ensure_privacy_schema, get_user_persona_emotion
 from app.v3.router import router as v3_router
 from app.v3.schema import ensure_schema
 from app.v3.service import V3Service
@@ -162,9 +164,10 @@ def test_call_turn_records_behavior_and_emotion(db):
     chat = _chat(db, _MockLLM())
     plan = chat._call_turn_plan(friend, "I had a terrible day")
     assert plan is not None
+    ensure_privacy_schema(db)
 
     before = json.loads(db.get_friend(friend["id"])["recent_behaviors"] or "[]")
-    bean = _persona(db, "Callum").get("emotion_state") or "{}"
+    public_before = _persona(db, "Callum").get("emotion_state") or "{}"
 
     chat._after_reply_hooks(friend, plan, "I had a terrible day")
 
@@ -172,10 +175,16 @@ def test_call_turn_records_behavior_and_emotion(db):
     assert len(after) == len(before) + 1
     assert after[-1] == plan.behavior
 
-    emo = db.conn.execute(
+    # 多用户一期：私聊情绪写「当前用户 × 人物」关系表；公共基线 personas.emotion_state
+    # 只由世界事件推进，私聊不再改写它（否则 A 的私聊会改变 B 遇到的人物情绪）。
+    public_after = db.conn.execute(
         "SELECT emotion_state FROM personas WHERE id=?", (plan.persona_id,)
     ).fetchone()["emotion_state"]
-    assert emo not in ("", "{}", bean)
+    assert public_after == public_before
+
+    relation = get_user_persona_emotion(db, current_user_id(), plan.persona_id)
+    assert relation, "私聊情绪应写入 persona_user_emotion"
+    assert relation.get("updated_at")
 
 
 def test_call_prompt_building_never_calls_llm(db):

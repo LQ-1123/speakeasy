@@ -1,0 +1,152 @@
+{
+  "kind": "chat-modes-consistency",
+  "generated_at": "2026-11-10T19:02:10.875642+08:00",
+  "base": "http://127.0.0.1:8000",
+  "checks": [
+    {
+      "name": "文字模式回复 Adrian",
+      "ok": true,
+      "detail": "Fine. Moving buttons two pixels. Vital work."
+    },
+    {
+      "name": "文字模式语言一致性 Adrian",
+      "ok": true,
+      "detail": {
+        "latin_ratio": 1.0,
+        "reply": "Fine. Moving buttons two pixels. Vital work."
+      }
+    },
+    {
+      "name": "文字模式回复 Annika",
+      "ok": true,
+      "detail": "It's three in the morning here, so \"day\" is a generous word for whatever this is. I'm mostly lying there negotiating wit"
+    },
+    {
+      "name": "文字模式语言一致性 Annika",
+      "ok": true,
+      "detail": {
+        "latin_ratio": 1.0,
+        "reply": "It's three in the morning here, so \"day\" is a generous word for whatever this is. I'm mostly lying there negotiating wit"
+      }
+    },
+    {
+      "name": "文字模式回复 Callum",
+      "ok": true,
+      "detail": "Long. Started at 9:45 and my feet are only just forgiving me now. Got a secondhand soul record on the turntable though, "
+    },
+    {
+      "name": "文字模式语言一致性 Callum",
+      "ok": true,
+      "detail": {
+        "latin_ratio": 1.0,
+        "reply": "Long. Started at 9:45 and my feet are only just forgiving me now. Got a secondhand soul record on the turntable though, "
+      }
+    },
+    {
+      "name": "三个英文字符人物口吻不同",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "图片模式返回非空回复",
+      "ok": true,
+      "detail": "That's a blue square. Bold choice."
+    },
+    {
+      "name": "实时通话回合返回非空回复",
+      "ok": true,
+      "detail": "Poking at the client mockups.Not loving them."
+    },
+    {
+      "name": "通话模式语言一致性",
+      "ok": true,
+      "detail": 1.0
+    },
+    {
+      "name": "语音条模式返回非空回复",
+      "ok": true,
+      "detail": "It's not a choice though. That's the default swatch."
+    },
+    {
+      "name": "语音条带音频地址（同一人物音色链路）",
+      "ok": true,
+      "detail": "/api/v2/audio/fish_821ef701e047.mp3"
+    },
+    {
+      "name": "文字/通话共享角色卡-姓名",
+      "ok": true,
+      "detail": "Adrian"
+    },
+    {
+      "name": "文字/通话共享角色卡-职业",
+      "ok": true,
+      "detail": "Product designer"
+    },
+    {
+      "name": "文字/通话共享角色卡-城市",
+      "ok": true,
+      "detail": "Manchester"
+    },
+    {
+      "name": "通话 Prompt 比文字 Prompt 短（精简版）",
+      "ok": true,
+      "detail": {
+        "text": 5102,
+        "call": 1089
+      }
+    },
+    {
+      "name": "文字 Prompt 含 User Persona（昵称/兴趣）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "文字 Prompt 含 Character Card 与示例声线模块",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "接线顺序符合 A–H 契约",
+      "ok": true,
+      "detail": [
+        "global",
+        "language",
+        "character_card",
+        "scenario",
+        "user_persona",
+        "relationship_memory",
+        "examples",
+        "opening",
+        "behavior",
+        "author_note"
+      ]
+    },
+    {
+      "name": "人物动态朗读可用（TTS 链路）",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "content_type": "audio/mpeg"
+      }
+    }
+  ],
+  "prompt_modules": [
+    "global",
+    "language",
+    "character_card",
+    "scenario",
+    "user_persona",
+    "relationship_memory",
+    "examples",
+    "opening",
+    "behavior",
+    "author_note"
+  ],
+  "tts": {
+    "status": 200,
+    "content_type": "audio/mpeg"
+  },
+  "checks_total": 20,
+  "checks_passed": 20,
+  "passed": true
+}

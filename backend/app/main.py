@@ -70,6 +70,34 @@ async def lifespan(app: FastAPI):
     db = app.state.v2.db
     ensure_schema(db, seed=False)
     ensure_client_schema(db)
+    # 账号体系（邮箱凭据/邀请码/邮箱令牌/可撤销设备会话/年龄核验）
+    from app.v3.accounts import ensure_accounts_schema  # noqa: PLC0415
+    from app.v3.media_access import ensure_media_schema  # noqa: PLC0415
+    from app.v3.privacy import ensure_privacy_schema  # noqa: PLC0415
+    from app.v3.teen import ensure_teen_schema  # noqa: PLC0415
+
+    ensure_accounts_schema(db)
+    ensure_privacy_schema(db)
+    # 媒体归属（私聊音频/图片 owner 校验与短时令牌）
+    ensure_media_schema(db)
+    # 青少年模式（监护关系/时长/宵禁）
+    ensure_teen_schema(db)
+    # 个性化推荐流（用户专属快照 + 已看记录）
+    from app.v3.recommend import ensure_recommend_schema  # noqa: PLC0415
+
+    ensure_recommend_schema(db)
+    # 商业合作（品牌/活动/素材/投放/频控/留痕）
+    from app.v3.ads import ensure_ads_schema  # noqa: PLC0415
+
+    ensure_ads_schema(db)
+    # 内容举报（通用举报表；广告另有投放事件）
+    from app.v3.reports import ensure_reports_schema  # noqa: PLC0415
+
+    ensure_reports_schema(db)
+    # 标签统一（自由文本 → 稳定 ID；幂等迁移历史资料/人物/动态）
+    from app.v3.taxonomy import migrate_tags  # noqa: PLC0415
+
+    migrate_tags(db)
     repair_persona_voices(db)
     app.state.v3 = V3Service(db, engines, str(settings.data_path))
     app.state.v3_audio = PersonaAudioCache(
@@ -142,10 +170,22 @@ def create_app() -> FastAPI:
     app.include_router(conversations_api.router)
     app.include_router(v2_router)
     app.include_router(v3_router)
+    from app.v3.accounts_router import router as accounts_router  # noqa: PLC0415
+    from app.v3.ads_router import router as ads_router  # noqa: PLC0415
+    from app.v3.media_access_router import router as media_access_router  # noqa: PLC0415
+    from app.v3.reports_router import router as reports_router  # noqa: PLC0415
+    from app.v3.teen_router import router as teen_router  # noqa: PLC0415
+
+    app.include_router(accounts_router)
+    app.include_router(ads_router)
+    app.include_router(media_access_router)
+    app.include_router(reports_router)
+    app.include_router(teen_router)
     app.include_router(calls_router)
     app.include_router(client_router)
 
-    # 管理端（控制面）：词库管理。仅本机可用，与客户端完全解耦。
+    # 管理端（控制面）：Sonder 运营控制台。仅管理身份可用，与客户端完全解耦。
+    from app.admin import api_public_router as admin_public_router  # noqa: PLC0415
     from app.admin import page_router as admin_page_router  # noqa: PLC0415
     from app.admin import router as admin_router  # noqa: PLC0415
 
@@ -153,6 +193,9 @@ def create_app() -> FastAPI:
 
     app.include_router(app_release_router)
     app.include_router(admin_router)
+    # 不鉴权的管理 API（会话查询 / 退出）：必须能在未登录时调通，
+    # 所以不能挂在带 require_admin 依赖的 admin_router 下。
+    app.include_router(admin_public_router)
     app.include_router(admin_page_router)
 
     # 对话持久化存储
@@ -183,9 +226,17 @@ def _mount_static(app: FastAPI, settings) -> None:
     app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
     # 用户上传图片：/uploads/*
+    # 多用户隔离：按 media_assets 归属校验（owner 本人或有效 ?t= 令牌），
+    # 未登记的历史文件保持可读并标记 X-Legacy-Asset: 1。
     uploads_dir = os.path.join(str(settings.data_path), "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+    from app.v3.uploads_guard import ProtectedUploads  # noqa: PLC0415
+
+    app.mount(
+        "/uploads",
+        ProtectedUploads(directory=uploads_dir, kind="post_image"),
+        name="uploads",
+    )
 
     if os.path.isdir(APP_DIR) and os.path.exists(os.path.join(APP_DIR, "index.html")):
         # Next static export 需要把 /_next/* 正确映射；直接整目录挂到 / 会被 /api 抢走

@@ -129,7 +129,8 @@ def test_build_context_injects_time_facts_episodes_reviews(db):
     # 待复习表达
     assert "I'm down for that" in context
     # 硬约束：人设/事实约束保留；「每轮 1-2 句 + 以问题结尾」已移除（改由行为指令决定）
-    assert "never say you are an AI" in context
+    # 多用户/合规升级：不再要求「绝不承认是 AI」，改为要求「被问到时诚实说明是 AI 伙伴」
+    assert "AI companion, not a real human" in context
     assert "[This turn]" in context
     assert "end with a hook" not in context
     assert "1-2 short spoken English sentences" not in context
@@ -149,7 +150,7 @@ def test_build_context_handles_sparse_friend(db):
     assert "Mia" in context
     assert "None" not in context
     assert "Closeness level 1/5" in context
-    assert "never say you are an AI" in context
+    assert "AI companion, not a real human" in context
 
 
 def test_build_context_lists_only_pending_open_loops(db):

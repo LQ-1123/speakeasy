@@ -64,7 +64,19 @@ export interface Friend {
   requestedAt?: string;
 }
 
-export type MessageKind = "voice" | "text" | "image" | "call" | "system";
+export type MessageKind = "voice" | "text" | "image" | "call" | "system" | "ad";
+
+/** 聊天里的商业合作段落元数据（服务端审核模板 + 投放记录）。 */
+export interface MessageAd {
+  delivery_id: string;
+  campaign_id?: string;
+  campaign_version?: number;
+  brand_name?: string;
+  label?: string;
+  landing_url?: string;
+  facts?: string[];
+  persona_id?: string;
+}
 
 export interface Suggestion {
   better: string;
@@ -92,6 +104,8 @@ export interface Message {
   clientId?: string;
   /** 乐观消息发送失败：气泡显示「重试」，而不是永远停在「发送中」 */
   failed?: boolean;
+  /** 商业合作段落元数据（kind="ad" 时存在） */
+  ad?: MessageAd;
 }
 
 export interface MomentComment {
@@ -148,6 +162,19 @@ export interface Profile {
   weaknesses: string[];
   /** 生日 YYYY-MM-DD（用来匹配年龄相仿的人） */
   birthday?: string;
+  /**
+   * 首次引导是否已完成。
+   *
+   * 只来自后端 profile.profile_setup_completed_at：
+   *  - true  = 已完成
+   *  - false = 后端明确说未完成（Shell 这时才展示 Onboarding）
+   *  - undefined = 还不知道（bootstrap 未完成 / fixture），不展示引导，避免闪屏
+   */
+  setupCompleted?: boolean;
+  /** 希望语伴如何纠错：natural（自然聊，不打断）/ occasional（偶尔纠正）/ improve（帮我改进表达）；"" = 未设置 */
+  communicationPreference?: "natural" | "occasional" | "improve" | "";
+  /** 引导完成时间（后端 profile_setup_completed_at 原样） */
+  setupCompletedAt?: string;
 }
 
 export interface DiscoverCandidate {

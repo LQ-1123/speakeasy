@@ -123,6 +123,26 @@ _VOICE_BY_LANG: dict[str, list[str]] = {
 }
 
 
+def _canonical(tags: Any, limit: int = 8) -> list[str]:
+    """自由文本标签 → 稳定 ID（taxonomy 不可用时原样截断，绝不阻断写世界）。"""
+    try:
+        from app.v3 import taxonomy  # noqa: PLC0415
+
+        return taxonomy.canonical_tags(tags, limit=limit)
+    except Exception:  # noqa: BLE001
+        return [str(item) for item in (tags or [])][:limit]
+
+
+def _migrate_tags(db: Any) -> None:
+    """把种子/历史世界里的自由文本标签统一成稳定 ID（幂等，失败只记日志）。"""
+    try:
+        from app.v3 import taxonomy  # noqa: PLC0415
+
+        taxonomy.migrate_tags(db)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("标签迁移失败（忽略）: %s", exc)
+
+
 def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
     """写入一位人物和 TA 的动态，返回写入的帖子数。"""
     import json
@@ -148,7 +168,8 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
                 avatar_seed,
                 str(persona.get("bio") or "")[:400],
                 str(persona.get("personality") or "")[:600],
-                json.dumps(persona.get("interests") or [], ensure_ascii=False),
+                # 标签统一成稳定 ID（未知的自定义标签保留 custom: 前缀）
+                json.dumps(_canonical(persona.get("interests") or []), ensure_ascii=False),
                 lang,
                 str(persona.get("country") or "")[:60],
                 str(persona.get("city") or "")[:60],
@@ -176,7 +197,7 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
                 " VALUES (?,?,?, '[]', ?, ?, 'public', 0, 0, ?)",
                 (
                     post_id, pid, content,
-                    json.dumps(post.get("tags") or persona.get("interests") or []),
+                    json.dumps(_canonical(post.get("tags") or persona.get("interests") or [], 16)),
                     lang,
                     created.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                 ),
@@ -268,6 +289,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
         sync_persona_friends(db)
         backfill_post_languages(db)
         backfill_avatar_seeds(db)
+        _migrate_tags(db)
         updated = await _ensure_avatar_options(db, llm)
         if updated:
             sync_persona_friends(db)
@@ -282,6 +304,7 @@ async def ensure_world(db: Any, llm: Any) -> dict:
     sync_persona_friends(db)
     backfill_post_languages(db)
     backfill_avatar_seeds(db)
+    _migrate_tags(db)
     updated = await _ensure_avatar_options(db, llm)
     if updated:
         sync_persona_friends(db)

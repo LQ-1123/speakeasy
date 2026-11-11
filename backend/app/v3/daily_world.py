@@ -8,6 +8,13 @@
 - 默认规模很小（5 人 × 6 条 = 30 条/天），可配；不够时惰性补量，避免空窗。
 
 幂等：同一天只生成一次（``daily_world`` 表 day 主键）。
+
+批次可中断恢复
+-------------
+人物/动态 id 全部确定性（``p_d{YYYYMMDD}{index:02d}`` / ``pp_{persona_id}_{index}``），
+写入用 ``INSERT OR IGNORE``：同一个 day 重跑只会跳过已存在行，不会重复造人/造帖。
+批次开始前把「这一批要生成几个人」记进 ``v3_meta['daily_batch:<day>']``，
+中途异常时**不写** ``daily_world`` 成功行，下次重试按同一批人数补齐后清标记。
 """
 
 from __future__ import annotations
@@ -16,7 +23,7 @@ import asyncio
 import hashlib
 import json
 import os
-import uuid
+import sqlite3
 from datetime import datetime, time, timedelta
 from typing import Any
 
@@ -33,6 +40,17 @@ POSTS_PER_PERSONA = max(1, int(os.getenv("SE_DAILY_POSTS_PER_PERSONA", "3")))
 POST_TTL_HOURS = max(1, int(os.getenv("SE_POST_TTL_HOURS", "24")))
 POST_KEEP_DAYS = max(1, int(os.getenv("SE_POST_KEEP_DAYS", "7")))
 LAZY_REFILL_BELOW = max(1, int(os.getenv("SE_FEED_MIN_POOL", "10")))
+
+#: 每日供给人数区间（活跃关系/内容缺口只在这个区间内调节）
+SUPPLY_MIN = max(1, int(os.getenv("SE_SUPPLY_MIN", "2")))
+SUPPLY_MAX = max(SUPPLY_MIN, int(os.getenv("SE_SUPPLY_MAX", "8")))
+#: 「近 N 天活跃关系」窗口：accepted 好友且 updated_at 在窗口内
+SUPPLY_RELATION_DAYS = max(1, int(os.getenv("SE_SUPPLY_RELATION_DAYS", "7")))
+#: 内容缺口：可见动态少于该阈值时多补 1 人（一屏都撑不满）
+SUPPLY_CONTENT_FLOOR = max(POSTS_PER_PERSONA * 2, int(os.getenv("SE_SUPPLY_CONTENT_FLOOR", "6")))
+
+#: 批次中断恢复标记（v3_meta）：``daily_batch:<day>`` → {"target": n}
+BATCH_MARKER_PREFIX = "daily_batch:"
 
 #: 语言 → 声线（与 world.py 保持一致）
 VOICE_BY_LANG: dict[str, list[str]] = {
@@ -90,6 +108,194 @@ def next_run_at(dt: datetime | None = None) -> datetime:
     if target <= current:
         target = target + timedelta(days=1)
     return target
+
+
+# --------------------------------------------------------------------------- #
+# 供给目标：跟随近期活跃关系 + 内容缺口
+# --------------------------------------------------------------------------- #
+def _explicit_daily_personas() -> int | None:
+    """显式 ``SE_DAILY_PERSONAS``（每次调用重新读，测试 monkeypatch 立即生效）。"""
+    raw = os.getenv("SE_DAILY_PERSONAS", "").strip()
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
+
+
+def _day_digits(day: str) -> str:
+    digits = "".join(ch for ch in str(day or "") if ch.isdigit())[:8]
+    return digits or "00000000"
+
+
+def _persona_id(day: str, index: int) -> str:
+    """确定性 persona id：同一天同一序号永远同一个（重试/重跑不会重复造人）。"""
+    return f"p_d{_day_digits(day)}{int(index):02d}"
+
+
+def _post_id(persona_id: str, index: int) -> str:
+    """确定性动态 id：重试只会跳过已写入的行，不会重复发帖。"""
+    return f"pp_{persona_id}_{int(index):02d}"
+
+
+def supply_target(db: Any, *, now: datetime | None = None) -> int:
+    """今天该生成多少位游客人物（区间 :data:`SUPPLY_MIN` – :data:`SUPPLY_MAX`）。
+
+    信号
+    ----
+    - **近期活跃关系**：近 7 天 ``accepted`` 好友（``friendships.updated_at``）去重
+      persona 数——有人在主动认识人物时，世界要多供给新人；
+    - **内容缺口**：可见且未过期的 ``persona_posts`` 数量，低于一屏阈值时多补 1 人；
+    - **显式配置**：``SE_DAILY_PERSONAS`` 设置时以它为准（运营/测试可控）。
+
+    没有近期活跃关系时返回 ≤3（保底 2 + 内容缺口 1）；关系越多供给越大。
+    """
+    explicit = _explicit_daily_personas()
+    if explicit is not None:
+        return explicit
+
+    current = now or now_local()
+    now_str = iso(current)
+    cutoff = iso(current - timedelta(days=SUPPLY_RELATION_DAYS))
+    active_personas = 0
+    visible_posts = 0
+    try:
+        with db._lock:  # noqa: SLF001
+            row = db.conn.execute(
+                "SELECT COUNT(DISTINCT persona_id) AS n FROM friendships"
+                " WHERE status='accepted' AND updated_at<>'' AND updated_at>=?",
+                (cutoff,),
+            ).fetchone()
+            active_personas = int(row["n"]) if row is not None else 0
+            row = db.conn.execute(
+                "SELECT COUNT(*) AS n FROM persona_posts"
+                " WHERE visibility='public' AND (expires_at='' OR expires_at>?)",
+                (now_str,),
+            ).fetchone()
+            visible_posts = int(row["n"]) if row is not None else 0
+    except sqlite3.Error as exc:  # pragma: no cover - 最小库/老库
+        log.debug("供给目标读取失败（回退最小值）: %s", exc)
+        return SUPPLY_MIN
+
+    target = SUPPLY_MIN + min(4, (active_personas + 1) // 2)
+    if visible_posts < SUPPLY_CONTENT_FLOOR:
+        target += 1
+    return max(SUPPLY_MIN, min(SUPPLY_MAX, target))
+
+
+# --------------------------------------------------------------------------- #
+# 批次中断恢复标记（v3_meta）
+# --------------------------------------------------------------------------- #
+def _batch_key(day: str) -> str:
+    return f"{BATCH_MARKER_PREFIX}{day}"
+
+
+def _read_batch_target(db: Any, day: str) -> int | None:
+    """读取「这一批本来要生成几个人」的中断标记；没有/损坏时返回 None。"""
+    if db is None:
+        return None
+    try:
+        with db._lock:  # noqa: SLF001
+            row = db.conn.execute(
+                "SELECT value FROM v3_meta WHERE key=?", (_batch_key(day),)
+            ).fetchone()
+    except sqlite3.Error as exc:  # pragma: no cover - 最小库/老库
+        log.debug("读取每日批次标记失败（忽略）: %s", exc)
+        return None
+    if row is None:
+        return None
+    try:
+        data = json.loads(str(row["value"]) or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        target = int(data.get("target") or 0)
+    except (TypeError, ValueError):
+        return None
+    return target if target > 0 else None
+
+
+def _write_batch_target(db: Any, day: str, target: int) -> None:
+    if db is None:
+        return
+    try:
+        with db._lock, db.conn:  # noqa: SLF001
+            db.conn.execute(
+                "INSERT INTO v3_meta (key, value) VALUES (?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (_batch_key(day), json.dumps({"target": int(target)}, ensure_ascii=False)),
+            )
+    except sqlite3.Error as exc:  # pragma: no cover - 最小库/老库
+        log.warning("写每日批次标记失败（忽略）: %s", exc)
+
+
+def _clear_batch_target(db: Any, day: str) -> None:
+    if db is None:
+        return
+    try:
+        with db._lock, db.conn:  # noqa: SLF001
+            db.conn.execute("DELETE FROM v3_meta WHERE key=?", (_batch_key(day),))
+    except sqlite3.Error as exc:  # pragma: no cover - 最小库/老库
+        log.debug("清理每日批次标记失败（忽略）: %s", exc)
+
+
+def prune_batch_markers(db: Any, *, before_day: str) -> int:
+    """删除早于 ``before_day`` 的中断标记（只对已不可能重试的旧批次使用）。"""
+    if db is None or not before_day:
+        return 0
+    try:
+        with db._lock, db.conn:  # noqa: SLF001
+            cur = db.conn.execute(
+                "DELETE FROM v3_meta WHERE key LIKE ? AND key < ?",
+                (f"{BATCH_MARKER_PREFIX}%", _batch_key(before_day)),
+            )
+            return int(cur.rowcount or 0)
+    except sqlite3.Error as exc:  # pragma: no cover - 最小库/老库
+        log.debug("清理每日批次标记失败（忽略）: %s", exc)
+        return 0
+
+
+def _persona_total(db: Any) -> int:
+    try:
+        with db._lock:  # noqa: SLF001
+            row = db.conn.execute("SELECT COUNT(*) AS n FROM personas").fetchone()
+        return int(row["n"]) if row is not None else 0
+    except sqlite3.Error:  # pragma: no cover - 最小库/老库
+        return 0
+
+
+def _count_persona_posts(db: Any, persona_ids: list[str]) -> int:
+    ids = [str(pid) for pid in persona_ids if str(pid or "").strip()]
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    try:
+        with db._lock:  # noqa: SLF001
+            row = db.conn.execute(
+                f"SELECT COUNT(*) AS n FROM persona_posts WHERE persona_id IN ({marks})",
+                ids,
+            ).fetchone()
+        return int(row["n"]) if row is not None else 0
+    except sqlite3.Error:  # pragma: no cover - 最小库/老库
+        return 0
+
+
+def _daily_batch_target(db: Any, *, day: str, row: Any) -> int:
+    """本次批次人数：中断标记 > 供给目标；空库按配置规模起世界；已登记批次只补不缩。"""
+    pending = _read_batch_target(db, day)
+    if pending is not None:
+        target = pending
+    else:
+        target = supply_target(db)
+        if _persona_total(db) == 0 and _explicit_daily_personas() is None:
+            # 全新库（还没有任何人物）：先按配置规模起一个完整世界，避免冷启动只有 2 人
+            target = DAILY_PERSONAS
+    if row is not None:
+        target = max(target, int(row["personas"] or 0))
+    return max(1, int(target))
 
 
 # --------------------------------------------------------------------------- #
@@ -513,7 +719,12 @@ LEVEL_GUIDE = {
 
 
 def _user_lang_prefs(db: Any) -> tuple[list[str], dict[str, str]]:
-    """读取用户在练语言与各自水平。"""
+    """读取社区在练语言与各自水平（返回 ``(targets, levels)``，保持既有签名）。
+
+    注意：``levels`` 只服务于管理台预览等「针对某个学习者」的场景。
+    每日公共世界生成**不使用**它（见 :func:`generate_daily`）：
+    公共人物/动态的风格必须由人物自身设定决定，而不是被某个用户的学习水平污染。
+    """
     try:
         # The world is shared. Build language coverage from registered users' own
         # rows; never borrow a local user's private fact sheet for another user.
@@ -689,72 +900,103 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
         return ""
 
 
-async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) -> tuple[str, int]:
-    """写入一位游客人物 + 它的动态，返回 (persona_id, 帖数)。"""
+async def _insert_persona(
+    db: Any,
+    persona: dict,
+    *,
+    day: str,
+    expires_at: str,
+    index: int | None = None,
+) -> tuple[str, int]:
+    """写入一位游客人物 + 它的动态，返回 (persona_id, **本次新增**帖数)。
+
+    - id 确定性（``p_d{YYYYMMDD}{index:02d}`` / ``pp_{persona_id}_{index:02d}``），
+      配合 ``INSERT OR IGNORE``：同一 day 重跑只跳过已存在行，不会重复造人/造帖；
+    - 已存在的人物不再重复挑声线（避免重试时白白消耗/占用音色）；
+    - 标签统一走 :mod:`app.v3.taxonomy` 的稳定 ID，和迁移后的历史数据一致。
+    """
     from app.v3.avatar_style import default_options
 
-    pid = f"p_{uuid.uuid4().hex[:10]}"
+    try:
+        from app.v3.taxonomy import canonical_tags  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 - 裁剪部署时退化为原文标签
+
+        def canonical_tags(values: Any, *, limit: int = 8) -> list[str]:  # type: ignore[misc]
+            return [str(v) for v in (values or []) if str(v).strip()][: max(1, int(limit))]
+
+    pid = _persona_id(day, 0 if index is None else int(index))
     lang = str(persona.get("language") or "en").strip().lower()
     if lang not in VOICE_BY_LANG:
         lang = "en"
     created = now_local()
     posts = list(persona.get("posts") or [])[:POSTS_PER_PERSONA]
     options = json.dumps(default_options({**persona, "id": pid}), ensure_ascii=False)
-    fish_ref = await _pick_fish_voice(db, lang, str(persona.get("gender") or ""))
-    strict = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
-    verified_edge = ""
-    if strict:
-        from app.voice.catalog import verify_voice
 
-        if fish_ref and not await verify_voice(db, "fish", fish_ref, language=lang):
-            fish_ref = ""
-        verified_edge = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
-        if verified_edge and not await verify_voice(db, "edge", verified_edge, language=lang):
-            verified_edge = ""
+    with db._lock:  # noqa: SLF001
+        existing = db.conn.execute(
+            "SELECT status FROM personas WHERE id=?", (pid,)
+        ).fetchone()
+
+    strict = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+    fish_ref = ""
+    verified_edge = ""
+    voice_ready = str(existing["status"]) == "active" if existing is not None else False
+    if existing is None:
+        fish_ref = await _pick_fish_voice(db, lang, str(persona.get("gender") or ""))
+        if strict:
+            from app.voice.catalog import verify_voice  # noqa: PLC0415
+
+            if fish_ref and not await verify_voice(db, "fish", fish_ref, language=lang):
+                fish_ref = ""
+            verified_edge = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
+            if verified_edge and not await verify_voice(db, "edge", verified_edge, language=lang):
+                verified_edge = ""
+
     with db._lock, db.conn:  # noqa: SLF001
         if not db.conn.in_transaction:
             db.conn.execute("BEGIN IMMEDIATE")
-        edge_voice = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
-        if strict and edge_voice != verified_edge:
-            edge_voice = ""
-        if fish_ref and db.conn.execute(
-            "SELECT 1 FROM personas WHERE status='active' AND fish_voice_id=?", (fish_ref,)
-        ).fetchone():
-            fish_ref = ""
-        voice_ready = bool(edge_voice or (strict and fish_ref))
-        db.conn.execute(
-            "INSERT INTO personas (id, nickname, avatar, avatar_seed, avatar_style, avatar_options,"
-            " bio, personality, interests, language, country, city, timezone, occupation, age,"
-            " gender, voice_id, fish_voice_id, archetype_id, ai_config, status, created_at,"
-            " lifecycle, expires_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                pid,
-                str(persona.get("nickname") or "Guest")[:40],
-                "",
-                "persona-" + pid[2:],
-                "avataaars",
-                options,
-                str(persona.get("bio") or "")[:400],
-                str(persona.get("personality") or "")[:600],
-                json.dumps(persona.get("interests") or [], ensure_ascii=False),
-                lang,
-                str(persona.get("country") or "")[:60],
-                str(persona.get("city") or "")[:60],
-                "UTC",
-                str(persona.get("occupation") or "")[:80],
-                int(persona.get("age") or 27),
-                str(persona.get("gender") or "female"),
-                edge_voice,
-                fish_ref,
-                "",
-                json.dumps({"generated": "daily", "day": day}, ensure_ascii=False),
-                "active" if voice_ready else "waiting_voice",
-                iso(created),
-                "guest",
-                expires_at,
-            ),
-        )
+        if existing is None:
+            edge_voice = _pick_edge_voice(db, lang, str(persona.get("gender") or ""))
+            if strict and edge_voice != verified_edge:
+                edge_voice = ""
+            if fish_ref and db.conn.execute(
+                "SELECT 1 FROM personas WHERE status='active' AND fish_voice_id=?", (fish_ref,)
+            ).fetchone():
+                fish_ref = ""
+            voice_ready = bool(edge_voice or (strict and fish_ref))
+            db.conn.execute(
+                "INSERT OR IGNORE INTO personas (id, nickname, avatar, avatar_seed, avatar_style,"
+                " avatar_options, bio, personality, interests, language, country, city, timezone,"
+                " occupation, age, gender, voice_id, fish_voice_id, archetype_id, ai_config, status,"
+                " created_at, lifecycle, expires_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    pid,
+                    str(persona.get("nickname") or "Guest")[:40],
+                    "",
+                    "persona-" + pid[2:],
+                    "avataaars",
+                    options,
+                    str(persona.get("bio") or "")[:400],
+                    str(persona.get("personality") or "")[:600],
+                    json.dumps(canonical_tags(persona.get("interests") or []), ensure_ascii=False),
+                    lang,
+                    str(persona.get("country") or "")[:60],
+                    str(persona.get("city") or "")[:60],
+                    "UTC",
+                    str(persona.get("occupation") or "")[:80],
+                    int(persona.get("age") or 27),
+                    str(persona.get("gender") or "female"),
+                    edge_voice,
+                    fish_ref,
+                    "",
+                    json.dumps({"generated": "daily", "day": day}, ensure_ascii=False),
+                    "active" if voice_ready else "waiting_voice",
+                    iso(created),
+                    "guest",
+                    expires_at,
+                ),
+            )
         written = 0
         for idx, raw_post in enumerate(posts):
             if isinstance(raw_post, dict):
@@ -768,22 +1010,22 @@ async def _insert_persona(db: Any, persona: dict, *, day: str, expires_at: str) 
             if not content:
                 continue
             post_created = created - timedelta(minutes=30 + idx * 47 + (idx * idx) % 20)
-            db.conn.execute(
-                "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
+            cur = db.conn.execute(
+                "INSERT OR IGNORE INTO persona_posts (id, persona_id, content, media, tags, language,"
                 " visibility, like_count, comment_count, created_at, expires_at)"
                 " VALUES (?,?,?, '[]', ?, ?, ?, 0, 0, ?, ?)",
                 (
-                    f"pp_{uuid.uuid4().hex[:12]}",
+                    _post_id(pid, idx),
                     pid,
                     content,
-                    json.dumps(tags or [], ensure_ascii=False),
+                    json.dumps(canonical_tags(tags, limit=16), ensure_ascii=False),
                     lang,
                     "public" if voice_ready else "waiting_voice",
                     iso(post_created),
                     expires_at,
                 ),
             )
-            written += 1
+            written += int(cur.rowcount or 0)
     return pid, written
 
 
@@ -791,38 +1033,85 @@ async def generate_daily(
     db: Any, llm: Any, *, day: str | None = None, force: bool = False,
     media_dir: str | None = None,
 ) -> dict:
-    """生成「今日世界」：N 个游客人物 × M 条动态。同一天幂等。"""
+    """生成「今日世界」：N 个游客人物 × M 条动态。
+
+    - 人数由 :func:`supply_target` 决定（显式 ``SE_DAILY_PERSONAS`` 优先）；
+    - 同一天幂等：确定性 id + ``INSERT OR IGNORE``，``force=True`` 重跑也不会翻倍；
+    - 单个 persona 写入失败只跳过它，**不写** ``daily_world`` 成功行，并保留批次标记，
+      下次（含进程重启后）按同一批人数补齐。
+    """
     day = day or day_key()
     now = now_local()
     expires = iso(now + timedelta(hours=POST_TTL_HOURS))
 
     with db._lock, db.conn:  # noqa: SLF001
         row = db.conn.execute("SELECT * FROM daily_world WHERE day=?", (day,)).fetchone()
-    if row is not None and not force:
+    pending_target = _read_batch_target(db, day)
+    # 有未完成的批次标记时不算「已完成」：即使行存在也要续跑（force 之前的异常重试）
+    if row is not None and not force and pending_target is None:
         return {
             "day": day, "skipped": True,
             "personas": int(row["personas"]), "posts": int(row["posts"]),
             "source": str(row["source"]),
         }
 
+    target = _daily_batch_target(db, day=day, row=row)
+    # 先记账：中途异常/崩溃也能按同一批人数续跑，不会因为供给目标变化而漏人
+    _write_batch_target(db, day, target)
+
     created_personas = 0
     created_posts = 0
+    failed = 0
     source = "llm"
     persona_rows: list[dict] = []
-    targets, levels = _user_lang_prefs(db)
-    for index in range(DAILY_PERSONAS):
+    new_persona_rows: list[dict] = []
+    # 语言轮换用社区在练语言；**不**读任何用户的 level——公共世界风格只由人物自身决定
+    targets, _levels = _user_lang_prefs(db)
+    with db._lock:  # noqa: SLF001
+        existing_ids = {
+            str(r[0])
+            for r in db.conn.execute(
+                "SELECT id FROM personas WHERE id LIKE ?", (f"p_d{_day_digits(day)}%",)
+            ).fetchall()
+        }
+    for index in range(target):
         lang = targets[index % len(targets)] if targets else "en"
-        level = levels.get(lang, "能聊几句")
-        persona = await _llm_persona(llm, index, day, language=lang, level=level)
+        persona = await _llm_persona(llm, index, day, language=lang)
         if persona is not None:
             persona["language"] = lang
         if persona is None:
             persona = _fallback_persona(index, day, lang)
             source = "template" if index == 0 else source
-        pid, posts = await _insert_persona(db, persona, day=day, expires_at=expires)
-        created_personas += 1
+        pid = _persona_id(day, index)
+        try:
+            pid, posts = await _insert_persona(
+                db, persona, day=day, expires_at=expires, index=index
+            )
+        except Exception as exc:  # noqa: BLE001 - 单个人物失败不拖垮整批
+            failed += 1
+            log.warning("每日人物 #%d 写入失败（本批不落账，稍后重试）: %s", index, exc)
+            continue
+        is_new = pid not in existing_ids
+        existing_ids.add(pid)
+        if is_new:
+            created_personas += 1
+            new_persona_rows.append({**persona, "id": pid})
         created_posts += posts
         persona_rows.append({**persona, "id": pid})
+
+    ensured_personas = len(persona_rows)
+    ensured_posts = _count_persona_posts(db, [item["id"] for item in persona_rows])
+    if failed:
+        log.warning(
+            "每日世界 %s 中断：%d 位人物写入失败（%d 位已写入，等待重试）",
+            day, failed, ensured_personas,
+        )
+        return {
+            "day": day, "skipped": False, "personas": ensured_personas,
+            "posts": ensured_posts, "source": source, "expires_at": expires,
+            "failed_personas": failed, "target": target,
+            "resumed": pending_target is not None,
+        }
 
     # 游客人物的表达层（Speech DNA + 12 组示例）：确定性生成，**0 次 LLM 调用**
     if persona_rows:
@@ -835,34 +1124,44 @@ async def generate_daily(
             log.debug("每日人物表达层补齐失败（忽略）: %s", exc)
 
     # 生活图文 + 纯文字（图库零 key 源，人设硬过滤）
+    # 只给**本次新建**的人物发：force 重跑时不会重复生成随机 id 的生活动态
     life_stats = {"image_posts": 0, "text_posts": 0, "skipped_images": 0}
-    if persona_rows:
+    if new_persona_rows:
         try:
             from app.v3.life_posts import generate_life_posts  # noqa: PLC0415
 
             media_root = media_dir or os.path.join(os.getenv("SE_DATA_DIR", "data"), "media")
             life_stats = await generate_life_posts(
-                db, llm, persona_rows, media_dir=media_root, expires_at=expires
+                db, llm, new_persona_rows, media_dir=media_root, expires_at=expires
             )
             created_posts += life_stats["image_posts"] + life_stats["text_posts"]
         except Exception as exc:  # noqa: BLE001
             log.warning("生活图文生成失败（不影响文字动态）: %s", exc)
 
+    ensured_posts = _count_persona_posts(db, [item["id"] for item in persona_rows])
     with db._lock, db.conn:  # noqa: SLF001
-        db.conn.execute(
-            "INSERT INTO daily_world (day, generated_at, personas, posts, source)"
-            " VALUES (?,?,?,?,?) ON CONFLICT(day) DO UPDATE SET generated_at=excluded.generated_at,"
-            " personas=excluded.personas, posts=excluded.posts, source=excluded.source",
-            (day, iso(now), created_personas, created_posts, source),
-        )
+        # 纯重跑（什么都没新增）且已有成功行 → 保留原批次账本，不覆盖
+        if row is None or created_personas > 0 or created_posts > 0:
+            db.conn.execute(
+                "INSERT INTO daily_world (day, generated_at, personas, posts, source)"
+                " VALUES (?,?,?,?,?) ON CONFLICT(day) DO UPDATE SET"
+                " generated_at=excluded.generated_at, personas=excluded.personas,"
+                " posts=excluded.posts, source=excluded.source",
+                (day, iso(now), ensured_personas, ensured_posts, source),
+            )
+    _clear_batch_target(db, day)
 
     sync_persona_friends(db)
     backfill_avatar_seeds(db)
-    log.info("每日世界 %s：%d 人物 / %d 动态（%s）", day, created_personas, created_posts, source)
+    log.info(
+        "每日世界 %s：新增 %d 人物 / %d 动态，批次共 %d 人物 / %d 动态（%s）",
+        day, created_personas, created_posts, ensured_personas, ensured_posts, source,
+    )
     return {
-        "day": day, "skipped": False, "personas": created_personas,
-        "posts": created_posts, "source": source, "expires_at": expires,
-        "life": life_stats,
+        "day": day, "skipped": False, "personas": ensured_personas,
+        "posts": ensured_posts, "source": source, "expires_at": expires,
+        "created_personas": created_personas, "target": target,
+        "resumed": pending_target is not None, "life": life_stats,
     }
 
 
@@ -1016,11 +1315,14 @@ def preview_personas(count: int = 3, language: str = "en", day: str = "") -> lis
 
 
 __all__ = [
+    "BATCH_MARKER_PREFIX",
     "DAILY_HOUR",
     "DAILY_PERSONAS",
     "POSTS_PER_PERSONA",
     "POST_KEEP_DAYS",
     "POST_TTL_HOURS",
+    "SUPPLY_MAX",
+    "SUPPLY_MIN",
     "daily_loop",
     "daily_status",
     "day_key",
@@ -1029,4 +1331,6 @@ __all__ = [
     "next_run_at",
     "now_local",
     "preview_personas",
+    "prune_batch_markers",
+    "supply_target",
 ]

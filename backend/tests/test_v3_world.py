@@ -450,7 +450,8 @@ def test_user_post_media_limited_to_mock_and_tags_cleaned(world_db):
         assert ok.status_code == 200
         post = ok.json()["post"]
         assert post["media"] == ["/mock/photos/cafe.jpg", "/mock/photos/beach.jpg"]
-        assert post["tags"] == ["咖啡", "旅行"]
+        # 标签统一为稳定 ID（咖啡→coffee、旅行→travel），不再存自由文本
+        assert post["tags"] == ["coffee", "travel"]
 
         for bad in (
             "https://example.com/cat.jpg",
@@ -509,7 +510,10 @@ def test_user_image_upload_and_post(world_db):
             json={"content": "my own photo", "media": [data["url"]]},
         )
         assert post.status_code == 200, post.text
-        assert post.json()["post"]["media"] == [data["url"]]
+        # 多用户隔离：本人媒体 URL 由服务端补短时令牌（浏览器 <img> 不带身份头），基础路径不变
+        posted_media = post.json()["post"]["media"]
+        assert len(posted_media) == 1
+        assert posted_media[0].startswith(data["url"] + "?t=")
 
         bad = client.post(
             "/api/v3/media/upload",
@@ -541,8 +545,8 @@ def test_profile_interests_saved_and_rank_discover(world_db):
         fact = profile["fact_sheet"]
         assert fact["profile"]["city"] == "上海"
         assert fact["profile"]["major_or_job"] == "软件工程学生"
-        # 去 #、去重、超长截断到 16 字
-        assert fact["interests"] == ["咖啡", "旅行", "x" * 16]
+        # 去 #、去重、未知标签保留 custom: 前缀（稳定 ID，slug 最长 32 字符）
+        assert fact["interests"] == ["coffee", "travel", "custom:" + long_tag]
 
         # 库里确实有人物带 coffee 兴趣 → 偶遇应优先返回兴趣重叠的人
         rows = db.conn.execute("SELECT interests FROM personas").fetchall()

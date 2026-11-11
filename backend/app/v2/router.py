@@ -38,6 +38,15 @@ from app.v2 import user_moments as user_moments_mod
 from app.v2.timeutil import local_date_str, local_state
 from app.v2.voices import load_archetypes
 from app.v3.identity import LOCAL_USER_ID, current_user_id
+from app.v3.media_access import (
+    KIND_AUDIO,
+    KIND_CHAT_IMAGE,
+    KIND_POST_IMAGE,
+    owner_of,
+    owner_of_filename,
+    register_asset,
+    verify_media_token,
+)
 from app.v3.security import bind_current_user
 from app.voice.stt_config import (
     STT_PRESETS,
@@ -161,6 +170,33 @@ def _thread(fn, *args, **kwargs):
     return asyncio.to_thread(fn, *args, **kwargs)
 
 
+async def _teen_gate(
+    request: Request, services: Any, user_id: str, friend: dict | None
+) -> None:
+    """聊天入口的青少年分龄门禁 + 使用时长记录。
+
+    - 拒绝时由 :func:`app.v3.teen.enforce_request` 抛 ``HTTPException(403,
+      detail="minor:<reason>")``，reason ∈ age_unverified/guardian_required/curfew/
+      daily_limit/persona_blocked；
+    - 通过后记一次活动（``v3_minor_usage`` 累计当日秒数与连续会话）；
+    - ``persona_id`` 只用于「屏蔽人物」名单，老库查不到就是空串，不影响默认判定；
+    - 门禁只在 ``SE_AGE_GATE=1`` 且账号为 teen/unknown 时生效，local/设备身份/adult 不受影响。
+    """
+    from app.v3 import teen  # noqa: PLC0415 - 局部导入，避免启动期循环依赖
+    from app.v3.persona_context import persona_id_for_friend  # noqa: PLC0415
+
+    try:
+        persona_id = persona_id_for_friend(services.db, friend or {})
+    except Exception as exc:  # noqa: BLE001 - 解析失败按「无 persona」处理
+        log.debug("解析 persona_id 失败（忽略）: %s", exc)
+        persona_id = ""
+    await teen.enforce_request(request, user_id, feature="chat", persona_id=persona_id)
+    try:
+        await _thread(teen.record_activity, services.db, user_id)
+    except Exception as exc:  # noqa: BLE001 - 统计失败不阻断聊天主链路
+        log.debug("记录使用时长失败（忽略）: %s", exc)
+
+
 def _friendship_set_status(services: Any, friend_id: str, status: str) -> None:
     """V2 好友申请接受/拒绝时，同步 V3 的 ``friendships`` 状态（表可能不存在，忽略即可）。"""
     db = services.db
@@ -188,6 +224,45 @@ def _friendship_drop(services: Any, friend_id: str) -> None:
         log.debug("清理 friendship 失败: %s", exc)
 
 
+def _ad_public(msg: dict) -> dict | None:
+    """把 ``msg_type='ad'`` 消息的 context JSON 解析成结构化 ``ad`` 字段。
+
+    广告消息本身仍按普通消息返回（保留 transcript/created_at 等原始字段），
+    额外加一个 ``ad``：前端据此渲染「广告 · 品牌合作」标签、落地页与 fact 列表。
+    解析失败/空 context 返回 None（不伪造字段），绝不影响消息列表接口。
+    """
+    raw = msg.get("context")
+    payload: dict[str, Any] = {}
+    if isinstance(raw, dict):
+        payload = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            payload = parsed
+    if not payload:
+        return None
+    facts = payload.get("facts")
+    if not isinstance(facts, list):
+        facts = []
+    try:
+        campaign_version = int(payload.get("campaign_version") or 0)
+    except (TypeError, ValueError):
+        campaign_version = 0
+    return {
+        "delivery_id": str(payload.get("delivery_id") or ""),
+        "campaign_id": str(payload.get("campaign_id") or ""),
+        "campaign_version": campaign_version,
+        "brand_name": str(payload.get("brand_name") or ""),
+        "label": str(payload.get("label") or ""),
+        "landing_url": str(payload.get("landing_url") or ""),
+        "facts": [str(item) for item in facts if str(item).strip()],
+        "persona_id": str(payload.get("persona_id") or ""),
+    }
+
+
 def _message_public(msg: dict | None) -> dict | None:
     if msg is None:
         return None
@@ -196,7 +271,126 @@ def _message_public(msg: dict | None) -> dict | None:
     data["audio_url"] = f"/api/v2/audio/{os.path.basename(name)}" if name else None
     image = data.get("image_path")
     data["image_url"] = f"/api/v2/media/{os.path.basename(image)}" if image else None
+    # 浏览器 <img> 无法带身份头：自己名下的图片 URL 由服务端补短时令牌，前端无需改造。
+    if data["image_url"]:
+        try:
+            from app.v3.identity import current_user_id  # noqa: PLC0415
+            from app.v3.media_access import signed_url  # noqa: PLC0415
+            from app.v3.security import current_request_db  # noqa: PLC0415
+
+            db = current_request_db()
+            if db is not None:
+                data["image_url"] = signed_url(db, current_user_id(), data["image_url"])
+        except Exception:  # noqa: BLE001 - 签名失败退回原 URL
+            pass
+    if str(data.get("msg_type") or "") == "ad":
+        ad = _ad_public(data)
+        if ad is not None:
+            data["ad"] = ad
     return data
+
+
+# --------------------------------------------------------------------------- #
+# 媒体归属（多用户数据隔离）
+# --------------------------------------------------------------------------- #
+# 规则：
+# - 好友 TTS 音频 / 聊天图片 / 动态图片在**合成/上传落盘处**登记 owner；
+#   好友产物的 owner 取 ``friends.owner_user_id``，用户产物的 owner 取当前用户。
+# - 读取端（/audio/{filename}、/media/{filename}）在「已登记且 owner 不是当前用户」
+#   时返回 403，除非带 ``?t=<media_token>``（见 app.v3.media_access）。
+# - **历史兼容**：隔离上线前就存在的文件没有 media_assets 记录，继续放行
+#   （否则老用户的历史聊天记录会全部变哑），但响应头加 ``X-Legacy-Asset: 1``，
+#   方便后续做存量回填与灰度下线。
+MEDIA_IMAGE_KINDS = (KIND_CHAT_IMAGE, KIND_POST_IMAGE)
+
+
+def _media_filename(value: Any) -> str:
+    """媒体落库值 → 裸文件名（音频/图片在库里都只存 basename）。"""
+    return os.path.basename(str(value or "").strip().replace("\\", "/"))
+
+
+def _register_media_assets(db: Any, owner_user_id: str, kind: str, names: Any) -> None:
+    """批量登记媒体归属；单条失败只记日志，绝不影响主流程。"""
+    for name in names:
+        filename = _media_filename(name)
+        if not filename:
+            continue
+        try:
+            register_asset(db, owner_user_id, kind, filename)
+        except Exception as exc:  # noqa: BLE001 - 归属登记失败不应打断聊天
+            log.warning(
+                "媒体归属登记失败 %s/%s: %s: %s",
+                kind,
+                filename,
+                type(exc).__name__,
+                exc,
+            )
+
+
+def _register_message_media(db: Any, message: dict | None, *, owner_user_id: str) -> None:
+    """登记一条消息里的音频/图片。"""
+    if not message:
+        return
+    _register_media_assets(db, owner_user_id, KIND_AUDIO, [message.get("audio_path")])
+    _register_media_assets(db, owner_user_id, KIND_CHAT_IMAGE, [message.get("image_path")])
+
+
+def _register_turn_media(
+    services: Any, friend: dict | None, user_id: str, result: dict | None
+) -> None:
+    """登记一个聊天回合产出的媒体（好友产物归好友 owner，用户产物归当前用户）。"""
+    if not isinstance(result, dict):
+        return
+    db = services.db
+    friend_owner = str((friend or {}).get("owner_user_id") or user_id)
+    messages = [result.get("user_message"), *(result.get("friend_messages") or [])]
+    for message in messages:
+        if not message:
+            continue
+        owner = friend_owner if message.get("sender") == "friend" else user_id
+        _register_message_media(db, message, owner_user_id=owner)
+
+
+def _authorize_media_read(
+    db: Any,
+    *,
+    filename: str,
+    token: str = "",
+    kind: str | None = None,
+    kinds: tuple[str, ...] | None = None,
+) -> bool:
+    """媒体读取前的归属校验，返回 True 表示「历史文件」（调用方加 X-Legacy-Asset）。
+
+    - 未登记 → True（历史兼容，放行）；
+    - 已登记且 owner == 当前用户 → False；
+    - 已登记但 owner 不是当前用户 → 仅当 ``?t=`` 是 owner 的未过期令牌时放行，
+      否则 403。令牌是 owner 的凭证：允许匿名（``local``）请求使用；如果请求
+      显式带了别的身份头，则拒绝（B 拿到 A 的令牌也用不了）。
+    """
+    name = _media_filename(filename)
+    if kind is not None:
+        owner = owner_of(db, kind, name)
+        matched_kind: str | None = kind if owner is not None else None
+    else:
+        found = owner_of_filename(db, name, kinds=kinds)
+        owner, matched_kind = found if found is not None else (None, None)
+
+    if owner is None:
+        return True
+    current = current_user_id()
+    if owner == current:
+        return False
+
+    verified = verify_media_token(db, token) if token else None
+    if (
+        verified is not None
+        and verified[0] == owner
+        and verified[1] == matched_kind
+        and verified[2] == name
+        and (current == LOCAL_USER_ID or current == owner)
+    ):
+        return False
+    raise HTTPException(status_code=403, detail="无权访问该媒体资产")
 
 
 def _user_today() -> str:
@@ -787,6 +981,13 @@ async def discover_friend(request: Request, body: DiscoverBody | None = None) ->
     if friend.get("status") == "waiting_voice":
         raise HTTPException(status_code=409, detail="人物声音尚未就绪，请稍后再试")
     message = await _send_icebreaker(services, friend)
+    # 多用户隔离：招呼语音归属该好友的 owner
+    await _thread(
+        _register_message_media,
+        services.db,
+        message,
+        owner_user_id=str(friend.get("owner_user_id") or current_user_id()),
+    )
     # 把招呼语写进 request_message：好友申请列表里也能看到/试听这句话
     try:
         await _thread(
@@ -1013,14 +1214,27 @@ async def accept_friend(request: Request, friend_id: str) -> dict:
     if friend.get("status") != "active":
         friend = await _thread(services.db.update_friend, friend_id, status="active")
     _friendship_set_status(services, friend_id, "accepted")
+    friend_owner = str(friend.get("owner_user_id") or current_user_id())
     existing = await _thread(services.db.recent_messages, friend_id, 1)
     if existing:
         # 偶遇时已经说过第一句了：接受时不再补一条，避免出现两条招呼
+        await _thread(
+            _register_message_media,
+            services.db,
+            existing[-1],
+            owner_user_id=friend_owner,
+        )
         return {
             "friend": await _friend_public(services, friend),
             "message": _message_public(existing[-1]),
         }
     message = await _send_icebreaker(services, friend)
+    await _thread(
+        _register_message_media,
+        services.db,
+        message,
+        owner_user_id=friend_owner,
+    )
     return {"friend": await _friend_public(services, friend), "message": _message_public(message)}
 
 
@@ -1169,17 +1383,41 @@ async def call_turn_stream(
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, current_user_id(), friend)
     data = await audio.read()
     filename = audio.filename or "call.webm"
+    user_id = current_user_id()
+    friend_owner = str(friend.get("owner_user_id") or user_id)
 
     async def gen():
         try:
             async for event in services.chat.handle_call_turn_stream(
                 friend_id, data, filename, duration_ms
             ):
-                if event.get("type") == "done":
+                event_type = event.get("type")
+                if event_type == "done":
+                    # 多用户隔离：先把本轮消息里的音频登记到各自 owner，再转公共字段
+                    await _thread(
+                        _register_turn_media,
+                        services,
+                        friend,
+                        user_id,
+                        {
+                            "user_message": event.get("user_message"),
+                            "friend_messages": [event.get("friend_message")],
+                        },
+                    )
                     event["user_message"] = _message_public(event.get("user_message"))
                     event["friend_message"] = _message_public(event.get("friend_message"))
+                elif event_type == "sentence":
+                    # 逐句语音是临时文件（不落消息表），按好友 owner 登记
+                    await _thread(
+                        _register_media_assets,
+                        services.db,
+                        friend_owner,
+                        KIND_AUDIO,
+                        [event.get("audio_url")],
+                    )
                 yield json.dumps(event, ensure_ascii=False) + "\n"
         except asyncio.CancelledError:
             raise
@@ -1330,6 +1568,7 @@ async def call_turn_text(
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, current_user_id(), friend)
 
     async def gen():
         try:
@@ -1369,6 +1608,7 @@ async def save_call_summary(
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, current_user_id(), friend)
     total = max(0, int(body.duration_s))
     minutes, seconds = divmod(total, 60)
     turns = max(0, int(body.turns))
@@ -1396,6 +1636,7 @@ async def chat_image(
     friend = await _thread(services.db.get_friend, friend_id)
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, current_user_id(), friend)
     data = await image.read()
     try:
         result = await services.chat.handle_image(
@@ -1407,6 +1648,8 @@ async def chat_image(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    # 多用户隔离：本轮的用户图片与好友语音条在落盘后登记归属
+    await _thread(_register_turn_media, services, friend, current_user_id(), result)
     return {
         "user_message": _message_public(result["user_message"]),
         "friend_messages": [_message_public(m) for m in result["friend_messages"]],
@@ -1427,6 +1670,11 @@ async def chat_voice(
     duration_ms: int = Form(0),
 ) -> dict:
     services = _services(request)
+    user_id = current_user_id()
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, user_id, friend)
     data = await audio.read()
     try:
         result = await services.chat.handle_voice(
@@ -1436,12 +1684,19 @@ async def chat_voice(
         raise HTTPException(status_code=404, detail="好友不存在") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # 多用户隔离：好友 TTS 音频按 friends.owner_user_id 登记，用户上传的语音归自己
+    await _thread(_register_turn_media, services, friend, user_id, result)
     return _turn_public(result)
 
 
 @router.post("/chat/{friend_id}/text")
 async def chat_text(request: Request, friend_id: str, body: TextTurnBody) -> dict:
     services = _services(request)
+    user_id = current_user_id()
+    friend = await _thread(services.db.get_friend, friend_id)
+    if friend is None:
+        raise HTTPException(status_code=404, detail="好友不存在")
+    await _teen_gate(request, services, user_id, friend)
     try:
         result = await services.chat.handle_text(
             friend_id, body.text, body.context, client_message_id=body.client_message_id
@@ -1450,6 +1705,8 @@ async def chat_text(request: Request, friend_id: str, body: TextTurnBody) -> dic
         raise HTTPException(status_code=404, detail="好友不存在") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # 多用户隔离：本轮好友语音条按 friends.owner_user_id 登记归属
+    await _thread(_register_turn_media, services, friend, user_id, result)
     return _turn_public(result)
 
 
@@ -1457,6 +1714,8 @@ def _turn_public(result: dict) -> dict:
     data = dict(result)
     data["user_message"] = _message_public(result.get("user_message"))
     data["friend_messages"] = [_message_public(m) for m in result.get("friend_messages") or []]
+    # 商业合作：独立广告消息（没有投放时为 None），不进 friend_messages
+    data["ad_message"] = _message_public(result.get("ad_message"))
     return data
 
 
@@ -1679,6 +1938,14 @@ async def create_user_moment_photo(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    # 多用户隔离：动态配图登记到当前用户（kind=post_image）
+    await _thread(
+        _register_media_assets,
+        services.db,
+        current_user_id(),
+        KIND_POST_IMAGE,
+        [image_name],
+    )
     text = " ".join((content or "").split()).strip() or "（分享了一张图片）"
     if len(text) > 500:
         raise HTTPException(status_code=422, detail="动态内容过长")
@@ -1877,7 +2144,13 @@ async def update_friend_memory(
 # 音频 / 声线
 # --------------------------------------------------------------------------- #
 @router.get("/audio/{filename}")
-async def get_audio(request: Request, filename: str) -> FileResponse:
+async def get_audio(request: Request, filename: str, t: str = "") -> FileResponse:
+    """音频静态服务（私聊语音条）。
+
+    多用户隔离：已登记资产只有 owner（或持有 owner 的 ``?t=<media_token>``）能读。
+    **未登记的历史文件继续放行（200 + ``X-Legacy-Asset: 1``）**，这是上线前的
+    存量数据兼容策略，不能改成 403，否则老用户历史聊天记录会全部变哑。
+    """
     services = _services(request)
     try:
         path = services.audio.path_for(filename)
@@ -1886,6 +2159,11 @@ async def get_audio(request: Request, filename: str) -> FileResponse:
     if not os.path.isfile(path):
         log.warning("音频文件不存在: %s", filename)
         raise HTTPException(status_code=404, detail="音频不存在")
+    headers: dict[str, str] = {}
+    if _authorize_media_read(
+        services.db, filename=filename, token=t, kind=KIND_AUDIO
+    ):
+        headers["X-Legacy-Asset"] = "1"
     # 显式声明标准 MIME：Safari 对 audio/x-wav 兼容性不佳，统一用 audio/wav
     ext = os.path.splitext(path)[1].lower()
     media_type = {
@@ -1896,7 +2174,7 @@ async def get_audio(request: Request, filename: str) -> FileResponse:
         ".ogg": "audio/ogg",
         ".opus": "audio/opus",
     }.get(ext) or (mimetypes.guess_type(path)[0] or "application/octet-stream")
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 @router.get("/tts/sample")
@@ -2046,8 +2324,12 @@ async def v2_health(request: Request) -> dict:
 
 
 @router.get("/media/{filename}")
-async def get_media(request: Request, filename: str) -> FileResponse:
-    """用户上传图片的静态服务（显式 MIME，移动端 Safari 兼容）。"""
+async def get_media(request: Request, filename: str, t: str = "") -> FileResponse:
+    """用户上传图片的静态服务（显式 MIME，移动端 Safari 兼容）。
+
+    多用户隔离：聊天图片 / 动态图片已登记时只有 owner（或 ``?t=`` 令牌）能读；
+    未登记的历史图片继续放行（``X-Legacy-Asset: 1``）。
+    """
     services = _services(request)
     if not hasattr(services, "media") or services.media is None:
         raise HTTPException(status_code=404, detail="图片不存在")
@@ -2057,8 +2339,13 @@ async def get_media(request: Request, filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="图片不存在") from None
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="图片不存在")
+    headers: dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+    if _authorize_media_read(
+        services.db, filename=filename, token=t, kinds=MEDIA_IMAGE_KINDS
+    ):
+        headers["X-Legacy-Asset"] = "1"
     return FileResponse(
         path,
         media_type=services.media.mime_for(filename),
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers=headers,
     )

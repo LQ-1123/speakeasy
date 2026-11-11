@@ -30,7 +30,9 @@ from app.v3 import behavior as behavior_mod
 from app.v3 import emotion as emotion_mod
 from app.v3 import event_posts as event_posts_mod
 from app.v3 import life_events as life_events_mod
+from app.v3 import privacy as privacy_mod
 from app.v3 import speech_dna as speech_mod
+from app.v3.identity import current_user_id
 from app.v2 import social as social_mod
 
 log = get_logger(__name__)
@@ -159,6 +161,66 @@ def _friend_as_persona(friend: dict, persona_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# 多用户：当前用户 & 情绪分层（关系情绪 → 公共基线）
+# --------------------------------------------------------------------------- #
+def resolve_user_id(user_id: str | None = None) -> str:
+    """本轮情绪归属的用户。
+
+    - 显式传入的 ``user_id`` 优先（后台任务 / 测试可以钉死用户）；
+    - 否则读 :mod:`app.v3.identity` 的 ContextVar。``asyncio.to_thread`` 与
+      ``create_task`` 都会复制 contextvars，所以聊天线程里同样拿得到请求用户；
+    - 没有身份头的本地单用户模式恒为 ``"local"``（与老库数据 owner 一致）。
+    """
+    explicit = str(user_id or "").strip()
+    if explicit:
+        return explicit
+    try:
+        return current_user_id()
+    except Exception:  # noqa: BLE001 - 身份上下文异常退化为本地用户
+        return "local"
+
+
+def _emotion_for_turn(
+    db: Any,
+    persona: dict,
+    row: dict | None,
+    persona_id: str,
+    user_id: str,
+    moment: datetime,
+) -> dict:
+    """本轮情绪的完整读法（多用户隔离的关键）：
+
+    1. **关系情绪优先**：``persona_user_emotion`` 里「当前用户 × 该人物」的记录，
+       这是这个用户与这个人物私聊累积出来的私有状态；
+    2. **没有记录 → 公共基线**：``personas.emotion_state``（只由世界事件写入）经时间
+       衰减；老库/新人物还没有公共情绪时，用 :func:`app.v3.emotion.default_state`
+       按人设生成确定性初始状态（比裸基线更贴人物气质）。
+
+    两条路径都会按 ``updated_at`` 到现在的小时数做衰减，和升级前读公共情绪的节奏一致。
+    """
+    relation: dict = {}
+    if db is not None and persona_id and user_id:
+        try:
+            relation = privacy_mod.get_user_persona_emotion(db, user_id, persona_id)
+        except Exception as exc:  # noqa: BLE001 - 隐私存储失败就回退公共基线
+            log.debug("读关系情绪失败（回退公共基线）: %s", exc)
+            relation = {}
+
+    if relation:
+        state = emotion_mod.normalize_state(relation)
+    else:
+        raw = _loads(persona.get("emotion_state"), {}) if row is not None else {}
+        state = emotion_mod.normalize_state(raw) if raw else emotion_mod.default_state(persona)
+
+    updated = _parse_iso(state.get("updated_at"))
+    if updated is not None:
+        hours = max(0.0, (moment - updated).total_seconds() / 3600.0)
+        if hours >= 0.5:
+            state = emotion_mod.decay(state, hours=hours)
+    return state
+
+
+# --------------------------------------------------------------------------- #
 # 一轮对话的计划
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -166,6 +228,7 @@ class TurnPlan:
     """本轮聊天要注入的全部 Persona 侧信息（可测试、可打印）。"""
 
     persona_id: str = ""
+    user_id: str = ""
     persona: dict = field(default_factory=dict)
     dna: dict = field(default_factory=dict)
     dna_traits: dict = field(default_factory=dict)
@@ -206,23 +269,27 @@ def build_turn_plan(
     rng: Any = None,
     now: datetime | None = None,
     include_examples: bool = True,
+    user_id: str | None = None,
 ) -> TurnPlan:
     """计算本轮：人设、DNA、情绪、行为、示例、生活事实。**永不抛异常**。
 
     ``include_examples=False`` 用于语音通话（示例会拉高 TTFT，通话只要声音像本人）。
+    ``user_id`` 显式给出时优先，否则取 :func:`app.v3.identity.current_user_id`
+    （聊天链路默认走后者，实现「A 的私聊情绪不影响 B」）。
     """
     friend = friend if isinstance(friend, dict) else {}
     moment = now or _now()
     persona_id = persona_id_for_friend(db, friend)
     row = _persona_row(db, persona_id)
     persona = row if row is not None else _friend_as_persona(friend, persona_id)
+    uid = resolve_user_id(user_id)
 
     language = str(
         friend.get("reply_language") or friend.get("native_lang")
         or persona.get("language") or "en"
     ).strip().lower() or "en"
 
-    plan = TurnPlan(persona_id=persona_id, persona=persona, language=language)
+    plan = TurnPlan(persona_id=persona_id, user_id=uid, persona=persona, language=language)
 
     # --- Speech DNA ---
     try:
@@ -238,17 +305,9 @@ def build_turn_plan(
         }
         plan.degraded = True
 
-    # --- 情绪（读 → 按时间衰减） ---
+    # --- 情绪（关系情绪优先 → 公共基线；读 → 按时间衰减） ---
     try:
-        state = emotion_mod.normalize_state(
-            _loads(persona.get("emotion_state"), {}) if row is not None else {}
-        )
-        updated = _parse_iso(state.get("updated_at"))
-        if updated is not None:
-            hours = max(0.0, (moment - updated).total_seconds() / 3600.0)
-            if hours >= 0.5:
-                state = emotion_mod.decay(state, hours=hours)
-        plan.emotion = state
+        plan.emotion = _emotion_for_turn(db, persona, row, persona_id, uid, moment)
     except Exception as exc:  # noqa: BLE001
         log.debug("情绪状态解析失败（忽略）: %s", exc)
         plan.emotion = {}
@@ -424,10 +483,17 @@ def build_call_plan(
     *,
     turn_index: int = 0,
     rng: Any = None,
+    user_id: str | None = None,
 ) -> TurnPlan:
     """语音通话的本轮计划：与文字聊天同源，但**不注入示例对话**（省 TTFT）。"""
     return build_turn_plan(
-        db, friend, transcript, turn_index=turn_index, rng=rng, include_examples=False
+        db,
+        friend,
+        transcript,
+        turn_index=turn_index,
+        rng=rng,
+        include_examples=False,
+        user_id=user_id,
     )
 
 
@@ -596,6 +662,31 @@ def _life_now_line(activity: dict, *, moment: datetime | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# 公开适配层：prompt_composer 需要复用「此刻生活 / 身边的人 / 通话压缩」这些
+# 已经打磨过的片段，但不应该 import 私有函数（_people_lines / _life_now_line …）。
+# 这里只做导出适配，行为与原函数完全一致。
+# --------------------------------------------------------------------------- #
+def life_now_line(activity: dict, *, moment: datetime | None = None) -> str:
+    """公开版本 :func:`_life_now_line`（供 prompt_composer 使用）。"""
+    return _life_now_line(activity, moment=moment)
+
+
+def people_lines(db: Any, persona_id: str) -> list[str]:
+    """公开版本 :func:`_people_lines`（供 prompt_composer 使用）。"""
+    return _people_lines(db, persona_id)
+
+
+def compact_directive(directive: str) -> str:
+    """公开版本 :func:`_compact_directive`（通话版行为指令压缩）。"""
+    return _compact_directive(directive)
+
+
+def compact_dna_line(dna: dict) -> str:
+    """公开版本 :func:`_compact_dna_line`（通话版 DNA 一行）。"""
+    return _compact_dna_line(dna)
+
+
+# --------------------------------------------------------------------------- #
 # 回合结束后写回
 # --------------------------------------------------------------------------- #
 def record_behavior(db: Any, friend: dict, behavior_value: str) -> list[str]:
@@ -633,9 +724,22 @@ def record_behavior(db: Any, friend: dict, behavior_value: str) -> list[str]:
 
 
 def update_emotion_after_turn(
-    db: Any, plan: TurnPlan, *, intent: str = "", behavior_value: str = ""
+    db: Any,
+    plan: TurnPlan,
+    *,
+    intent: str = "",
+    behavior_value: str = "",
+    user_id: str | None = None,
 ) -> dict:
-    """一轮聊天结束后更新 Persona 持续情绪（幅度很小，不会一次聊天气质突变）。"""
+    """一轮聊天结束后更新**「当前用户 × 该人物」**的关系情绪。
+
+    多用户一期起，私聊**绝不写** ``personas.emotion_state``：那是公共基线，只由世界
+    事件（:mod:`app.v3.life_events`）推进。私聊结果落到
+    ``persona_user_emotion(user_id, persona_id)``，A 的情绪不会改变 B 遇到的人物。
+
+    ``user_id`` 解析优先级：显式参数 → ``plan.user_id``（本轮计划读情绪时用的用户，
+    保证读写同一个人的记录）→ :func:`app.v3.identity.current_user_id`。
+    """
     if db is None or not plan.persona_id:
         return plan.emotion or {}
     try:
@@ -643,11 +747,9 @@ def update_emotion_after_turn(
             plan.emotion or {}, intent=intent or "unknown", behavior=behavior_value or plan.behavior
         )
         state["updated_at"] = _now().strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        with db._lock, db.conn:  # noqa: SLF001
-            db.conn.execute(
-                "UPDATE personas SET emotion_state=? WHERE id=?",
-                (json.dumps(state, ensure_ascii=False), plan.persona_id),
-            )
+        uid = str(user_id or "").strip() or str(getattr(plan, "user_id", "") or "").strip()
+        uid = uid or resolve_user_id()
+        privacy_mod.save_user_persona_emotion(db, uid, plan.persona_id, state)
         return state
     except Exception as exc:  # noqa: BLE001
         log.debug("更新情绪状态失败（忽略）: %s", exc)
@@ -668,6 +770,20 @@ def behavior_summary(plan: TurnPlan) -> dict:
     }
 
 
+def prompt_summary(composed: Any) -> dict:
+    """本轮 Prompt Composer 合成摘要（版本 / 模块 key / 每模块 chars）。
+
+    延迟导入 :mod:`app.v3.prompt_composer`，避免 v2/v3 循环导入；任何异常返回空 dict。
+    """
+    try:
+        from app.v3.prompt_composer import prompt_summary as _summary  # noqa: PLC0415
+
+        return _summary(composed)
+    except Exception as exc:  # noqa: BLE001 - 摘要只服务排查，不允许影响主链路
+        log.debug("prompt_summary 失败（忽略）: %s", exc)
+        return {}
+
+
 __all__ = [
     "EXAMPLE_K",
     "MAX_CALL_LAYER_CHARS",
@@ -679,7 +795,13 @@ __all__ = [
     "build_call_plan",
     "build_persona_layer",
     "build_turn_plan",
+    "compact_directive",
+    "compact_dna_line",
+    "life_now_line",
+    "people_lines",
     "persona_id_for_friend",
+    "prompt_summary",
     "record_behavior",
+    "resolve_user_id",
     "update_emotion_after_turn",
 ]

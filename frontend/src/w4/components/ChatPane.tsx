@@ -38,6 +38,9 @@ import { clockTime, dayOf } from "../format";
 import "../styles/chat.css";
 import type { Friend, Message, Route } from "../model";
 import { API_ORIGIN } from "../api";
+import { adEvent } from "../v3/accountClient";
+import { safeLandingUrl } from "../v3/adEvents";
+import { ReportDialog } from "../v3/ReportDialog";
 import { callSession } from "../v3/callSession";
 import { registerOverlay } from "../navigationStore";
 import {
@@ -1260,6 +1263,10 @@ function MessageRow({
     );
   }
 
+  if (message.kind === "ad" && message.ad) {
+    return <ChatAdCard message={message} friend={friend} />;
+  }
+
   const isVoice = message.kind === "voice";
   const isImage = message.kind === "image";
   const readable = !mine && !isVoice && !isImage && message.text.trim().length > 0;
@@ -1467,3 +1474,91 @@ function SuggestionCard({
 }
 
 /* --------------------------------------------------------------- 通话 */
+
+/** 聊天里的商业合作段落：审核文案 + 品牌标识 + 关闭/举报（不参与记忆/语音朗读）。 */
+function ChatAdCard({ message, friend }: { message: Message; friend: Friend }) {
+  const ad = message.ad;
+  const [hidden, setHidden] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [reporting, setReporting] = useState(false);
+
+  if (!ad || hidden) return null;
+  const landing = safeLandingUrl(ad.landing_url);
+
+  const dismiss = (type: "close" | "report") => {
+    setHidden(true);
+    setFeedback(type === "close" ? "已关闭这条推荐" : "已举报，运营会核查");
+    if (ad.delivery_id) void adEvent(ad.delivery_id, type).catch(() => undefined);
+  };
+
+  return (
+    <div className="w4-msg" data-chat-ad="1">
+      <button className="w4-msg-avatar" onClick={() => undefined} aria-label="人物头像">
+        <Avatar friend={friend} size={36} />
+      </button>
+      <div className="w4-msg-col">
+        <div
+          style={{
+            display: "grid",
+            gap: 6,
+            padding: "10px 12px",
+            borderRadius: 14,
+            border: "1px solid rgba(120,120,120,.24)",
+            background: "linear-gradient(180deg, rgba(79,124,255,.08), rgba(79,124,255,.02))",
+            maxWidth: 360,
+          }}
+        >
+          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, opacity: 0.8 }}>
+            <span
+              style={{
+                padding: "1px 8px",
+                borderRadius: 999,
+                background: "rgba(255,166,0,.16)",
+                color: "#a96a00",
+                fontWeight: 600,
+              }}
+            >
+              {ad.label || "广告 · 品牌合作"}
+            </span>
+            <span>{ad.brand_name || "合作品牌"}</span>
+          </div>
+          <div style={{ fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{message.text}</div>
+          <div style={{ display: "flex", gap: 10, fontSize: 12, alignItems: "center" }}>
+            {landing ? (
+              <a
+                href={landing}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  if (ad.delivery_id) void adEvent(ad.delivery_id, "click").catch(() => undefined);
+                }}
+                style={{ color: "var(--accent, #4f7cff)", fontWeight: 600 }}
+              >
+                了解详情
+              </a>
+            ) : null}
+            <button type="button" onClick={() => dismiss("close")} style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.72 }}>
+              不感兴趣
+            </button>
+            <button type="button" onClick={() => setReporting(true)} style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.72 }}>
+              举报
+            </button>
+            {feedback ? <span style={{ opacity: 0.7 }}>{feedback}</span> : null}
+          </div>
+        </div>
+      </div>
+      {reporting ? (
+        <ReportDialog
+          targetType="ad"
+          targetId={ad.delivery_id}
+          onClose={() => setReporting(false)}
+          onDone={(msg) => {
+            setReporting(false);
+            dismiss("report");
+            setFeedback(msg);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}

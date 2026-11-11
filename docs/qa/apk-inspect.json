@@ -1,0 +1,34 @@
+{
+  "apk": "deliverables\\SpeakEasy-v4.2.0-release.apk",
+  "size_bytes": 15086185,
+  "zip_entries": 606,
+  "text_entries_scanned": 273,
+  "hits": {
+    "prod_domain": [
+      "assets/public/_next/static/chunks/572.9846bc72ad2faaa6.js: ()}catch(e){return null}}let d=\"https://47-104-24-236.sslip.io\".replace(/\\/+$/,\"\"),u=\"\".concat(d,\"/api"
+    ],
+    "prod_ip": [],
+    "localhost": [],
+    "localhost_name": [
+      "assets/public/_next/static/chunks/polyfills-42372ed130431b0a.js: g}else{if(a=s.parseHost(l))return a;if(\"localhost\"===s.host&&(s.host=\"\"),e)return;l=\"\",c=",
+      "assets/public/offline.html: p>应用页面暂时无法打开。请重新加载。</p><a href=\"https://localhost/\">重新加载</a></main></body></html> "
+    ],
+    "lan_ip": [],
+    "secret_sk": [],
+    "secret_key_assign": []
+  },
+  "hit_counts": {
+    "prod_domain": 1,
+    "prod_ip": 0,
+    "localhost": 0,
+    "localhost_name": 2,
+    "lan_ip": 0,
+    "secret_sk": 0,
+    "secret_key_assign": 0
+  },
+  "prod_domain_present": true,
+  "localhost_present": false,
+  "localhost_word_only": true,
+  "lan_ip_present": false,
+  "secret_leak_present": false
+}

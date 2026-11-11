@@ -288,6 +288,94 @@ CREATE TABLE IF NOT EXISTS v3_discover_views (
     seen_at TEXT NOT NULL,
     PRIMARY KEY (user_id, persona_id)
 );
+
+-- 管理端操作日志：写操作成功后由 app.admin.auth.require_admin 自动落一条。
+-- summary 只记「改了哪些字段」，绝不记录密钥明文（见 app.admin.audit.summarize）。
+CREATE TABLE IF NOT EXISTS admin_audit (
+    id TEXT PRIMARY KEY,
+    at TEXT NOT NULL,
+    ip TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_at ON admin_audit(at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_action ON admin_audit(action, at DESC);
+
+-- ---------------------------------------------------------------------------
+-- P3：公共事件池 / 待发动态队列 / Prompt 改写
+-- ---------------------------------------------------------------------------
+
+-- 运营手写的公共事件池。运营写一份「周末市集」，多个角色各自领取，
+-- 各自用自己的人设去演绎——这是"同一个世界事件、不同角色视角"的来源。
+CREATE TABLE IF NOT EXISTS event_pool (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '',
+    start_at TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    slots INTEGER NOT NULL DEFAULT 1,
+    conditions TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_event_pool_status ON event_pool(status, created_at DESC);
+
+-- 领取记录。UNIQUE(pool_id, persona_id) 是**幂等键**：
+-- 重复点「让 TA 领取」不会让同一角色领两次、也不会重复生成事件。
+CREATE TABLE IF NOT EXISTS event_pool_claims (
+    id TEXT PRIMARY KEY,
+    pool_id TEXT NOT NULL REFERENCES event_pool(id) ON DELETE CASCADE,
+    persona_id TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    score_detail TEXT NOT NULL DEFAULT '{}',
+    event_id TEXT NOT NULL DEFAULT '',
+    claimed_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(pool_id, persona_id)
+);
+CREATE INDEX IF NOT EXISTS idx_event_pool_claims_pool ON event_pool_claims(pool_id);
+
+-- 待发动态队列。
+--
+-- 为什么不给 persona_posts 加 status 列：persona_posts 在代码里约 157 处引用，
+-- 加状态列要逐处补过滤条件，漏一处就会把「还没发」的内容露给真实用户。
+-- 独立表让「已发布」的判定留在信息流那一侧，不扩散风险。
+CREATE TABLE IF NOT EXISTS post_queue (
+    id TEXT PRIMARY KEY,
+    persona_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    media TEXT NOT NULL DEFAULT '[]',
+    source_type TEXT NOT NULL DEFAULT 'manual',
+    source_event_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    publish_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    published_post_id TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_post_queue_status ON post_queue(status, publish_at);
+CREATE INDEX IF NOT EXISTS idx_post_queue_persona ON post_queue(persona_id, created_at DESC);
+
+-- 角色 × 模式 × 模块 → 改写文本。
+-- 只覆盖「固定模块」；动态模块（记忆/上下文）永远是只读的，
+-- 因为它们的正确性依赖运行时数据，让运营改会直接改坏行为。
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+    persona_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    module_key TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (persona_id, mode, module_key)
+);
+
+-- 可复用模板：一份 modules 可以套到多个角色。
+CREATE TABLE IF NOT EXISTS prompt_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    modules TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT ''
+);
 """
 
 #: ``v3_meta`` 里标记「语料已入库」的键

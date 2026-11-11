@@ -10,9 +10,13 @@ from datetime import datetime, timezone
 
 import httpx
 
+from app.v3 import teen
 from app.v3.client_api import preferences
 
 log = logging.getLogger(__name__)
+
+#: 青少年推送抑制后的重试间隔：保留 pending，等门禁放行或下个活跃时段再推。
+MINOR_PUSH_RETRY_S = 3600
 
 # A missing deployment credential is a permanent state until the process restarts
 # with keys; warn once instead of logging on every worker tick.
@@ -83,9 +87,15 @@ def collect_events(db) -> int:
 async def dispatch_push(db) -> int:
     global _unconfigured_warned
     from app.config import get_settings
+    from app.v3 import push_config
+
+    # 凭据来源（env > 管理台保存 > .env）统一由 push_config 解析。
+    # 以前这里内联读 env/settings，导致管理台根本改不了推送配置。
+    creds = push_config.effective()
+    key = creds["app_key"]
+    secret = creds["master_secret"]
+    # settings 后面还要用来拼通知大图的 base url，别删。
     settings = get_settings()
-    key = (os.getenv('JPUSH_APP_KEY') or settings.jpush_app_key).strip()
-    secret = (os.getenv('JPUSH_MASTER_SECRET') or settings.jpush_master_secret).strip()
     if not key or not secret:
         marked = mark_push_unconfigured(db)
         if not _unconfigured_warned:
@@ -98,6 +108,13 @@ async def dispatch_push(db) -> int:
     sent = 0
     async with httpx.AsyncClient(timeout=8, auth=(key,secret)) as client:
         for event in rows:
+            # 青少年模式：宵禁 / 当日超时 / 未核验 / 未绑监护期间不主动推送。
+            # 不标 failed/suppressed，只把 next_attempt 推后，等允许时再发。
+            if teen.push_suppressed(db, event['user_id']):
+                with db._lock, db.conn:
+                    db.conn.execute('UPDATE client_events SET next_attempt=? WHERE id=?',
+                                    (time.time() + MINOR_PUSH_RETRY_S, event['id']))
+                continue
             pref = await asyncio.to_thread(preferences,db,event['user_id'])
             enabled = pref['messages'] if event['type']=='message' else pref['interactions']
             with db._lock:

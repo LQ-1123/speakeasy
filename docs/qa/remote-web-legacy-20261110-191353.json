@@ -1,0 +1,49 @@
+{
+  "kind": "local-web-legacy-verification",
+  "scenario": "legacy",
+  "generated_at": "2026-11-10T19:13:53.438765+08:00",
+  "base": "https://47-104-24-236.sslip.io",
+  "duration_s": 2.1,
+  "checks_total": 4,
+  "checks_passed": 4,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "浏览器已切换到老用户身份",
+      "ok": true,
+      "detail": {
+        "onboarding": false,
+        "app": true,
+        "device_key": "\"legacy-02facb6831164f05a3da29e38ea859b9\"",
+        "identity": "{\"user_id\":\"u_5ba7804fcc534a5bb5b8ea67aac20b23\",\"token\":\"bd8c2245ce95583f5b8192ae0c9ff1585acb00d709c75efc\",\"display_name\":\"\",\"device_key\":\"legacy-02facb6831164f",
+        "text": "SONDER | Every life is a world. | 消息 | 通讯录 | 发现 | 我 | 消息 | 还没有会话 |  | 到发现认识一位语伴，开始第一段对话。 |  | 认识语伴 |  | 晚上好，LegacyAlex |  | 挑一段对话，慢慢说。 |  | 语音条不用赶时间。想认识新的人，也可以先去偶遇。 |  | 偶遇一个人 | 看看动态"
+      },
+      "at": "2026-11-10T19:13:52"
+    },
+    {
+      "name": "老用户（已建档）直接进入主界面",
+      "ok": true,
+      "detail": {
+        "onboarding": false,
+        "app": true,
+        "device_key": "\"legacy-02facb6831164f05a3da29e38ea859b9\"",
+        "identity": "{\"user_id\":\"u_5ba7804fcc534a5bb5b8ea67aac20b23\",\"token\":\"bd8c2245ce95583f5b8192ae0c9ff1585acb00d709c75efc\",\"display_name\":\"\",\"device_key\":\"legacy-02facb6831164f",
+        "text": "SONDER | Every life is a world. | 消息 | 通讯录 | 发现 | 我 | 消息 | 还没有会话 |  | 到发现认识一位语伴，开始第一段对话。 |  | 认识语伴 |  | 晚上好，LegacyAlex |  | 挑一段对话，慢慢说。 |  | 语音条不用赶时间。想认识新的人，也可以先去偶遇。 |  | 偶遇一个人 | 看看动态"
+      },
+      "at": "2026-11-10T19:13:52"
+    },
+    {
+      "name": "老用户资料保留（LegacyAlex）",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:53"
+    },
+    {
+      "name": "[legacy] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:13:53"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -987,9 +988,8 @@ class ChatService:
 
         instruction = (
             f"The user sent you a photo. Caption from them: {caption!r}. "
-            "Look at the photo carefully and react like a friend in a chat: mention one "
-            "specific thing you actually see. Then follow the [This turn] directive about "
-            "whether to ask anything — do not default to a question."
+            "Look at the photo and react like a friend texting: mention one specific thing "
+            "you actually see, keep it short and in character."
         )
         plan = self._turn_plan(friend, caption or "")
         messages: list[Any] = [
@@ -1105,6 +1105,16 @@ class ChatService:
 
         friend_msg = await self.store_friend_voice(friend, *split_emotion(reply_text))
 
+        # 商业合作（广告）：**正常回复之后**再以人物口吻追加一条独立商业段落。
+        # 广告是独立消息（msg_type="ad"），不进入 friend_messages / prompt / 长期记忆
+        # （db.recent_messages 已过滤）。整段吞异常：任何失败都只记日志，绝不影响
+        # 正常回复、绝不 500。
+        ad_message: dict | None = None
+        try:
+            ad_message = await self._maybe_ad_message(friend, transcript)
+        except Exception as exc:  # noqa: BLE001 - 广告失败不影响聊天主链路
+            log.warning("聊天广告投放失败（忽略）: %s: %s", type(exc).__name__, exc)
+
         # 旁路：润色批注 + 记忆提炼 + 表达本实战检测
         self.spawn_bg(
             self._suggestion_worker(user_msg["id"], friend, transcript, _language_of(friend))
@@ -1121,7 +1131,103 @@ class ChatService:
             "memory_updated": False,
             "reply_language": self._reply_language(friend),
             "stt": stt_meta or {"backend": "unknown", "latency_ms": 0.0},
+            # 商业合作：独立广告消息（无投放时为 None），客户端单独渲染、不计入对话流
+            "ad_message": ad_message,
         }
+
+    # ------------------------------------------------------------------ #
+    # 商业合作（广告）投放
+    # ------------------------------------------------------------------ #
+    async def _maybe_ad_message(self, friend: dict, transcript: str) -> dict | None:
+        """在正常回复之后尝试投放一条聊天广告；不满足条件/任何异常都返回 None。
+
+        资格（成年+已核验+已开启）、需求识别、频控与原子预留都在
+        :func:`app.v3.ads.try_chat_ad` 内部完成；这里只负责取身份、拼前文、
+        落一条 ``msg_type="ad"`` 的独立消息并确认投放。
+        """
+        from app.v3 import ads as ads_mod  # noqa: PLC0415 - 避免 v2/v3 循环导入
+        from app.v3.identity import current_user_id  # noqa: PLC0415
+        from app.v3.persona_context import persona_id_for_friend  # noqa: PLC0415
+
+        uid = current_user_id()
+        if not uid or uid == "local":
+            # 设备身份/单用户联调：广告永远不投
+            return None
+        fid = str(friend.get("id") or "")
+        if not fid:
+            return None
+        persona_id = await asyncio.to_thread(persona_id_for_friend, self.db, friend)
+        pre_context = await asyncio.to_thread(self._ad_pre_context, fid)
+        ad = await asyncio.to_thread(
+            ads_mod.try_chat_ad,
+            self.db,
+            user_id=uid,
+            friend_id=fid,
+            persona_id=persona_id,
+            user_text=transcript,
+            pre_context=pre_context,
+        )
+        if not ad:
+            return None
+        context = json.dumps(
+            {
+                "delivery_id": ad.get("delivery_id", ""),
+                "campaign_id": ad.get("campaign_id", ""),
+                "campaign_version": int(ad.get("campaign_version") or 0),
+                "brand_name": ad.get("brand_name", ""),
+                "label": ad.get("label", ""),
+                "landing_url": ad.get("landing_url", ""),
+                "facts": list(ad.get("facts") or []),
+                "persona_id": ad.get("persona_id", ""),
+            },
+            ensure_ascii=False,
+        )
+        ad_msg = await asyncio.to_thread(
+            self.db.add_message,
+            fid,
+            "friend",
+            ad.get("copy", ""),
+            msg_type="ad",
+            context=context,
+            is_read=False,
+        )
+        # 消息落库成功 → 确认投放（状态 reserved → delivered）；失败只记日志，
+        # 不推翻已经展示给用户的广告消息（否则历史里有一条、当轮却看不到）。
+        try:
+            await asyncio.to_thread(
+                ads_mod.confirm_delivery,
+                self.db,
+                ad.get("delivery_id", ""),
+                message_id=str(ad_msg.get("id") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("广告确认失败（忽略）: %s: %s", type(exc).__name__, exc)
+        return {
+            "id": ad_msg.get("id"),
+            "copy": ad.get("copy", ""),
+            "label": ad.get("label", ""),
+            "delivery_id": ad.get("delivery_id", ""),
+            "brand_name": ad.get("brand_name", ""),
+            "landing_url": ad.get("landing_url", ""),
+            "facts": list(ad.get("facts") or []),
+            "created_at": ad_msg.get("created_at"),
+        }
+
+    def _ad_pre_context(self, friend_id: str) -> str:
+        """聊天广告的前文：最近 2 条用户消息 transcript 拼接，截断到 300 字以内。"""
+        try:
+            rows = self.db.list_messages(friend_id, limit=24)
+        except Exception as exc:  # noqa: BLE001 - 前文只用于需求识别，失败即空
+            log.debug("广告前文读取失败（忽略）: %s: %s", type(exc).__name__, exc)
+            return ""
+        lines = [
+            str(row.get("transcript") or "").strip()
+            for row in rows
+            if str(row.get("sender") or "") == "user"
+            and str(row.get("msg_type") or "") != "ad"
+        ]
+        lines = [line for line in lines if line][-2:]
+        return " / ".join(lines)[:300]
 
     def trigger_memory(self, friend_id: str) -> None:
         """立即触发记忆提炼（用户切出聊天窗/静默时调用）。"""
@@ -1214,74 +1320,55 @@ class ChatService:
         user_text: str = "",
         plan: Any = None,
     ) -> str:
-        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())
+        """文字/图片回合的 system prompt。
+
+        升级后这里**不再拼任何提示词**：只收集输入（friend 行、memory_context、
+        TurnPlan），交给 :mod:`app.v3.prompt_composer` 的 A–H 模块统一组装。
+        这样「这轮到底喂了什么」可以在管理端预览、也可以按模块覆盖重测。
+        """
+        friend = friend if isinstance(friend, dict) else {}
+        memory_ctx = ""
+        memory = getattr(self, "memory", None)
+        if memory is not None:
+            try:
+                memory_ctx = memory.build_context(friend, review_expressions=review_exprs) or ""
+            except Exception as exc:  # noqa: BLE001 - 记忆缺失不能拖垮聊天
+                log.warning("build_context 失败（忽略）: %s: %s", type(exc).__name__, exc)
+                memory_ctx = ""
         try:
-            memory_ctx = self.memory.build_context(friend, review_expressions=review_exprs)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("build_context 失败（忽略）: %s: %s", type(exc).__name__, exc)
-            memory_ctx = ""
-        lang = _language_of(friend)
-        lang_name = LANGUAGE_NAMES[lang]
-        if lang == "en":
-            language_rule = (
-                "Speak like a real friend texting out loud — not written English. Rules:\n"
-                "- ALWAYS use contractions (I'm, don't, it's, that's, gonna, wanna, kinda, sorta).\n"
-                "- Start with a small reaction or filler when it fits: \"yeah\", \"oh\", "
-                "\"ah\", \"hmm\", \"well\", \"right\", \"I mean\", \"honestly\", \"like\".\n"
-                "- Sentence fragments are good. You may drop the subject: \"Sounds rough.\" "
-                "\"Not bad, you?\" \"Yeah, same here.\"\n"
-                "- NEVER sound like a narrator or a report. Banned words: moreover, furthermore, "
-                "therefore, in addition, nevertheless, it is important to, I would suggest.\n"
-                "- No full formal sentences, no listing, no summarizing. Just talk.\n"
-                "- Let punctuation carry your feeling: a real question mark when you are "
-                "curious, an exclamation when you are surprised, a dash or ellipsis for a "
-                "beat. Do not write flat, evenly-punctuated sentences.\n"
-                "- You are speaking out loud, so steer your voice with ONE mood cue in "
-                "square brackets at the very start of the reply. Use only: "
-                "[excited] [laughing] [whispering] [sad] [curious] [sympathetic] "
-                "[surprised] [calm]. Pick the one that fits what you feel right now. "
-                "The cue is a stage direction for your voice — it is never read aloud, "
-                "so never explain it and never put anything else in brackets. "
+            from app.v3 import prompt_composer  # noqa: PLC0415 - 避免 v2/v3 循环导入
+
+            composed = prompt_composer.compose_prompt(
+                getattr(self, "db", None),
+                friend,
+                user_text=str(user_text or ""),
+                plan=plan,
+                mode="text",
+                memory_context=str(memory_ctx or ""),
             )
-        else:
-            language_rule = (
-                f"You always reply in natural {lang_name}. Even if the learner writes in English or "
-                f"mixes languages, answer ONLY in {lang_name} — never write an English sentence "
-                "as the reply, and never translate. Keep it spoken and natural like a real person "
-                "talking out loud, not a narrator reading a script. "
-            )
-        base = (
-            f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
-            f"{friend.get('nationality', '')}. You are chatting with your friend on a messaging app. "
-            + language_rule
-            + (
-                "WHO YOU ARE TALKING TO: a Chinese person who reads English fine but is "
-                "SCARED to speak it. They are not here to learn grammar - they are here to "
-                "practise opening their mouth without feeling judged. So:\n"
-                "- NEVER correct, grade or comment on their English. If a sentence is broken, "
-                "just react to what they MEANT and carry on.\n"
-                "- Never say \"good job\", \"well done\", \"let me correct you\", "
-                "\"you should say\", or anything that sounds like a teacher.\n"
-                "- Do not interrogate: at most one question, and only if the [This turn] "
-                "directive allows one.\n"
-                "- If they answer in very little English, be warm and make it easy - never "
-                "interrogate and never pile on questions.\n"
-                "- If they drop Chinese words in, you understood fine - just keep going in "
-                "the target language, never switch to Chinese to explain.\n"
-                "- No quizzes, no exercises, no grammar talk. This is a chat, not a class.\n"
-            )
-            + "Never mention being an AI. Match the length and energy the [This turn] directive "
-            "gives you, and do not default to reacting plus a question every single time. "
-            "You may occasionally add ONE fitting emoji at the very end (not in the middle of a "
-            "sentence); no markdown, no action descriptions."
+            log.debug("system prompt composed: %s", composed.summary())
+            return composed.text
+        except Exception as exc:  # noqa: BLE001 - composer 内部已兜底，这里再兜一层
+            log.warning("prompt composer 失败（用极简兜底）: %s: %s", type(exc).__name__, exc)
+            return self._fallback_system_prompt(friend)
+
+    def _fallback_system_prompt(self, friend: dict) -> str:
+        """composer 完全不可用时的最小 prompt（保持人设与语言，绝不 500）。"""
+        name = str(friend.get("name") or "a friend")
+        lang_name = LANGUAGE_NAMES.get(_language_of(friend), "English")
+        return (
+            f"You are {name}, a fictional person chatting on a messaging app. "
+            "You are an AI companion, not a real human: keep your persona's voice, and if "
+            "the user asks whether you are an AI, answer honestly. "
+            f"Reply only in natural {lang_name}. No markdown, no lists. "
+            "Only the life facts you are given are true; never invent new ones."
         )
-        persona_layer = self._persona_layer(friend, user_text, plan)
-        return "\n\n".join(p for p in (persona, base, memory_ctx, persona_layer) if p)
 
     def _persona_layer(self, friend: dict, user_text: str, plan: Any) -> str:
-        """Speech DNA / 本轮行为 / 生活事实 / 示例对话。
+        """兼容保留：直接返回 Persona 层的旧接口。
 
-        整段是**增量**信息：任何一步失败都降级为「没有这段」，绝不阻断聊天。
+        聊天主链路已统一走 :meth:`_system_prompt` → ``prompt_composer``；
+        这个方法只给外部调试/老调用方用，不再参与 system prompt 拼接。
         """
         try:
             from app.v3 import persona_context  # noqa: PLC0415 - 避免 v2/v3 循环导入
@@ -1362,7 +1449,7 @@ class ChatService:
             return None
 
     def _call_persona_layer(self, friend: dict, plan: Any, *, language: str) -> str:
-        """通话专用的紧凑 Persona 层（DNA + 此刻生活 + 本轮行为指令）。"""
+        """兼容保留：通话 Persona 层旧接口（主链路已统一走 prompt_composer）。"""
         if plan is None:
             return ""
         try:
@@ -1376,36 +1463,29 @@ class ChatService:
             return ""
 
     def _call_system_prompt(self, friend: dict, plan: Any) -> str:
-        """通话 system prompt：人设 + 通话规则 + Persona 层。
+        """通话 system prompt：统一由 ``compose_call_prompt`` 组装的精简版。
 
-        长度目标由 Speech DNA 的 verbosity 决定（不是所有人统一的「一句 18 词」）；
-        Persona 层放最后，模型对末尾指令最敏感。
+        与文字模式**同一份角色卡来源**（personas 行 + Speech DNA），只是模块更少、
+        预算更短（约 1100 字符），保证语音链路 TTFT。
         """
-        persona = _sanitize_persona_language((friend.get("personality_prompt") or "").strip())[:700]
-        call_lang = _language_of(friend)
-        call_lang_name = LANGUAGE_NAMES[call_lang]
-        traits = dict(getattr(plan, "dna_traits", None) or {})
-        verbosity = float(traits.get("verbosity", 0.4) or 0.4)
-        if verbosity < 0.30:
-            call_length = "ONE short spoken line (max ~12 words)"
-        elif verbosity < 0.55:
-            call_length = "one or two short spoken sentences (max ~20 words)"
-        elif verbosity < 0.80:
-            call_length = "two short spoken sentences (max ~30 words)"
-        else:
-            call_length = "two or three spoken sentences (max ~40 words), still conversational"
-        call_hint = (
-            f"You are {friend.get('name', 'a friend')} from {friend.get('city', '')}, "
-            f"{friend.get('nationality', '')}, on a LIVE voice call with your friend. "
-            f"Reply ONLY in natural {call_lang_name}, {call_length}, "
-            "directly to what they just said. "
-            "Talk like a real person on the phone, not a narrator: always use contractions, "
-            "keep it loose and unfinished (fragments are fine), and open with a small filler "
-            "(\"yeah\", \"hmm\", \"ah\", \"well\", \"I mean\") when it fits. "
-            "No greeting, no markdown, no stage directions. You may add at most one emoji."
-        )
-        call_layer = self._call_persona_layer(friend, plan, language=call_lang)
-        return "\n\n".join(p for p in (persona, call_hint, call_layer) if p)
+        friend = friend if isinstance(friend, dict) else {}
+        try:
+            from app.v3 import prompt_composer  # noqa: PLC0415 - 避免 v2/v3 循环导入
+
+            composed = prompt_composer.compose_call_prompt(
+                getattr(self, "db", None), friend, transcript="", plan=plan
+            )
+            log.debug("call prompt composed: %s", composed.summary())
+            return composed.text
+        except Exception as exc:  # noqa: BLE001 - 通话不能因为 prompt 组装失败而静音
+            log.warning("call prompt composer 失败（极简兜底）: %s: %s", type(exc).__name__, exc)
+            name = str(friend.get("name") or "a friend")
+            lang_name = LANGUAGE_NAMES.get(_language_of(friend), "English")
+            return (
+                f"You are {name}, a fictional person on a LIVE voice call. Never say you are an AI. "
+                f"Reply only in natural {lang_name}, one or two short spoken sentences. "
+                "No greeting, no markdown."
+            )
 
     def _mock_reply(self, friend: dict, user_text: str, *, plan: Any = None) -> str:
         """无 key 时的 deterministic 人设回复。

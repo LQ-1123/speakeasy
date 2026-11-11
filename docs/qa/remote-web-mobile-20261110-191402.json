@@ -1,0 +1,99 @@
+{
+  "kind": "local-web-mobile-verification",
+  "scenario": "mobile",
+  "generated_at": "2026-11-10T19:14:02.339706+08:00",
+  "base": "https://47-104-24-236.sslip.io",
+  "duration_s": 5.6,
+  "checks_total": 11,
+  "checks_passed": 11,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "手机端新用户出现引导",
+      "ok": true,
+      "detail": "onboarding",
+      "at": "2026-11-10T19:13:57"
+    },
+    {
+      "name": "Step1 手机宽无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 390,
+        "inner": 390,
+        "body": 390
+      },
+      "at": "2026-11-10T19:13:57"
+    },
+    {
+      "name": "Step2 手机宽无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 390,
+        "inner": 390,
+        "body": 390
+      },
+      "at": "2026-11-10T19:13:58"
+    },
+    {
+      "name": "Step2 手机端选中英语",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:58"
+    },
+    {
+      "name": "Step2 手机端选中日语",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:58"
+    },
+    {
+      "name": "Step2 手机端出现分语言水平设置",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:59"
+    },
+    {
+      "name": "Step3 手机宽无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 390,
+        "inner": 390,
+        "body": 390
+      },
+      "at": "2026-11-10T19:13:59"
+    },
+    {
+      "name": "320px 极窄无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 320,
+        "inner": 320,
+        "body": 320
+      },
+      "at": "2026-11-10T19:14:00"
+    },
+    {
+      "name": "手机端保存进入主界面",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:14:01"
+    },
+    {
+      "name": "主界面手机宽无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 390,
+        "inner": 390,
+        "body": 390
+      },
+      "at": "2026-11-10T19:14:01"
+    },
+    {
+      "name": "[mobile] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:14:02"
+    }
+  ]
+}

@@ -13,6 +13,7 @@
  */
 
 import { API_ORIGIN } from "../api";
+import { readSession, sessionHeaders } from "./session";
 
 const ID_STORE = "speakeasy.identity.v1";
 const DEVICE_STORE = "speakeasy.device_key.v1";
@@ -62,10 +63,17 @@ export interface FeedLikedBy {
 }
 
 export interface FeedItem {
-  kind: "persona_post" | "user_post";
+  kind: "persona_post" | "user_post" | "sponsored";
   id: string;
   content: string;
   media: string[];
+  /** 商业合作（kind=sponsored）字段 */
+  delivery_id?: string;
+  campaign_id?: string;
+  brand_name?: string;
+  title?: string;
+  label?: string;
+  landing_url?: string;
   post_kind?: string;
   alt_text?: string;
   media_credit?: string;
@@ -280,6 +288,24 @@ export function installApiIdentity(): void {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (!isOurApi(url)) return original(input, init);
+    /* 登录/注册本身不需要（也不应该带）身份：否则会被设备身份兜底抢先 */
+    if (url.includes("/api/v3/auth/login") || url.includes("/api/v3/auth/register")) {
+      return original(input, init);
+    }
+    /* 账号会话优先于设备身份：登录后所有请求改用 X-Session-Token */
+    const session = readSession();
+    if (session) {
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      for (const [key, value] of Object.entries(sessionHeaders(method))) {
+        headers.set(key, value);
+      }
+      return original(input, { ...(init ?? {}), headers });
+    }
     let id: Identity | null = null;
     try {
       id = await ensureIdentity();
@@ -343,7 +369,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401 && !retried) {
+  if (res.status === 401 && !retried && !readSession()) {
     resetIdentity();
     await ensureIdentity();
     return request<T>(path, init, true);

@@ -145,7 +145,8 @@ async def test_personality_prompt_is_english_and_in_character(spawner) -> None:
     # 口头禅 + 句长/角色约束
     assert any(q in prompt for q in friend["speech_quirks"])
     assert "1-2 sentences" in prompt
-    assert "Never say you are an AI" in prompt
+    # 合规升级：不再要求「绝不承认是 AI」，改为「被问到时诚实说明」
+    assert "AI companion, not a real human" in prompt
     assert "TTS voice already carries the accent" in prompt
 
 

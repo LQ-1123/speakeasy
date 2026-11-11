@@ -1,4 +1,4 @@
-﻿"""词库（lexicon）：捏人/表达的**可管理词表**，与客户端完全解耦。
+"""词库（lexicon）：捏人/表达的**可管理词表**，与客户端完全解耦。
 
 为什么要抽出来
 --------------
@@ -72,8 +72,16 @@ RHYTHM_BOUNDS: dict[str, tuple[float, float]] = {
     "posts_since_hours": (1.0, 48.0),
 }
 
-#: 需要重启才生效的参数（UI 会明确标注）
-RESTART_REQUIRED = ("life_tick_s", "posts_tick_s")
+#: 需要重启才生效的参数。
+#:
+#: 2026-11 起为**空**：4 个 tick/批量参数（``life_tick_s`` / ``posts_tick_s`` /
+#: ``posts_max_events`` / ``posts_since_hours``）已接入 :func:`rhythm_params`，
+#: 维护循环每轮重新读取，所以后台保存后**下一轮即生效**，不需要重启。
+#:
+#: 历史说明：旧实现在 ``maintenance.py`` 里直接读 ``os.getenv``，这 4 个参数
+#: 改了从来没生效过——旧页面标的「重启后生效」也是错的（重启同样不生效）。
+#: 保留这个常量，是为了给将来的新参数留一个统一的"要不要重启"出口。
+RESTART_REQUIRED: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------------------- #
@@ -437,6 +445,86 @@ def applied_status() -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- #
 # 使用统计（找出死词 / 撞梗）
+#: rhythm 参数的代码默认值（词库文件缺失/字段缺失时用它）。
+#: 运行时优先级：**环境变量 > 词库文件 > 这里的默认值**。
+#: 环境变量仍然优先，是为了给运维留一个不改词库就能临时压制的手段。
+#:
+#: 注意：这些值必须与各模块的代码常量保持一致（``event_posts`` 的
+#: ``TENSION_PENALTY_STEP`` / ``TENSION_PENALTY_FLOOR`` /
+#: ``DEFAULT_EVENT_POSTS_PER_DAY`` / ``COMMENT_BACKFILL_WINDOW_HOURS``，
+#: 以及 ``life_events`` 的事件配额）。测试 ``test_lexicon_rhythm_wiring``
+#: 会断言两者相等，防止这里悄悄漂移。
+RHYTHM_DEFAULTS: dict[str, float] = {
+    "rule_events_per_day": 4.0,
+    "narrative_events_per_day": 2.0,
+    "event_posts_per_day": 8.0,
+    "tension_penalty_step": 0.18,
+    "tension_penalty_floor": 0.15,
+    "comment_backfill_hours": 6.0,
+    "life_tick_s": 300.0,
+    "posts_tick_s": 240.0,
+    "posts_max_events": 4.0,
+    "posts_since_hours": 6.0,
+}
+
+#: rhythm 参数 → 对应的环境变量名（运维覆盖通道，优先级最高）。
+RHYTHM_ENV: dict[str, str] = {
+    "rule_events_per_day": "SE_RULE_EVENTS_PER_DAY",
+    "narrative_events_per_day": "SE_NARRATIVE_EVENTS_PER_DAY",
+    "event_posts_per_day": "SE_EVENT_POSTS_PER_DAY",
+    "tension_penalty_step": "SE_TENSION_PENALTY_STEP",
+    "tension_penalty_floor": "SE_TENSION_PENALTY_FLOOR",
+    "comment_backfill_hours": "SE_COMMENT_BACKFILL_HOURS",
+    "life_tick_s": "SE_LIFE_TICK_S",
+    "posts_tick_s": "SE_POSTS_TICK_S",
+    "posts_max_events": "SE_POSTS_MAX_EVENTS",
+    "posts_since_hours": "SE_POSTS_SINCE_HOURS",
+}
+
+
+def rhythm_params(*, fresh: bool = False) -> dict[str, float]:
+    """当前生效的世界节奏参数（**每次调用都读最新值**，保存即生效）。
+
+    为什么要有这个函数
+    ------------------
+    2026-11 前，``life_tick_s`` / ``posts_tick_s`` / ``posts_max_events`` /
+    ``posts_since_hours`` 这 4 个参数在后台能改、能落盘，但**运行时从来没人读**
+    （``maintenance.py`` 直接读 ``os.getenv``），所以改了等于没改，旧页面标的
+    「重启后生效」也是错的——重启也不会生效。
+
+    现在统一从这里取：维护循环每轮都调一次，运营在后台保存后**下一轮就生效**，
+    不需要重启。
+
+    优先级：环境变量 > 词库文件 > :data:`RHYTHM_DEFAULTS`。
+    环境变量优先是为了保住运维的紧急刹车；它一旦设置就会盖过后台设置。
+    """
+    raw = (load("rhythm", fresh=fresh) or {}).get("params") or {}
+    out: dict[str, float] = {}
+    for key, default in RHYTHM_DEFAULTS.items():
+        value = default
+        # 1) 词库文件
+        if isinstance(raw, dict) and key in raw:
+            try:
+                value = float(raw[key])
+            except (TypeError, ValueError):
+                value = default
+        # 2) 环境变量（最高优先级）
+        env_name = RHYTHM_ENV.get(key)
+        if env_name:
+            flag = os.getenv(env_name)
+            if flag not in (None, ""):
+                try:
+                    value = float(flag)
+                except (TypeError, ValueError):
+                    pass
+        # 3) 夹到合法区间，防止脏数据把循环拖垮
+        bounds = RHYTHM_BOUNDS.get(key)
+        if bounds:
+            value = max(float(bounds[0]), min(float(bounds[1]), value))
+        out[key] = value
+    return out
+
+
 # --------------------------------------------------------------------------- #
 def usage_stats(db: Any) -> dict[str, Any]:
     """统计每个词条被多少角色使用；失败返回空结构。"""

@@ -125,6 +125,13 @@ export function mediaUrl(path?: string | null): string | undefined {
 type RawFriend = Record<string, unknown>;
 type RawMessage = Record<string, unknown>;
 
+/** 纠错偏好：只接受后端枚举值，其他（含缺失）一律当作未设置 ""。 */
+function normalizeCommunicationPreference(
+  value: unknown,
+): Profile["communicationPreference"] {
+  return value === "natural" || value === "occasional" || value === "improve" ? value : "";
+}
+
 function mapFriend(raw: RawFriend): Friend {
   const id = String(raw.id ?? raw.friend_id ?? "");
   const name = String(raw.name ?? "?");
@@ -197,6 +204,7 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
     : kindRaw === "image" ? "image"
     : kindRaw === "call" ? "call"
     : kindRaw === "system" ? "system"
+    : kindRaw === "ad" ? "ad"
     : "text";
   const id = String(raw.id ?? "");
   if (!id) return null;
@@ -209,6 +217,23 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
     time: String(raw.created_at ?? new Date().toISOString()),
     read: Boolean(raw.is_read),
   };
+  /* 商业合作段落元数据：服务端在 msg_type="ad" 时放在 ad 字段 */
+  if (kind === "ad" && raw.ad && typeof raw.ad === "object") {
+    const ad = raw.ad as Record<string, unknown>;
+    if (ad.delivery_id) {
+      mapped.ad = {
+        delivery_id: String(ad.delivery_id),
+        campaign_id: ad.campaign_id ? String(ad.campaign_id) : undefined,
+        campaign_version:
+          typeof ad.campaign_version === "number" ? ad.campaign_version : undefined,
+        brand_name: ad.brand_name ? String(ad.brand_name) : undefined,
+        label: ad.label ? String(ad.label) : undefined,
+        landing_url: ad.landing_url ? String(ad.landing_url) : undefined,
+        facts: Array.isArray(ad.facts) ? ad.facts.map((f) => String(f)) : undefined,
+        persona_id: ad.persona_id ? String(ad.persona_id) : undefined,
+      };
+    }
+  }
   /* 客户端消息 id：让乐观消息与服务端消息在同一个 clientId 下对齐（防止重复气泡/重复发送） */
   if (raw.client_message_id) mapped.clientId = String(raw.client_message_id);
   if (typeof raw.duration_ms === "number") mapped.durationMs = raw.duration_ms;
@@ -299,6 +324,11 @@ export function mapClientBootstrap(boot: import("./v3/clientApi").ClientBootstra
       >) ?? {},
     level: String((fact.profile as Record<string, unknown> | undefined)?.level ?? "能聊几句"),
     birthday: String(rawProfile.birthday ?? ""),
+    /* 首次引导：profile_setup_completed_at 为空字符串/缺失 = 未完成。
+       Shell 只在 setupCompleted === false 时展示引导，undefined（bootstrap 还没回来）不展示。 */
+    setupCompleted: Boolean(rawProfile.profile_setup_completed_at),
+    setupCompletedAt: String(rawProfile.profile_setup_completed_at ?? ""),
+    communicationPreference: normalizeCommunicationPreference(fact.communication_preference),
   } as Partial<Profile>;
 
   const requests = ((boot.requests as RawFriend[]) ?? []).map((r) => ({
@@ -400,6 +430,10 @@ export async function saveProfile(
     nativeLanguage?: string;
     level?: string;
     levels?: Record<string, string>;
+    /** 纠错偏好（natural / occasional / improve），透传 communication_preference */
+    communicationPreference?: string;
+    /** 首次引导最后一步设为 true，透传 complete_setup */
+    completeSetup?: boolean;
   },
 ): Promise<boolean> {
   const body: Record<string, unknown> = {
@@ -412,7 +446,9 @@ export async function saveProfile(
     native_language: extra?.nativeLanguage,
     level: extra?.level,
     levels: extra?.levels,
+    communication_preference: extra?.communicationPreference,
   };
+  if (extra?.completeSetup !== undefined) body.complete_setup = extra.completeSetup;
   if (birthday !== undefined) body.birthday = birthday;
   const r = await getJson(`${API_ORIGIN}/api/v3/profile`, {
     method: "PUT",
@@ -421,6 +457,91 @@ export async function saveProfile(
   });
   return r !== null;
 }
+
+/** 首次引导一次性提交的完整请求体（字段名对齐后端 PUT /api/v3/profile 契约）。 */
+export interface ProfileSetupPayload {
+  nickname: string;
+  native_language: string;
+  target_languages: string[];
+  levels: Record<string, string>;
+  interests: string[];
+  communication_preference: string;
+  complete_setup: true;
+}
+
+/** GET/PUT /api/v3/profile 返回的引导状态。 */
+export interface ProfileSetupState {
+  completed: boolean;
+  completed_at: string;
+  /** 后端判定缺哪些必填字段（400 profile_incomplete 时最有用） */
+  missing: string[];
+}
+
+export type ProfileSetupResult =
+  | { ok: true; profile: Record<string, unknown>; setup: ProfileSetupState }
+  | { ok: false; error: "incomplete"; missing: string[] }
+  | { ok: false; error: "network" };
+
+function normalizeProfileSetup(raw: unknown): ProfileSetupState {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const missing = Array.isArray(value.missing)
+    ? value.missing.filter((item): item is string => typeof item === "string")
+    : [];
+  return {
+    completed: Boolean(value.completed),
+    completed_at: String(value.completed_at ?? ""),
+    missing,
+  };
+}
+
+/**
+ * 首次引导：一次 PUT 提交全部资料（complete_setup: true）。
+ *
+ * 与 `saveProfile` 的区别：这里需要完整结果——网络失败要能停在当前步骤重试，
+ * 400 profile_incomplete 要拿到 `missing` 高亮对应字段，所以不能只返回 boolean。
+ */
+export async function saveProfileSetup(payload: ProfileSetupPayload): Promise<ProfileSetupResult> {
+  try {
+    const response = await fetch(`${API_ORIGIN}/api/v3/profile`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    if (response.ok) {
+      return {
+        ok: true,
+        profile: (data?.profile as Record<string, unknown>) ?? {},
+        setup: normalizeProfileSetup(data?.setup),
+      };
+    }
+    /* 400 profile_incomplete：把后端 missing 原样带回，让 UI 跳回缺字段的步骤 */
+    const detail = data && typeof data.detail === "object" ? (data.detail as Record<string, unknown>) : null;
+    if (response.status === 400 && detail && detail.code === "profile_incomplete") {
+      const missing = Array.isArray(detail.missing)
+        ? detail.missing.filter((item): item is string => typeof item === "string")
+        : [];
+      return { ok: false, error: "incomplete", missing };
+    }
+    return { ok: false, error: "network" };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+/** 读一次引导状态（GET /api/v3/profile）；失败返回 null，调用方保持现有 UI。 */
+export async function fetchProfileState(): Promise<{
+  profile: Record<string, unknown>;
+  setup: ProfileSetupState;
+} | null> {
+  const r = await getJson<{ profile?: Record<string, unknown>; setup?: unknown }>(
+    `${API_ORIGIN}/api/v3/profile`,
+  );
+  if (!r) return null;
+  return { profile: r.profile ?? {}, setup: normalizeProfileSetup(r.setup) };
+}
+
 
 /* ========================================================================== */
 /* 设置                                                                        */

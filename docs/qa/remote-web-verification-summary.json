@@ -1,0 +1,73 @@
+{
+  "kind": "local-web-verification-summary",
+  "generated_at": "2026-11-10T19:14:53.615032+08:00",
+  "scenarios": {
+    "chat": {
+      "report": "artifacts/remote-web-reports/remote-web-chat-20261110-191415.json",
+      "checks_total": 22,
+      "checks_passed": 22,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    },
+    "compat": {
+      "report": "artifacts/remote-web-reports/remote-web-compat-20261110-191453.json",
+      "checks_total": 26,
+      "checks_passed": 26,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    },
+    "legacy": {
+      "report": "artifacts/remote-web-reports/remote-web-legacy-20261110-191353.json",
+      "checks_total": 4,
+      "checks_passed": 4,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    },
+    "main": {
+      "report": "artifacts/remote-web-reports/remote-web-main-20261110-191342.json",
+      "checks_total": 29,
+      "checks_passed": 29,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    },
+    "mobile": {
+      "report": "artifacts/remote-web-reports/remote-web-mobile-20261110-191402.json",
+      "checks_total": 11,
+      "checks_passed": 11,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    },
+    "reopen": {
+      "report": "artifacts/remote-web-reports/remote-web-reopen-20261110-191347.json",
+      "checks_total": 2,
+      "checks_passed": 2,
+      "checks_failed": 0,
+      "passed": true,
+      "failed_checks": []
+    }
+  },
+  "missing_scenarios": [],
+  "all_passed": true,
+  "screenshots": [
+    "artifacts/remote-web-screenshots/01-onboarding-step1-desktop.png",
+    "artifacts/remote-web-screenshots/02-onboarding-step3-desktop.png",
+    "artifacts/remote-web-screenshots/03-main-after-onboarding-desktop.png",
+    "artifacts/remote-web-screenshots/04-reload-no-onboarding.png",
+    "artifacts/remote-web-screenshots/05-me-profile-desktop.png",
+    "artifacts/remote-web-screenshots/06-reopen-no-onboarding.png",
+    "artifacts/remote-web-screenshots/07-legacy-user-no-onboarding.png",
+    "artifacts/remote-web-screenshots/08-onboarding-step1-mobile.png",
+    "artifacts/remote-web-screenshots/09-onboarding-step2-mobile.png",
+    "artifacts/remote-web-screenshots/10-onboarding-step3-mobile.png",
+    "artifacts/remote-web-screenshots/11-onboarding-320px.png",
+    "artifacts/remote-web-screenshots/11b-main-mobile.png",
+    "artifacts/remote-web-screenshots/14-chat-real-reply.png",
+    "artifacts/remote-web-screenshots/20-compat-discover.png",
+    "artifacts/remote-web-screenshots/21-compat-persona.png"
+  ]
+}

@@ -190,9 +190,9 @@ def test_feed_visibility_rules(tmp_path):
             "u_author", "private note", visibility="private"
         )
 
-        # 别人只能看到 public
+        # 多用户隔离第一期：信息流只查本人动态，别人一条都看不到（含 public）
         other_ids = {item["id"] for item in service.feed("u_reader", limit=40)["items"]}
-        assert public_post["id"] in other_ids
+        assert public_post["id"] not in other_ids
         assert friends_post["id"] not in other_ids
         assert private_post["id"] not in other_ids
 
@@ -202,7 +202,7 @@ def test_feed_visibility_rules(tmp_path):
             assert post["id"] in own
             assert own[post["id"]]["is_mine"] is True
 
-        # 存储层数据仍在（只是读路径按可见性过滤）
+        # 存储层数据仍在（读路径不再跨用户暴露，但数据本身没有丢）
         assert service.get_user_post(private_post["id"]) is not None
         assert service.get_user_post(private_post["id"])["visibility"] == "private"
     finally:

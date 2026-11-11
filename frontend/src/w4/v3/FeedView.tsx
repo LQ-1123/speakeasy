@@ -28,6 +28,7 @@ import {
   Pause,
   PenSquare,
   RefreshCw,
+  ShieldAlert,
   Trash2,
   Users,
   Volume2,
@@ -41,6 +42,8 @@ import { haptic } from "../../theme/haptics";
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { Avatar, Dialog, Lightbox } from "../ui";
+import { ReportDialog } from "./ReportDialog";
+import { SponsoredCard, type SponsoredItem } from "./SponsoredCard";
 import {
   createPost,
   deletePost,
@@ -109,6 +112,7 @@ export function FeedView({
   const [publishOpen, setPublishOpen] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
   const [commentFor, setCommentFor] = useState<string | null>(null);
+  const [reportFor, setReportFor] = useState<FeedItem | null>(null);
   const [draft, setDraft] = useState("");
   const seq = useRef(0);
   const scrollRef = useScrollMemory<HTMLDivElement>("discover");
@@ -417,6 +421,21 @@ export function FeedView({
           <div style={{ position: "relative", height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((row) => {
               const item = items[row.index];
+              if (item.kind === "sponsored") {
+                return (
+                  <div
+                    key={item.id}
+                    data-index={row.index}
+                    ref={virtualizer.measureElement}
+                    style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${row.start}px)` }}
+                  >
+                    <SponsoredCard
+                      item={item as unknown as SponsoredItem}
+                      onHide={() => setItems((prev) => prev.filter((x) => x.id !== item.id))}
+                    />
+                  </div>
+                );
+              }
               return (
                 <div
                   key={item.id}
@@ -441,6 +460,7 @@ export function FeedView({
                     draft={draft}
                     setDraft={setDraft}
                     onSubmitComment={(text) => void submitComment(item, text)}
+                    onReport={() => setReportFor(item)}
                     myName={profile.name}
                     myAvatar={profile.avatar}
                   />
@@ -455,6 +475,15 @@ export function FeedView({
       </div>
 
       {zoom ? <Lightbox src={zoom} onClose={() => setZoom(null)} /> : null}
+
+      {reportFor ? (
+        <ReportDialog
+          targetType={reportFor.kind === "persona_post" ? "post" : "user"}
+          targetId={reportFor.kind === "persona_post" ? reportFor.id : reportFor.author.id}
+          onClose={() => setReportFor(null)}
+          onDone={(message) => showToast(message, "success")}
+        />
+      ) : null}
 
       {publishOpen ? (
         <PublishDialog
@@ -492,6 +521,7 @@ export function FeedCard({
   onLike,
   onComment,
   onDelete,
+  onReport,
   onZoom,
   onNotify,
   commentOpen,
@@ -506,6 +536,7 @@ export function FeedCard({
   onLike: () => void;
   onComment: () => void;
   onDelete: () => void;
+  onReport?: () => void;
   onZoom: (src: string) => void;
   onNotify?: (msg: string) => void;
   commentOpen: boolean;
@@ -727,6 +758,16 @@ export function FeedCard({
           >
             <Trash2 size={16} strokeWidth={1.9} />
             <span>删除</span>
+          </button>
+        ) : onReport ? (
+          <button
+            type="button"
+            className="disc-action disc-action-standalone"
+            onClick={onReport}
+            aria-label="举报这条内容"
+          >
+            <ShieldAlert size={16} strokeWidth={1.9} />
+            <span>举报</span>
           </button>
         ) : null}
       </div>

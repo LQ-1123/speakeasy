@@ -1,0 +1,97 @@
+{
+  "kind": "local-web-isolation-verification",
+  "scenario": "isolation",
+  "generated_at": "2026-11-10T19:09:18.937071+08:00",
+  "base": "http://127.0.0.1:8000",
+  "duration_s": 2.1,
+  "checks_total": 14,
+  "checks_passed": 14,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "Step1 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step1 昵称输入存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step1 母语选择存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 选中英语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 选中德语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 德语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 英语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step2 德语水平设为「刚开始」",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "Step3 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:17"
+    },
+    {
+      "name": "UserBeta 保存成功",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:18"
+    },
+    {
+      "name": "UserBeta 身份已保存",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:18"
+    },
+    {
+      "name": "UserBeta 刷新后无引导",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:18"
+    },
+    {
+      "name": "[isolation] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:09:18"
+    }
+  ]
+}

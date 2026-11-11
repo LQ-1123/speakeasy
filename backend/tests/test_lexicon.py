@@ -1,4 +1,4 @@
-﻿"""词库管理（控制面）测试。
+"""词库管理（控制面）测试。
 
 覆盖：
 - 校验器：枚举值必须带合法数值映射、默认值必须存在、场景不重复且 ≥8、禁用词类型正确；
@@ -170,10 +170,16 @@ def admin_client(lib_dir, tmp_path):
 
 
 def test_admin_page_served(admin_client):
+    # 第 4 期起 /admin 只有 React 管理台，旧词库页面（page.py）已删除。
     res = admin_client.get("/admin")
     assert res.status_code == 200
-    assert "词库管理" in res.text
-    assert "/api/admin/status" in res.text
+    assert "/admin/login" not in res.text
+
+    legacy = admin_client.get("/admin/legacy")
+    assert legacy.status_code == 200
+    # 旧页面已删：该路径现在只是新控制台的深链接（catch-all），
+    # 内容里不该再有旧页面的「词库管理」标题。
+    assert "词库管理" not in legacy.text
 
 
 def test_admin_api_list_get_put_validate_usage(admin_client, monkeypatch):

@@ -86,3 +86,9 @@ pip-unpack-*/
 pip-build-*/
 pip-install-*/
 
+# Local verification workdirs (Chrome profiles / temp data)
+.tmp/
+.baseline/
+
+# Root-level temp dirs created by local tooling (browser fixtures, test workspaces)
+/tmp*/

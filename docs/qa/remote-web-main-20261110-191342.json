@@ -1,0 +1,211 @@
+{
+  "kind": "local-web-main-verification",
+  "scenario": "main",
+  "generated_at": "2026-11-10T19:13:42.664768+08:00",
+  "base": "https://47-104-24-236.sslip.io",
+  "duration_s": 7.1,
+  "checks_total": 29,
+  "checks_passed": 29,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "全新用户首次进入显示 Onboarding",
+      "ok": true,
+      "detail": "onboarding",
+      "at": "2026-11-10T19:13:36"
+    },
+    {
+      "name": "首次进入不渲染主界面（无 Tab/侧栏）",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:36"
+    },
+    {
+      "name": "Step1 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step1 昵称输入存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step1 母语选择存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step2 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step2 选中英语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step2 选中德语目标语言",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:37"
+    },
+    {
+      "name": "Step2 德语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "Step2 英语独立水平面板",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "Step2 德语水平设为「刚开始」",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "Step3 标题存在",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "Step3 自定义兴趣回车添加",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "Step3 桌面无横向溢出",
+      "ok": true,
+      "detail": {
+        "scroll": 1424,
+        "inner": 1424,
+        "body": 1424
+      },
+      "at": "2026-11-10T19:13:38"
+    },
+    {
+      "name": "保存成功后进入主界面",
+      "ok": true,
+      "detail": "消息\n通讯录\n发现\n我\n消息\n还没有会话\n\n到发现认识一位语伴，开始第一段对话。\n\n认识语伴\n\n晚上好，AlexE2E\n\n挑一段对话，慢慢说。\n\n语音条不用赶时间。想认识新的人，也可以先去偶遇。\n\n偶遇一个人\n看看动态",
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "身份已持久化到 localStorage",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "后端标记建档完成",
+      "ok": true,
+      "detail": {
+        "completed": true,
+        "completed_at": "2026-11-10T11:13:38+00:00",
+        "missing": []
+      },
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "昵称落库",
+      "ok": true,
+      "detail": "AlexE2E",
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "母语落库",
+      "ok": true,
+      "detail": "zh",
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "多目标语言落库",
+      "ok": true,
+      "detail": [
+        "en",
+        "de"
+      ],
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "每门语言独立水平落库",
+      "ok": true,
+      "detail": {
+        "en": "能聊几句",
+        "de": "刚开始"
+      },
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "预设兴趣落库",
+      "ok": true,
+      "detail": [
+        "Technology",
+        "Gaming",
+        "Programming",
+        "Board games"
+      ],
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "自定义兴趣落库",
+      "ok": true,
+      "detail": [
+        "Technology",
+        "Gaming",
+        "Programming",
+        "Board games"
+      ],
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "纠错偏好落库",
+      "ok": true,
+      "detail": "occasional",
+      "at": "2026-11-10T19:13:39"
+    },
+    {
+      "name": "刷新后不再出现引导",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:13:40"
+    },
+    {
+      "name": "「我」页面显示昵称",
+      "ok": true,
+      "detail": "消息\n通讯录\n发现\n我\n我\nAlexE2E\n🇬🇧 英语 · 能聊几句\n🇩🇪 德语 · 刚开始\nTechnology\nGaming\nProgramming\nBoard games\n编辑资料\n练习\n表达本\n在练 0 · 掌握 0\n语伴\n我的语伴\n0 位\n好友申请\n暂无\n设置\n提醒\n外观与触感\n隐私与数据\n关于 Sonder",
+      "at": "2026-11-10T19:13:42"
+    },
+    {
+      "name": "主流程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:13:42"
+    },
+    {
+      "name": "主流程无 HTTP 4xx/5xx",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:13:42"
+    },
+    {
+      "name": "[main] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:13:42"
+    }
+  ]
+}

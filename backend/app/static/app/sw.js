@@ -57,6 +57,11 @@ self.addEventListener("fetch", (event) => {
   // 1) API / WebSocket 升级：完全绕过缓存
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws")) return;
 
+  // 1b) 管理台：完全绕过缓存。
+  //     /admin 的内容随时在变（运营改配置要立刻看到），而它的 HTML 会被
+  //     下面的 navigate 分支写成 "/" 的 shell 副本——绝不能让它污染客户端首页。
+  if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return;
+
   // 2) 页面导航：network-first，离线回退到缓存的 shell
   if (request.mode === "navigate") {
     event.respondWith(

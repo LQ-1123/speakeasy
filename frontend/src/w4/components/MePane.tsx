@@ -34,6 +34,19 @@ const NATIVE_LANGUAGES: Array<{ code: string; label: string; flag: string }> = [
   ...LANGUAGES,
 ];
 
+/**
+ * 纠错偏好：与 store/后端的 communication_preference 枚举一致。
+ * （Onboarding 里有同一份三选一，文案更完整；这里保持简短，避免编辑弹窗太长。）
+ */
+const COMMUNICATION_PREFERENCES: Array<{
+  value: "natural" | "occasional" | "improve";
+  label: string;
+}> = [
+  { value: "natural", label: "自然聊，不纠错" },
+  { value: "occasional", label: "偶尔纠正" },
+  { value: "improve", label: "帮我改进表达" },
+];
+
 export function MePane({ navigate }: { navigate: (r: Route) => void }) {
   const { profile, friends, requests, expressions, updateProfile, showToast } = useApp(
     useShallow((state) => ({
@@ -217,6 +230,7 @@ export function MePane({ navigate }: { navigate: (r: Route) => void }) {
               nativeLanguage: patch.nativeLanguage,
               level: patch.levels[patch.targets[0]] || "能聊几句",
               levels: patch.levels,
+              communicationPreference: patch.communicationPreference,
             });
             if (!ok) {
               haptic("error");
@@ -252,6 +266,7 @@ function EditProfileDialog({
     gender: "male" | "female" | "";
     nativeLanguage: string;
     levels: Record<string, string>;
+    communicationPreference: "natural" | "occasional" | "improve";
   }) => Promise<boolean>;
 }) {
   const { profile } = useApp(useShallow((state) => ({ profile: state.profile })));
@@ -266,6 +281,15 @@ function EditProfileDialog({
   const [gender, setGender] = useState<"male" | "female" | "">(profile.gender ?? "");
   const [nativeLanguage, setNativeLanguage] = useState(profile.nativeLanguage ?? "zh");
   const [levels, setLevels] = useState<Record<string, string>>(profile.levels ?? {});
+  const [communicationPreference, setCommunicationPreference] = useState<
+    "natural" | "occasional" | "improve"
+  >(
+    profile.communicationPreference === "natural" ||
+      profile.communicationPreference === "occasional" ||
+      profile.communicationPreference === "improve"
+      ? profile.communicationPreference
+      : "natural",
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -296,6 +320,7 @@ function EditProfileDialog({
                   gender,
                   nativeLanguage,
                   levels,
+                  communicationPreference,
                 });
                 if (!ok) setSaveError("保存失败，请重试");
               } catch {
@@ -474,6 +499,23 @@ function EditProfileDialog({
           </div>
         );
       })}
+      <div className="w4-field">
+        <div className="w4-field-label">语伴怎么帮你纠错</div>
+        <div className="w4-chips">
+          {COMMUNICATION_PREFERENCES.map((item) => (
+            <button
+              key={item.value}
+              className={`w4-chip ${communicationPreference === item.value ? "is-green" : ""}`}
+              style={{ cursor: "pointer", padding: "4px 9px", fontSize: 12 }}
+              aria-pressed={communicationPreference === item.value}
+              onClick={() => setCommunicationPreference(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="w4-field-hint">聊天时语伴是否纠正、怎样纠正你的表达。</div>
+      </div>
       {saveError ? <div className="w4-field-error">{saveError}</div> : null}
     </Dialog>
   );

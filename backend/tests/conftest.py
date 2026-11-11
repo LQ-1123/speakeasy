@@ -15,6 +15,11 @@ import pytest
 # 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
 os.environ.setdefault("SE_TTS_FISH", "0")
 
+# 测试离线：不抓开放图库（Wikimedia/Openverse 在无网环境下会一直等超时，
+# 曾导致 test_v3_world 整体挂起）。纯文字生活动态仍会生成，测试语义不受影响。
+# 需要真图的用例请显式 monkeypatch.setenv("SE_MEDIA_ENABLED", "1")。
+os.environ.setdefault("SE_MEDIA_ENABLED", "0")
+
 # 历史测试会直接调用客户端 /api/v2/settings/*（产品上已锁死，只允许管理端改）。
 # 测试环境放开编辑权限；管理端的锁定行为由 test_admin_config.py 显式验证。
 os.environ.setdefault("ALLOW_KEY_EDIT", "1")

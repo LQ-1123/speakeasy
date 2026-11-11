@@ -141,6 +141,23 @@ function sanitizeMoment(m: Moment): Moment {
 /** 后端 /settings + /settings/tts → store 里的 Settings（只做展示需要的映射） */
 const AppCtx = createContext<StoreApi<Store> | null>(null);
 
+/**
+ * 合并后端返回的 profile 补丁：只覆盖真的有值的字段。
+ *
+ * reloadAll / 事件推送拿到的 `Partial<Profile>` 里，可选字段可能是 undefined；
+ * 直接 `...patch` 会把本地已有值（比如刚在 Onboarding 里填的昵称）清空。
+ */
+function mergeProfilePatch(prev: Profile, patch: Partial<Profile>): Profile {
+  const next: Profile = { ...prev };
+  for (const key of Object.keys(patch) as Array<keyof Profile>) {
+    const value = patch[key];
+    if (value !== undefined) {
+      (next as unknown as Record<string, unknown>)[key] = value;
+    }
+  }
+  return next;
+}
+
 export function useApp(): Store;
 export function useApp<T>(selector: (state: Store) => T): T;
 export function useApp<T>(selector?: (state: Store) => T): T | Store {
@@ -159,7 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [threadHasMore, setThreadHasMore] = useState<Record<string, boolean>>({});
   const [moments, setMoments] = useState<Moment[]>(() => []);
   const [expressions, setExpressions] = useState<Expression[]>([]);
-  const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], gender: '', nativeLanguage: 'zh', levels: {}, birthday: '' });
+  const [profile, setProfile] = useState<Profile>({ name: '', avatar: '', city: '', job: '', targets: ['en'], level: '能聊几句', interests: [], weaknesses: [], gender: '', nativeLanguage: 'zh', levels: {}, birthday: '', setupCompleted: undefined, communicationPreference: '', setupCompletedAt: '' });
   const [bootError, setBootError] = useState("");
   const [booted, setBooted] = useState(false);
   /* 提示音：跟踪未读数 / 好友申请数变化 */
@@ -239,7 +256,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setFriends(snapshot.friends);
       setRequests(snapshot.requests);
       setExpressions(snapshot.expressions);
-      setProfile((profile) => ({ ...profile, ...snapshot.profile }));
+      setProfile((profile) => mergeProfilePatch(profile, snapshot.profile));
       setMessages((list) => mergeMessages(list, snapshot.messages));
     });
     const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
@@ -610,6 +627,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFriends(snap.friends);
     setMessages((list) => mergeMessages(list, snap.messages));
     setRequests(snap.requests ?? []);
+    /* 补齐 profile：否则重载后 Onboarding 填好的资料（setupCompleted 等）会丢失 */
+    setProfile((prev) => mergeProfilePatch(prev, snap.profile));
     setBootError("");
   }, []);
 

@@ -1,0 +1,31 @@
+{
+  "kind": "local-web-reopen-verification",
+  "scenario": "reopen",
+  "generated_at": "2026-11-10T19:08:46.251426+08:00",
+  "base": "http://127.0.0.1:8000",
+  "duration_s": 1.8,
+  "checks_total": 2,
+  "checks_passed": 2,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "关闭浏览器后再次进入不出现引导",
+      "ok": true,
+      "detail": {
+        "onboarding": false,
+        "app": true,
+        "device_key": "\"a53d0d0ac941ac586b122078aa53b361\"",
+        "identity": "{\"user_id\":\"u_3f77edf6becb4b0fbb8cc3cb822d0cc8\",\"token\":\"22ff0ac58b6c9e601caa086ee74b66f286f687d9fcd43b86\",\"display_name\":\"\",\"device_key\":\"a53d0d0ac941ac586b122",
+        "text": "SONDER | Every life is a world. | 消息 | 通讯录 | 发现 | 我 | 消息 | 还没有会话 |  | 到发现认识一位语伴，开始第一段对话。 |  | 认识语伴 |  | 晚上好，AlexE2E |  | 挑一段对话，慢慢说。 |  | 语音条不用赶时间。想认识新的人，也可以先去偶遇。 |  | 偶遇一个人 | 看看动态"
+      },
+      "at": "2026-11-10T19:08:44"
+    },
+    {
+      "name": "[reopen] 全程无 console error",
+      "ok": true,
+      "detail": [],
+      "at": "2026-11-10T19:08:46"
+    }
+  ]
+}

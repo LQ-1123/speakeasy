@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.v3 import teen
 from app.v3.call_sessions import CallSessionRegistry
 from app.v3.call_runtime import CallRuntime, reply_audio
 from app.v3.identity import reset_current_user, set_current_user
@@ -36,12 +37,28 @@ class CallIn(BaseModel):
 
 
 async def require_user(request: Request) -> str:
-    if not (request.headers.get("x-user-id") or "").strip() or not (request.headers.get("x-user-token") or "").strip():
-        raise HTTPException(401, "请先验证身份")
+    """要求「已登录」（会话凭据 / 旧设备身份均可），local 一律拒绝。
+
+    账号体系上线后凭据有两种：``X-Session-Token``（/Cookie）与旧的
+    ``X-User-Id`` + ``X-User-Token``；二者都由 :func:`bind_current_user` 统一解析，
+    这里不再假设客户端一定带旧头，否则邮箱账号会被误判 401。
+    """
     user = await bind_current_user(request)
     if user == "local":
         raise HTTPException(401, "请先验证身份")
     return user
+
+
+def minor_gate(db, user: str, *, feature: str = "chat") -> None:
+    """青少年门禁：拒绝时按约定返回 403 ``minor:<reason>``。
+
+    local / 旧设备身份 / 成年账号在 :mod:`app.v3.teen` 里直接放行，所以调用方
+    可以在所有"发起通话/订阅事件"的入口无差别调用。
+    """
+    try:
+        teen.enforce(db, user, feature=feature)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"minor:{exc}") from None
 
 
 def payload(call, ticket):
@@ -53,6 +70,7 @@ def payload(call, ticket):
 async def create_call(body: CallIn, request: Request) -> dict:
     user = await require_user(request)
     services = request.app.state.v2
+    minor_gate(services.db, user, feature="chat")
     friend = await asyncio.to_thread(services.db.get_friend, body.friend_id, owner_user_id=user)
     if not friend or friend.get("owner_user_id") != user:
         raise HTTPException(404, "好友不存在")
@@ -70,6 +88,7 @@ async def create_call(body: CallIn, request: Request) -> dict:
 @router.post("/{call_id}/ticket")
 async def renew_ticket(call_id: str, request: Request) -> dict:
     user = await require_user(request)
+    minor_gate(request.app.state.v2.db, user, feature="chat")
     try:
         ticket = REGISTRY.issue_ticket(call_id, user)
     except (PermissionError, KeyError):
@@ -92,6 +111,15 @@ async def finish_call(app, call_id: str, user: str) -> None:
     runtime = RUNTIMES.pop(call_id, None)
     if call:
         REGISTRY.end(call_id, user)
+    if call or runtime:
+        # 青少年模式：挂断即结束"连续会话"窗口（累计时长保留）。
+        # 门禁清理失败不能影响通话收尾，所以整段吞掉异常。
+        try:
+            db = getattr(getattr(app.state, "v2", None), "db", None)
+            if db is not None:
+                await asyncio.to_thread(teen.reset_session, db, user)
+        except Exception as exc:  # noqa: BLE001 - 挂断优先级最高
+            log.debug("teen.reset_session 失败 call=%s user=%s: %s", call_id, user, exc)
     if not runtime:
         return
     runtime.interrupt()

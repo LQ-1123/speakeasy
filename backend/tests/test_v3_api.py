@@ -217,15 +217,23 @@ def test_two_users_are_isolated(api, monkeypatch):
         headers=alice_headers,
     ).json()["post"]
 
-    # 信息流：Bob 看得到公开动态，看不到私密动态
+    # 信息流按用户隔离：Bob 看不到 Alice 的任何动态（含 public），Alice 自己能看到
     bob_feed_ids = {
         item["id"]
         for item in client.get(
             "/api/v3/feed", params={"limit": 40}, headers=bob_headers
         ).json()["items"]
     }
-    assert public_id in bob_feed_ids
+    assert public_id not in bob_feed_ids
     assert private["id"] not in bob_feed_ids
+    alice_feed_ids = {
+        item["id"]
+        for item in client.get(
+            "/api/v3/feed", params={"limit": 40}, headers=alice_headers
+        ).json()["items"]
+    }
+    assert public_id in alice_feed_ids
+    assert private["id"] in alice_feed_ids
 
     # 我的动态隔离
     assert client.get("/api/v3/posts/mine", headers=bob_headers).json()["items"] == []

@@ -1,0 +1,43 @@
+{
+  "kind": "local-web-isolation-check-verification",
+  "scenario": "isolation-check",
+  "generated_at": "2026-11-10T19:09:29.906703+08:00",
+  "base": "http://127.0.0.1:8000",
+  "duration_s": 0.1,
+  "checks_total": 5,
+  "checks_passed": 5,
+  "checks_failed": 0,
+  "passed": true,
+  "results": [
+    {
+      "name": "两个隔离用户身份都已保存",
+      "ok": true,
+      "detail": 2,
+      "at": "2026-11-10T19:09:29"
+    },
+    {
+      "name": "两个用户 user_id 不同",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:29"
+    },
+    {
+      "name": "用户 A 资料正确",
+      "ok": true,
+      "detail": "UserAlpha",
+      "at": "2026-11-10T19:09:29"
+    },
+    {
+      "name": "用户 B 资料正确",
+      "ok": true,
+      "detail": "UserBeta",
+      "at": "2026-11-10T19:09:29"
+    },
+    {
+      "name": "A/B 昵称未互相覆盖",
+      "ok": true,
+      "detail": "",
+      "at": "2026-11-10T19:09:29"
+    }
+  ]
+}

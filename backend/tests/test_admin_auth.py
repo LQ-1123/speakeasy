@@ -49,7 +49,8 @@ def test_login_flow_cookie(configured):
     page = client.get("/admin")
     assert page.status_code == 200
     assert "管理密码" in page.text
-    assert "词库管理" not in page.text
+    # 登录页不能是旧管理台本体（它顶多在回退链接里提到"旧版词库管理台"）
+    assert "/api/admin/status" not in page.text
 
     bad = client.post("/admin/login", data={"password": "wrong", "next": "/admin"})
     assert bad.status_code == 401
@@ -64,8 +65,15 @@ def test_login_flow_cookie(configured):
     assert auth.COOKIE_NAME in ok.cookies
 
     admin_page = client.get("/admin")
-    assert "词库管理" in admin_page.text
+    # P1 起 /admin 由 React 管理台接管，旧台移到 /admin/legacy。
+    # 这里只断言「登录后拿到的是控制台而不是登录页」，不绑定具体前端实现。
+    assert admin_page.status_code == 200
+    assert "/admin/login" not in admin_page.text
+    assert "管理密码" not in admin_page.text
     assert client.get("/api/admin/status").status_code == 200
+
+    # P4 删除了旧管理台：/admin/legacy 不再返回旧页面，而是走新控制台的 catch-all。
+    assert "词库管理" not in client.get("/admin/legacy").text
 
     # 没 Cookie 的新客户端被拒
     fresh = TestClient(app)
@@ -75,7 +83,7 @@ def test_login_flow_cookie(configured):
         fresh.get("/api/admin/status", headers={"X-Admin-Token": "tok-abc"}).status_code
         == 200
     )
-    assert "词库管理" in fresh.get("/admin?token=tok-abc").text
+    assert fresh.get("/admin/legacy?token=tok-abc").status_code == 200
 
     # 退出登录
     logout = client.post("/admin/logout", follow_redirects=False)

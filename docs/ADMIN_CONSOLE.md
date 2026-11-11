@@ -1,32 +1,60 @@
-﻿# 管理端（控制面）· 词库管理
+# Sonder 运营控制台（管理端）· 使用与实现说明
 
-> 目标：**客户端零配置**（预设 key，不暴露任何设置），所有"捏人原料"由管理端统一维护。
-> 管理端只在本机可用，与用户客户端完全解耦（不进客户端 bundle，不走客户端路由）。
-
-访问：**http://127.0.0.1:8000/admin**（页面）· API 前缀 `/api/admin`
+> 旧版是「本机词库编辑器」时代的产物（`page.py` 一个 2222 行内联 HTML + 原生 JS，11 个平铺标签）。
+> 现在服务已公网部署、有真实用户，管理端改为**按域组织**的 React 控制台：
+> **用户 / AI 世界 / 捏人 / 系统**。
+>
+> 第 4 期已删除 `backend/app/admin/page.py` 与 `/admin/legacy`。
+> 跨模块的锁死契约（表结构、CSRF、响应格式、四期交付记录）在
+> [`ADMIN_CONSOLE_CONTRACT.md`](./ADMIN_CONSOLE_CONTRACT.md)。
 
 ---
 
-## 1. 为什么这么切
+## 1. 打开与登录
 
-| | 客户端（`/`） | 管理端（`/admin`） |
+- 地址：`/admin`（hash 路由，如 `#/users`、`#/world/events`、`#/personas/prompts`）
+- 登录：`SE_ADMIN_PASSWORD` 口令 → `POST /admin/login` → HttpOnly 会话 Cookie（30 天）
+- 退出：右上角「退出」→ `POST /api/admin/logout`（幂等，会话过期也能调）
+- 远程访问：`X-Admin-Token`（值 `SE_ADMIN_TOKEN`）仍可用，供脚本 / CLI；
+  **未配口令且来自回环地址时直通**（本机开发不设密码也能进）
+- 同 IP 连续输错 5 次锁 5 分钟
+- 页面产物：`backend/app/static/app/admin/index.html`，由 `npm run build:backend` 生成
+
+### 安全模型（第 4 期收口）
+
+| 层 | 规则 |
+|---|---|
+| 鉴权 | Cookie 会话 → `X-Admin-Token` → 未配口令时回环直通 |
+| CSRF | **Cookie 身份的写请求一律要求**同源 + `X-Admin-CSRF`（P1~P3 曾是「带就校验」的灰名单，已收口） |
+| 豁免 | `X-Admin-Token` 与回环直通不发 CSRF（自定义头不构成 CSRF 面，跨站页面无法伪造） |
+| 审计 | 写操作**成功返回后**自动落一条 `admin_audit`；失败的写不记 |
+
+> `/api/admin/session` 与 `/api/admin/logout` 是**故意不鉴权**的：
+> 前端靠 `session` 返回的 `authenticated: false` 决定跳登录页，靠 `logout` 在会话过期时仍能退出。
+> 它们挂在独立的 `api_public_router` 上——如果挂进带 `require_admin` 的主路由，未登录会被 403。
+
+---
+
+## 2. 四个域
+
+| 域 | 页面 | 干什么 |
 |---|---|---|
-| 使用者 | 零基础客户 | 你 / 运营 |
-| 能看到 | 聊天、动态、通话 | 词库、校验、使用统计 |
-| 能改 | **什么都不能** | 枚举词、场景、口头禅、素材池 |
-| 出错后果 | — | 校验拦截，改不坏 |
+| 用户 | 用户列表 / 用户详情 | 搜用户、看设备与推送状态、指派角色好友、发测试推送 |
+| AI 世界 | 事件 / 动态 / 图片素材 / 世界节奏 | 手动补事件、公共事件池（预演谁会领）、动态待发队列、图库、产出参数 |
+| 捏人 | 角色工坊 / 表达 DNA / 捏人素材池 / 音色池 / Prompt 控制台 / 场景与口头禅 | 创建与编辑角色、调行为与表达、按角色改写 prompt |
+| 系统 | API 与密钥 / 版本发布 / 后台任务 / 操作日志 | LLM·STT·TTS·Deepgram·JPush 配置、APK 发布、任务状态、变更留痕 |
 
-**角色是成品，词库是原料**。管理端不编辑具体某个人物（会漂移、会让老角色变性格），
-只管理"新人怎么被造出来"的原料与参数。
+> 管理台**不提供聊天记录查看**。用户详情只展示账号、设备、好友、计数元数据。
+> 这是产品决定：运营需要判断"这个人是谁、处在什么状态"，不需要读用户的私聊。
 
 ---
 
-## 2. 词库文件（唯一真相）
+## 3. 词库文件（仍然是唯一真相）
 
 ```
 data/lexicons/
-├── dna.json        # 13 个 DNA 字段 × 枚举值 × 数值映射（0..1）+ 默认值
-├── scenes.json     # 示例对话的 12 个场景
+├── dna.json        # DNA 字段 × 枚举值 × 数值映射（0..1）+ 默认值
+├── scenes.json     # 示例对话场景
 ├── phrases.json    # 全局禁用词（红线）+ 分语言口头禅池
 └── world.json      # 捏人素材池：名字 / 职业 / 城市 / 兴趣
 ```
@@ -38,138 +66,226 @@ python scripts\export_lexicons.py            # 只补缺失文件
 python scripts\export_lexicons.py --force    # 覆盖（会先备份为 *.bak.json）
 ```
 
-文件不存在时**代码默认值继续生效**——所以删掉整个目录也不会坏。
+文件不存在时**代码默认值继续生效**——删掉整个目录也不会坏。
+
+### 三条硬规则（管理台会强制）
+
+1. **枚举值只能停用、不能删除**。老角色的 `speech_dna` 可能还在用这个值，删了它就成非法值。
+2. **新增枚举值必须带 `trait`（0..1）**。行为引擎只读数值，没有数值的枚举无法参与决策，保存会被拒。
+3. **保存前必须过校验，写盘原子 + 保留上一版**。校验不过直接返回问题列表、不落盘；成功会先备份 `*.bak.json`。
+
+其他校验：默认值必须在取值列表且未停用；场景不能重复且至少 8 个；禁用词必须非空；口头禅池单语言 ≤80 条。
 
 ---
 
-## 3. 管理页：全表单化（不需要写 JSON）
+## 4. 两处「改了就要立刻生效」的设计
 
-管理页没有任何"填 JSON"的步骤——**每个 key → value 都是一个可视化标签**。
+### 4.1 Prompt 控制台：改写真的会进入对话
 
-| 词库 | 界面形态 | 能做什么 |
-|---|---|---|
-| 表达 DNA | 13 张字段卡片，每个取值是一张小卡：`中文名 + key + 使用人数 + 启用/停用`，下面一行是 `数值滑杆(0..1) + 数值 + ★默认` | 拖动滑杆改行为强度、点启用/停用、点 ★ 设默认、底部「＋ 新增取值」填 key/中文名/数值即可新增 |
-| 示例场景 | 标签云 | 点 × 删除场景、输入框回车/按钮新增 |
-| 禁用词与口头禅 | 禁用词标签云 + 按语言分组的标签云（带条数） | 点 × 删除、回车新增、可新增语言池 |
-| **AI 事件与动态** | 12 张事件类型卡片：价值档 `低/★/★★/★★★` 分段按钮、来源 `规则事件/叙事事件/两者`、分享权重滑杆(0–2 倍率)、是否展示具体内容、可见 tag | 调价值档（谁先出现在信息流）、切换来源、调分享权重、停用类型；冲突类默认不展示具体内容（红线） |
-| **世界节奏** | 10 行滑杆：每天规则事件、每天叙事事件（0=关闭 LLM 叙事省钱）、动态配额、张力惩罚步长/下限、评论补位窗口、两个 tick、每轮事件上限、只看最近几小时 | 改完保存即生效（tick 两项需重启）；「模拟今天」按当前参数估算产出，不写库、不调模型 |
-| **捏人素材池** | 四组（名字/职业/城市/兴趣）；**名字带性别/国家，城市按国家分组**；语言下拉 + 「预览捏人」按钮 | 分组内增删、新增分组、删除整组；名字新增时可填性别和国家；**池子已接入真实捏人**：LLM 捏人会把池子写进 prompt 作为取材边界，无 LLM 时按池子直接取（名字性别/国家与城市对齐）；点「预览捏人」看效果（不写库、不调模型），池子过小时提示补素材 |
-| **模型与密钥** | LLM / STT / TTS / **Deepgram 流式识别** 四张配置卡（密钥只显示指纹） | 配 base_url / model / key；保存前**先做连通测试**，失败默认不落盘（可勾选强制保存）；Deepgram 用于通话实时识别（不是 TTS），来源显示 env/管理台，可测试/保存/清除；客户端不再有任何配置入口 |
+最容易做成假功能的一块：界面能改能存，真实对话用的还是原文。
 
-底部保留一个**折叠的「高级：查看当前 JSON（只读）」**，只用于排查，不是编辑入口。
-URL 支持 `#dna`、`#scenes`、`#phrases`、`#events`、`#rhythm`、`#world`、`#config` 直达；`?preview=en#world` 可直接看捏人预览。
+做法是**把「读取已保存改写」放进 `compose_prompt` 内部**，而不是让每个调用方各传一遍。
+`compose_prompt` 的调用点不止一处（真实聊天 / 通话 / 管理端预览），靠调用方记得传，迟早漏一个。
 
-### 截图
+**可改 vs 只读按内容来源判定**（不是拍脑袋）：
 
-| 页面 | 截图 |
+| 来源 | 模块 | 可改写 | 理由 |
+|---|---|---|---|
+| `global` / `persona` / `first_message` | global, language, character_card, examples, opening | ✅ | 内容不随这一轮对话变化 |
+| `plan` | scenario, behavior, author_note | ❌ | 按运行时计划算出，改它会让"角色此刻在做什么"失真 |
+| `profile` | user_persona | ❌ | 用户资料 |
+| `memory` | relationship_memory | ❌ | 关系记忆 |
+
+`editable` 由后端 `prompt_composer.module_meta()` 给出，前端不自己按 key 猜——
+否则会出现"界面允许改、实际被忽略"。**即使直接往表里塞动态模块的改写也不会生效**（加载时按 `editable` 过滤）。
+
+保存后**立即生效，不需要重启**。改写可存为模板复用（模板是复制源，不会自动应用）。
+
+### 4.2 世界节奏：参数读词库，不用重启
+
+10 个节奏参数（事件/动态配额、张力惩罚、tick 间隔等）按 **环境变量 > 词库文件 > 默认值** 解析，
+维护循环每轮重新读取，改完保存即生效。`stats_persona` 的 `background` 块也走同一份快照，避免两处漂移。
+
+---
+
+## 5. 第 3 期新增的三块能力
+
+| 能力 | 要点 |
 |---|---|
-| 表达 DNA（字段卡片 + 取值标签 + 滑杆/默认/启用） | `docs/screenshots/persona/admin-dna.png` |
-| 示例场景（标签云） | `docs/screenshots/persona/admin-scenes.png` |
-| 禁用词与口头禅（分语言标签云） | `docs/screenshots/persona/admin-phrases.png` |
-| AI 事件与动态（12 类事件卡片） | `docs/screenshots/persona/admin-events.png` |
-| 世界节奏（滑杆 + 模拟今天） | `docs/screenshots/persona/admin-rhythm.png` |
-| 捏人素材池（名字带性别/国家 + 预览捏人） | `docs/screenshots/persona/admin-world.png` |
-| 预览捏人结果（`/admin?preview=en#world`） | `docs/screenshots/persona/admin-world-preview.png` |
-| 模型与密钥（LLM / STT / TTS） | `docs/screenshots/persona/admin-config.png` |
-
-### 一次典型的修改
-
-1. 打开 `/admin`；
-2. 在「表达 DNA」找到「回复长度 verbosity」卡片；
-3. 把「长 long」的滑杆从 0.92 拖到 0.60（= 长回复的角色也没那么啰嗦）；
-4. 点右上「保存并生效」→ 校验通过后立刻生效（已实测：0.92→0.51→回滚 0.92）；
-5. 想新增一个取值（例如 `verbose`）：在卡片底部填 key / 中文名 / 数值 → 「＋ 新增取值」→ 保存。
+| **好友指派** | 两种模式：`request`（推通知，等用户同意）/ `direct`（跳过同意，立刻出现在好友列表）。界面上分别说明区别。**幂等**：已是好友返回 `{ok:false, issues:["已经是好友"]}`，不插重复行 |
+| **公共事件池** | 建池 → **预演**（4 维评分：职业/兴趣/城市/表达 DNA，每维给 `contribution`，各维之和 = 总分，只算不落库）→ 领取（写 `event_pool_claims`，`UNIQUE(pool_id,persona_id)` 保幂等，回填 `event_id`，领满置 `filled`） |
+| **动态待发队列** | 独立表 `post_queue`，**不给 `persona_posts` 加状态列**——那张表在代码里约 157 处引用，加状态列要逐处补过滤，漏一处就把未发布内容露给真实用户。取消是**软取消**（`status='cancelled'`，保留记录）；已发布不可编辑 |
 
 ---
 
-## 4. 三条硬规则（管理台会强制）
+## 6. 操作日志
 
-1. **枚举值只能停用、不能删除**
-   老角色的 `speech_dna` 里可能还在用这个值；删除会让它变成非法值。
-   停用 = 新角色不再分配、旧角色继续可用。
+页面：`#/system/audit`。用途只有一个——出问题时回答「最近谁改了什么」。
 
-2. **新增枚举值必须带 `trait`（0..1）**
-   行为引擎只读数值；没有数值的枚举值无法参与行为决策，保存会被拒绝。
-
-3. **保存前必须过校验，写盘原子 + 保留上一版**
-   校验不过直接返回问题列表，**不落盘**；保存成功会先备份成 `*.bak.json`，可一键回滚。
-
-其他校验：默认值必须在取值列表且未停用；场景不能重复且至少 8 个；
-禁用词必须是非空字符串；口头禅池单语言 ≤80 条（防止撞梗）。
+- 只记**成功的写操作**（由 `require_admin` 的 yield 依赖保证：handler 抛错就不写）。
+  失败的写不进表，否则误操作会把真正生效的改动淹掉。
+- **摘要只记字段名、不记值**（`audit.summarize`）。值里可能有密钥或用户内容，进日志等于二次泄露。
+- 时间戳带毫秒：同一秒常有多条写（比如"发布动态"= 入队 + 改状态），秒级精度下顺序只能靠随机 uuid 打破，排障时会误导。
+- 审计写入失败**永不影响业务结果**（旁路，不是关键路径）。
 
 ---
 
-## 5. 生效范围（当前版本）
+## 7. API 一览
 
-| 词库 | 是否运行时热生效 | 说明 |
-|---|---|---|
-| `dna.json` | ✅ 立即 | 枚举值、默认值、数值映射（traits）、禁用词都影响下一轮聊天 |
-| `scenes.json` | ✅ 立即 | 示例检索与覆盖统计 |
-| `phrases.json` | 部分 ✅ | 全局禁用词注入每个角色的 prompt；口头禅池供后续生成流程使用 |
-| `world.json` | ✅ 立即 | 下一次捏人（每日世界/游客）即使用新素材；已有人物不受影响 |
+完整清单以 `/openapi.json` 为准（筛选 `/api/admin`）。分组：
 
-说明：热生效只影响**之后的**对话与生成，不会改写已有角色的 DNA。
+| 前缀 | 内容 |
+|---|---|
+| `/api/admin/session`、`/logout` | 会话与退出（**不鉴权**） |
+| `/api/admin/overview` | 总览（服务健康、今日产出、待发数） |
+| `/api/admin/jobs` | 后台任务状态与立即执行 |
+| `/api/admin/lexicons/*` | 词库读/存/校验/回滚/用量/模拟/预览捏人 |
+| `/api/admin/personas/*` | 角色 CRUD、批量工具、音色、Prompt 模块与改写/模板 |
+| `/api/admin/users/*` | 用户列表/详情/候选角色/好友指派/解除/测试推送 |
+| `/api/admin/events`、`/event-pool/*` | 角色事件、公共池 CRUD/预演/领取 |
+| `/api/admin/posts/*` | 待发队列、已发、写一条、编辑、软取消、立即发布 |
+| `/api/admin/media/*` | 图库、搜图入库、上传、按兴趣补图 |
+| `/api/admin/config/*` | LLM / STT / TTS / Deepgram / JPush 保存与连通测试 |
+| `/api/admin/release/*` | APK 上传与发布 |
+| `/api/admin/audit`、`/audit/actions` | 操作日志与动作清单 |
 
----
+**响应约定**：业务失败一律 HTTP 200 + `{ok:false, issues:[...]}`；
+只有参数本身非法才 400。前端以 `ok` 判断，不以状态码猜。
 
-## 6. API
+### JPush 凭据优先级
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/admin` | 管理页（HTML，服务端直出） |
-| GET | `/api/admin/status` | 已生效摘要 + 各词库状态/校验结果 |
-| GET | `/api/admin/lexicons` | 词库列表（是否存在、大小、是否通过校验） |
-| GET | `/api/admin/lexicons/{name}` | 读取词库 + 校验问题 |
-| PUT | `/api/admin/lexicons/{name}` | 保存（body `{"data": {...}}`），校验不过返回 `{ok:false, issues:[...]}` |
-| POST | `/api/admin/lexicons/{name}/validate` | 只校验不保存 |
-| POST | `/api/admin/lexicons/{name}/reset` | 回滚到上一版（备份）或回到代码默认值 |
-| GET | `/api/admin/usage` | 使用统计：每个枚举值被多少角色使用、场景覆盖数、素材池条数 |\n| GET | `/api/admin/preview-personas?count=4&language=en` | 按当前素材池试捏人物（不写库、不调模型） |\n| GET | `/api/admin/simulate` | 估算今天/明天的事件与动态产出（只读） |
-| GET | `/api/admin/config` | 模型/STT/TTS 配置快照（密钥只返回指纹） |
-| PUT | `/api/admin/config/{llm,stt,tts}` | 保存配置：默认先验证再落盘，失败不保存（`force:true` 强存） |
-| POST | `/api/admin/config/{llm,stt,tts}/test` | 用当前配置做连通性测试 |
-
-**访问守卫**：默认只允许回环地址（`127.0.0.1` / `::1`）。
-需要远程访问时设置环境变量 `SE_ADMIN_TOKEN`，并在请求头带 `X-Admin-Token`。
+**环境变量 > 管理台保存（`data/jpush_config.json`） > `.env`**。
+管理台状态只回指纹（`app_key_tail`）；若被环境变量覆盖，界面会明示"后台设置不生效"——
+不说清楚就会变成"改了没用"的玄学问题。
 
 ---
 
-## 7. 验收脚本
+## 8. 验收
 
 ```powershell
-python scripts\check_admin.py
+# 后端（本机需排除一条依赖外网、会挂死的用例）
+.\.venv\Scripts\python.exe -m pytest backend/tests -q -p no:cacheprovider `
+  --deselect "backend/tests/test_v3_world.py::test_profile_language_levels_and_feed_filter"
+
+# 前端
+cd frontend && npx tsc --noEmit && npx vitest run && npm run build:backend
+
+# 端到端（需要先起真服务，DATA_DIR 指向临时目录——data/ 是只读的）
+python scripts\e2e_admin_p1.py   # 路由/静态产物/登录/CSRF/审计落库
+python scripts\e2e_admin_p3.py   # 用户/好友/事件池/动态队列/Prompt/JPush/上传
+python scripts\e2e_admin_p4.py   # 鉴权收口 + 审计真的在落库 + 旧台已删
 ```
 
-会依次验证：管理页可打开 → 已生效摘要 → 非法保存被拒 → 合法保存并热生效 →
-回滚恢复原值 → 使用统计。（脚本最后会回滚，不留副作用。）
+起服务的最小配方：
+
+```powershell
+cd backend
+$env:DATA_DIR="D:\path\to\.tmp\e2e"; $env:SE_ADMIN_PASSWORD="test-pw-123456"
+$env:SE_ADMIN_TOKEN="test-token-abc"; $env:NO_PROXY="127.0.0.1,localhost"
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8899
+```
+
+> `data/`（真实数据目录）对测试是只读的，端到端必须用临时 `DATA_DIR`，否则写库报
+> `attempt to write a readonly database`。
+> `scripts/check_admin.py`、`scripts/check_admin_events.py` 是更早的取证脚本，
+> 断言的是旧管理台页面内容，**已被上面的 e2e 取代**。
 
 ---
 
-## 8. 客户端解耦（模型 / 密钥）
+## 9. 客户端解耦（保持有效）
 
 | 项 | 状态 |
 |---|---|
-| 管理端「模型与密钥」页 | ✅ LLM / STT / TTS 集中配置，密钥只显示指纹 |
-| 保存策略 | ✅ 先验证再落盘（LLM 真发一次极小请求；TTS 探测 Fish 音色列表；STT 走官方 model 列表），失败默认不保存，可强制保存 |
-| 客户端配置入口 | ✅ 已移除：`LlmSettingsDialog`、`TTSSettingsSection` 删除；`SettingsPanel` 改为只读说明；classic / WeChatApp 只显示「配置由管理端统一管理」 |
-| 客户端「我 → 设置」 | ✅ 只剩 提醒 / 隐私与数据 / 关于；对话模型、声音、语音识别、本地密钥入口全部移除 |
-| 客户端首屏 | ✅ 首次进入落在「消息」页（`#/chats`），不再跳「发现」页；老链接（`#/discover`、`#/settings/llm` 等）仍可打开或安全回退 |
-| 客户端死代码 | ✅ 已删除 /settings/llm、/stt、/tts、/deepgram 的写接口封装；产物里不再含配置字样 |
-| 客户端写接口 | ✅ 默认锁定：`/api/v2/settings/*` 写操作返回 403 并指向 `/admin`；开发调试设 `ALLOW_KEY_EDIT=1` 放开 |
-| 管理端接口守卫 | 仅回环地址；远程需 `SE_ADMIN_TOKEN`（页面用 `/admin?token=…` 打开一次，口令存 sessionStorage、地址栏自动清掉，后续 API 自动带 `X-Admin-Token`） |
-| 音色池 | 页面：/admin#voices；输入 Fish 音色/model id → 真实合成一句检测 → 加入素材池；素材池可试听/移除，显示已分配人数；页面下方列出 Fish 账号全部音色（最多 1000）可过滤逐个试听/加入；新捏人物优先从素材池挑音色（一人一色规则不变） |
-| 角色工坊 | 页面：/admin#personas；全量原地重捏（保留角色ID/好友/聊天，重掷人设+头像+素材池音色）；另有一键「平衡男女比例（换名字/性别/头像并重配音色，保留角色ID/好友/聊天）、重新分配音色、重新生成动态、补齐生活层（作息/DNA/示例/关系）」或彻底重建（先备份DB，删全部AI角色/动态/示例/关系/好友/聊天后按素材池重建N个，可自动加所有用户为好友）；单个角色全属性编辑（昵称/性别/年龄/语言/国家/城市/职业/兴趣/bio/性格/Speech DNA JSON/ai_config JSON/Fish音色（可填素材池名称或 id，带下拉选择）/Edge兜底/状态/生命周期/头像，保存同步好友行）；新建测试角色并可绑定到指定用户作为好友；删除角色前自动备份 |
-| APK 发布 | 页面：/admin#release；上传安装包→填 versionCode/versionName/更新说明→发布；旧版本自动进历史可回滚；App 端启动检查 /api/app/latest 并下载安装 |
-| 客户端在线化（2026-11） | APK 改为「本地 bootstrap 壳 + 远程 UI」：改界面只需部署服务器；原生改动才发 APK（详见 docs/APP_UPDATE.md） |
-| 图片库 | 管理台「图片库」页：按关键词搜图（Wikimedia/Openverse）、下载入库、按角色兴趣补图（每批 8 人，目标每人 2 条带图动态，LLM 按图写文案）；图库有生命周期：单文件下载 ≤12MB（流式）、总量 200MB/800 张、未引用图 45 天过期、超配额按最旧未引用淘汰、被动态引用的图永不删除；后台每小时自动清理 |
-| 管理台登录 | 密码登录：GET /admin 显示登录页，POST /admin/login 校验 SE_ADMIN_PASSWORD 后写 HttpOnly 会话 Cookie（30 天）；POST /admin/logout 退出；旧 ?token= 链接与 X-Admin-Token 头仍兼容；同 IP 连续 5 次输错锁 5 分钟 |
-| 公网部署 | 已上线 `https://47-104-24-236.sslip.io`（HTTP:8000 保留兼容旧版 APK）：`ALLOW_KEY_EDIT=0`（客户端改配置 403）、管理台口令保护、Fish 经服务器 mihomo(127.0.0.1:7890) 出网、edge-tts 兜底已装 |
+| 管理端「API 与密钥」 | ✅ LLM / STT / TTS / Deepgram / **JPush** 集中配置，密钥只显示指纹 |
+| 保存策略 | ✅ 先验证再落盘（LLM 真发一次极小请求；TTS 探测 Fish 音色列表；STT 走官方 model 列表；JPush 打一次只读鉴权接口——**不发真推送**，避免给真实用户弹通知），失败默认不保存，可强制保存 |
+| 客户端配置入口 | ✅ 已移除；`/api/v2/settings/*` 写操作返回 403 并指向 `/admin`（开发调试设 `ALLOW_KEY_EDIT=1`） |
+| 音色池 | `/admin#/personas/voices`：Fish 音色入库、试听、已分配人数；新捏人物优先从池子挑（一人一色） |
+| 角色工坊 | `/admin#/personas/studio`：全量重捏（保留 ID/好友/聊天）、平衡男女比例、重配音色、重建（先备份 DB）、单角色全属性编辑、新建测试角色、删除前自动备份 |
+| APK 发布 | `/admin#/system/release`：上传 → 填 versionCode/versionName → 发布；旧版本进历史可回滚；App 启动检查 `/api/app/latest` |
+| 图片库 | `/admin#/world/media`：搜图（Wikimedia/Openverse）、上传、按角色兴趣补图；生命周期：单文件 ≤12MB、总量 200MB/800 张、未引用 45 天过期、被引用永不删除 |
+| 公网部署 | `https://47-104-24-236.sslip.io`；`ALLOW_KEY_EDIT=0`；Fish 经 mihomo 出网；edge-tts 兜底 |
 
 ---
 
-## 9. 下一阶段（未做，避免超范围）
+## 10. 已知取舍（有意保留）
 
-1. ~~表单化编辑~~ 已完成；~~配置面解耦~~ 已完成（模型与密钥收进管理端、客户端零配置入口）。
-2. **`world.json` 接线**：名字/职业/城市/兴趣池真正进入 `daily_world` 的捏人生成。
-3. **示例语料管理**：12 场景 × 语言覆盖矩阵、批量导入导出。
-4. **配置面解耦第二步**：把 `/api/v2/settings/*`（LLM/STT/TTS 写接口）迁到 `/api/admin` 并加本机守卫，客户端彻底不再出现配置入口。
-5. **审计与版本**：谁在什么时候改了哪个词库、diff、回滚点。
+1. **管理台手发的动态会占当日事件帖配额**——因为发布复用了 `event_posts._insert_post`
+   （唯一 INSERT 入口，这是有意的），它带 `post_type='life_event'` 并计入 `_today_event_post_count()`。
+   要让管理台动态不占配额，需要给该函数加参数，留待后续。
+2. **角色列表不分页**（后端只接受 `query` / `limit`，无 `total` / `offset`）。
+3. **HTTP 语义**：参数非法 400；业务失败（含"对象不存在"）→ 200 + `ok:false`。
+   与契约早期草稿写的 422/404 不一致，**以实现与测试为准**。
+
+---
+
+## 11. 用户身份模型：「注册行数」不等于「人数」
+
+这一条值得单独写，因为线上真的踩过：管理台一度显示「用户总数 91」，而实际上
+只有 1 个人在用。原因不是多用户功能，而是**身份模型本身的特性**。
+
+### 机制
+
+客户端首次启动会生成随机 `device_key` 换一个 `user_id`（`frontend/src/w4/v3/api.ts`），
+并存在 localStorage 的 `speakeasy.device_key.v1` 里——同一 key 永远是同一个 user。
+但反过来，**只要 localStorage 是空的就会造一个新 user**：
+
+- 无痕 / 隐私窗口
+- 新的浏览器 profile、换 WebView 容器
+- 重装 App、清应用数据
+- 自动化脚本每次用全新 profile 跑一遍（这一条贡献了线上绝大部分垃圾数据）
+
+所以「用户只有我一个」和「库里有 91 行」并不矛盾：缺的是**账号绑定**，
+不是多用户开关。要真正做到"一个人一个账号"，需要登录/绑定体系；在那之前，
+行数天然大于人数。
+
+### 管理台怎么处理
+
+口径定义在 `backend/app/admin/user_scope.py`（**唯一真相**，总览与用户列表共用）：
+
+| 口径 | 含义 |
+|---|---|
+| `total` | `v3_users` 原始行数 |
+| `real` | 有使用痕迹：注册设备 / 好友 / 动态 / 消息 / moment，任一即是 |
+| `empty` | `total - real`，注册后毫无痕迹的残留 |
+| `registered` | 注册过推送设备的数量——最接近"真的装了 App 并授权通知的人" |
+
+- 总览首屏主数字是 **`real`**，原始行数降级为副标题（"共 N 条注册记录，M 条无使用痕迹"）
+- 用户列表默认 `scope=real`，可切「仅注册未使用 / 全部」，每行带「有/仅注册」标记
+- **`real` 必须与 `v3_users` 求交集**：痕迹表里残留着指向已不存在用户的 id
+  （最典型是 `messages` → `friends.owner_user_id = 'local'`，V2 单用户时代的哨兵值）。
+  不取交集会出现「有使用痕迹 18 个、合计 17 条」这种自相矛盾的数字。
+
+### 清理脚本
+
+`scripts/cleanup_empty_users.py`。三档，**默认全部只演练，必须 `--apply` 才删**：
+
+```bash
+# 一档：只删完全没有痕迹的空壳（最安全）
+python scripts/cleanup_empty_users.py --data-dir data
+
+# 二档：连自动化测试身份一起删（按 device_key 前缀识别）
+python scripts/cleanup_empty_users.py --data-dir data --test-identities
+
+# 三档：只保留注册过设备的账号 + --keep 指定的，其余连同聊天记录/好友一起删
+python scripts/cleanup_empty_users.py --data-dir data --all --keep u_xxx --apply
+```
+
+安全设计（每一条都对应一次真实踩坑）：
+
+1. **先备份再删**，备份失败就中止；备份目录里有 manifest 记录删了哪些 id 和每张表行数
+2. **`--keep` 的 id 必须真实存在**——否则手误传入截断 id 会让保护名单形同虚设，
+   而三档会把人全删光（这是演练时发现的，不是假想）
+3. **子表按 `CASCADE` 级联删除**（消息→好友→好友关系→动态→推送事件→画像→用户），
+   避免留下指向已删用户的孤儿行
+4. **`persona_example_dialogs` 显式排除**：它的 `user_line` 是"示例对话里用户那句话"
+   的内容，不是用户外键。按列名模糊匹配会清空全部示例语料
+5. 单事务：任一张表失败整体回滚
+6. 不 `VACUUM`（线上服务在跑，且清理几千行回收不了多少空间）
+
+### 已知的历史残留
+
+数据库里还有两类**清理前就已存在**的孤儿，与本次设计无关，可择机单独处理：
+
+- `friends.owner_user_id = 'local'`（V2 单用户时代的哨兵值）
+- `v3_discover_views` 中指向已不存在用户的浏览记录
+

@@ -42,6 +42,9 @@ _DEFAULT_PROFILE: dict[str, Any] = {
     "nickname": "Traveler",
     "native_language": "zh-CN",
     "target_languages": ["en"],
+    #: 首次建档（Onboarding）完成时间；空字符串 = 尚未完成。必须始终存在于兜底 dict，
+    #: 前端（bootstrap / GET /api/v3/profile）据此决定是否展示引导。
+    "profile_setup_completed_at": "",
     "fact_sheet": {
         "profile": {
             "nickname": "Traveler",
@@ -154,7 +157,8 @@ class DB:
                     target_languages JSON DEFAULT '["en"]',
                     birthday TEXT DEFAULT '',
                     fact_sheet JSON NOT NULL DEFAULT '{}',
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    profile_setup_completed_at TEXT DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -164,7 +168,8 @@ class DB:
                     target_languages JSON DEFAULT '["en"]',
                     birthday TEXT DEFAULT '',
                     fact_sheet JSON NOT NULL DEFAULT '{}',
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    profile_setup_completed_at TEXT DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS friends (
@@ -296,6 +301,78 @@ class DB:
                 conn.execute("ALTER TABLE user_profile ADD COLUMN birthday TEXT DEFAULT ''")
                 log.info("migrated user_profile: added birthday column")
 
+            # 首次建档（Onboarding）状态：老库补列 + **一次性**回填。
+            #
+            # 为什么回填：本功能上线前就已存在的用户不应该被强制重新走引导，
+            # 因此迁移时把已有资料的完成时间设为 updated_at（历史用户视为已完成）。
+            # 迁移只会在「列缺失 → ALTER」的那一次执行：列已存在时整个分支跳过，
+            # 重复启动不会改写任何人的完成时间，也不会把上线后新注册的用户误标完成。
+            setup_column_added = False
+            for table in ("user_profile", "user_profiles"):
+                columns = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if columns and "profile_setup_completed_at" not in columns:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN profile_setup_completed_at TEXT DEFAULT ''"
+                    )
+                    log.info(
+                        "migrated %s: added profile_setup_completed_at column", table
+                    )
+                    setup_column_added = True
+            if setup_column_added:
+                now = _now_iso()
+                # 回填 1：两张资料表里迁移前已存在的行 → 已完成（优先沿用 updated_at）。
+                for table in ("user_profile", "user_profiles"):
+                    cur = conn.execute(
+                        f"UPDATE {table} SET profile_setup_completed_at="
+                        " COALESCE(NULLIF(TRIM(COALESCE(updated_at, '')), ''), ?)"
+                        " WHERE COALESCE(profile_setup_completed_at, '') = ''",
+                        (now,),
+                    )
+                    log.info(
+                        "backfilled %s: %d existing row(s) marked profile-setup-completed",
+                        table,
+                        int(cur.rowcount or 0),
+                    )
+                # 回填 2：迁移前已注册的 V3 账号 → 补一行 user_profiles 并标记完成。
+                # ``v3_users`` 由 ``app.v3.schema`` 创建，初始化顺序不定（正常流程：
+                # build_services → db.init() → main.py ensure_schema()，此时该表已存在），
+                # 这里用 sqlite_master 判断：表还不存在就跳过（不致命，下次启动列已存在、
+                # 不会再进本分支；这些账号在首次 PUT 资料时会正常建行，不会强制弹引导）。
+                has_v3_users = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v3_users'"
+                ).fetchone()
+                if has_v3_users is not None:
+                    cur = conn.execute(
+                        "INSERT OR IGNORE INTO user_profiles"
+                        " (user_id, nickname, native_language, target_languages, birthday,"
+                        "  fact_sheet, updated_at, profile_setup_completed_at)"
+                        " SELECT id, ?, ?, ?, '', ?, ?, ? FROM v3_users"
+                        " WHERE COALESCE(id, '') <> ''",
+                        (
+                            _DEFAULT_PROFILE["nickname"],
+                            _DEFAULT_PROFILE["native_language"],
+                            _json_dumps(_DEFAULT_PROFILE["target_languages"]),
+                            "{}",
+                            now,
+                            now,
+                        ),
+                    )
+                    conn.execute(
+                        "UPDATE user_profiles SET profile_setup_completed_at=?"
+                        " WHERE COALESCE(profile_setup_completed_at, '') = ''",
+                        (now,),
+                    )
+                    log.info(
+                        "backfilled v3_users: %d legacy account(s) marked profile-setup-completed",
+                        int(cur.rowcount or 0),
+                    )
+                else:  # pragma: no cover - 仅在非常规初始化顺序下出现
+                    log.info(
+                        "skip v3_users onboarding backfill: v3_users not created yet"
+                    )
+
             msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
             if msg_columns and "image_path" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
@@ -391,11 +468,20 @@ class DB:
             data["fact_sheet"] = json.loads(_json_dumps(_DEFAULT_PROFILE["fact_sheet"]))
             data["target_languages"] = list(_DEFAULT_PROFILE["target_languages"])
             data["id"] = 1 if owner == LOCAL_USER_ID else owner
+        # 兜底：极老的库/异常路径也必须带这个键（前端据此判断是否展示引导）
+        data.setdefault("profile_setup_completed_at", "")
         return data
 
     def update_profile(self, *, user_id: str | None = None, **fields: Any) -> dict:
         owner = user_id or current_user_id()
-        allowed = {"nickname", "native_language", "target_languages", "fact_sheet", "birthday"}
+        allowed = {
+            "nickname",
+            "native_language",
+            "target_languages",
+            "fact_sheet",
+            "birthday",
+            "profile_setup_completed_at",
+        }
         payload = {k: v for k, v in fields.items() if k in allowed}
         if "target_languages" in payload:
             payload["target_languages"] = _json_dumps(payload["target_languages"])
@@ -641,7 +727,10 @@ class DB:
         return rows
 
     def recent_messages(self, friend_id: str, limit: int = 10) -> list[dict]:
-        return self.list_messages(friend_id, limit=limit)
+        """给 prompt/记忆用的最近消息：**过滤商业段落**（广告不进入长期记忆与人物经历）。"""
+        rows = self.list_messages(friend_id, limit=max(1, int(limit)) * 3)
+        clean = [row for row in rows if str(row.get("msg_type") or "") != "ad"]
+        return clean[-max(1, int(limit)):]
 
     def count_turns(self, friend_id: str) -> int:
         with self._lock:

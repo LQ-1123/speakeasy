@@ -310,6 +310,13 @@ export default function PromptSection() {
   // 不写 effect 去"自动选中第一个"：派生值更简单，也不会多渲染一轮空状态。
   const activePersonaId = personaId || personaChoices[0]?.value || "";
 
+  /** 人物统一按昵称展示；找不到时再退回 id（旧数据/已删角色）。 */
+  const personaName = (personaId?: string): string => {
+    if (!personaId) return "";
+    const hit = (personasQuery.data?.personas ?? []).find((persona) => persona.id === personaId);
+    return hit?.nickname || personaId;
+  };
+
   /**
    * 模块清单。
    *
@@ -1098,7 +1105,7 @@ export default function PromptSection() {
                     <span className="admin-muted" style={{ fontSize: 11 }}>
                       {template.mode || "模式未标注"} · {count} 个模块 ·{" "}
                       {formatWhen(template.created_at)}
-                      {template.persona_id ? ` · 来自 ${template.persona_id}` : ""}
+                      {template.persona_id ? ` · 来自 ${personaName(template.persona_id)}` : ""}
                     </span>
                   </div>
                   <div className="admin-row">

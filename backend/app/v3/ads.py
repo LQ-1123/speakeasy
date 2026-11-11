@@ -627,11 +627,15 @@ def confirm_assignment(db: Any, campaign_id: str, persona_id: str, *, confirmed:
 
 
 def list_assignments(db: Any, campaign_id: str) -> list[dict]:
+    """分配列表：带上人物昵称/语言，管理台按名字展示而不是只显示 p_xxx。"""
     if not _ensure(db):
         return []
     with db._lock:  # noqa: SLF001
         rows = db.conn.execute(
-            "SELECT * FROM ads_assignments WHERE campaign_id=? ORDER BY score DESC", (campaign_id,)
+            "SELECT a.*, COALESCE(p.nickname,'') AS nickname, COALESCE(p.language,'') AS language"
+            " FROM ads_assignments a LEFT JOIN personas p ON p.id = a.persona_id"
+            " WHERE a.campaign_id=? ORDER BY a.score DESC, a.persona_id",
+            (campaign_id,),
         ).fetchall()
     return [dict(r) for r in rows]
 

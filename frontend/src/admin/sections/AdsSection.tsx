@@ -77,6 +77,9 @@ interface Creative {
 interface Assignment {
   id: string;
   persona_id: string;
+  /** 后端 join personas 得到；旧接口没有时降级显示 id */
+  nickname?: string;
+  language?: string;
   score: number;
   status: string;
 }
@@ -742,7 +745,12 @@ function AssignmentsPanel({
         rows={assignments}
         rowKey={(row) => row.id}
         columns={[
-          { key: "persona", header: "人物", render: (row) => <code className="admin-code">{row.persona_id}</code> },
+          { key: "persona", header: "人物", render: (row) => (
+            <div className="admin-col" style={{ gap: 0 }}>
+              <span>{row.nickname || row.persona_id}</span>
+              <span className="admin-muted admin-mono">{row.persona_id}{row.language ? ` · ${row.language}` : ""}</span>
+            </div>
+          ) },
           { key: "score", header: "匹配分", numeric: true, render: (row) => row.score.toFixed(1) },
           { key: "status", header: "状态", render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge> },
           {

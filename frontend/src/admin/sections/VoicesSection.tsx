@@ -335,6 +335,20 @@ export default function VoicesSection() {
 
   /* ------------------------------ 交互 ------------------------------ */
 
+  const verifyAllMutation = useMutation({
+    mutationFn: async () => ensureOk(await apiPost<ApiRecord>("/api/admin/voice-pool/verify")),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: adminKeys.voices() });
+      const failed = Array.isArray(result.failed) ? result.failed : [];
+      push(
+        `已验证 ${asNumber(result.verified)} / ${asNumber(result.total)} 个音色` +
+          (failed.length ? `，${failed.length} 个失败（见后端日志）` : ""),
+        failed.length ? "error" : "info",
+      );
+    },
+    onError: (error) => push(`批量验证失败：${errorMessage(error)}`, "error"),
+  });
+
   const submitValidate = () => {
     const query = refId.trim();
     if (!query) {
@@ -522,6 +536,13 @@ export default function VoicesSection() {
           </Badge>
           <Button onClick={() => void poolQuery.refetch()} disabled={poolQuery.isFetching}>
             {poolQuery.isFetching ? "刷新中…" : "刷新"}
+          </Button>
+          <Button
+            onClick={() => verifyAllMutation.mutate()}
+            loading={verifyAllMutation.isPending}
+            title="逐个确认池内音色可真实合成，并记为「已验证」（严格模式下重分配音色只认已验证的）"
+          >
+            全部检测并标记已验证
           </Button>
         </div>
       </div>

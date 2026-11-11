@@ -1500,13 +1500,24 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
     """把素材池音色均匀重新分配给全部角色（最少使用优先，语言/性别匹配优先）。"""
     from app.admin import voice_pool  # noqa: PLC0415
 
-    pool = voice_pool.load_pool()
-    if os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes"):
+    raw_pool = voice_pool.load_pool()
+    strict = os.getenv("SE_VOICE_STRICT", "0").lower() in ("1", "true", "yes")
+    pool = raw_pool
+    if strict:
         from app.voice.catalog import verified_voice
 
-        pool = [v for v in pool if verified_voice(db, "fish", str(v.get("reference_id") or ""))]
+        pool = [v for v in raw_pool if verified_voice(db, "fish", str(v.get("reference_id") or ""))]
     if not pool:
-        return {"ok": False, "issues": ["素材池为空，先到「音色池」加音色"]}
+        if raw_pool:
+            return {
+                "ok": False,
+                "issues": [
+                    f"音色池里有 {len(raw_pool)} 个音色，但通过验证的为 0"
+                    "（严格模式 SE_VOICE_STRICT=1，重分配只认已验证音色）。"
+                    "先到「音色池」点『全部检测并标记已验证』，或关闭严格模式后再试。"
+                ],
+            }
+        return {"ok": False, "issues": ["音色池为空，先到「音色池」加音色"]}
     with db._lock:  # noqa: SLF001
         rows = [
             dict(r)

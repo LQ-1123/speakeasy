@@ -225,6 +225,14 @@ async def validate_voice_pool(request: Request, body: dict = Body(...)) -> dict:
         audio, media = await voice_pool.preview_audio(reference_id, refresh=True)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "issues": [f"{type(exc).__name__}: {exc}"]}
+    db = deps.db(request)
+    if db is not None:
+        try:
+            from app.voice import catalog  # noqa: PLC0415
+
+            catalog.mark_verified(db, "fish", reference_id)
+        except Exception:  # noqa: BLE001 - 验证记录失败不影响试听
+            log.debug("voice-pool: mark_verified 失败 (%s)", reference_id, exc_info=True)
     return {
         "ok": True,
         "reference_id": reference_id,
@@ -249,6 +257,15 @@ async def add_voice_pool(request: Request, body: dict = Body(...)) -> dict:
                 "ok": False,
                 "issues": [f"检测失败，未加入：{type(exc).__name__}: {exc}"],
             }
+        # 合成本身成功了 → 记为已验证，严格模式下重分配音色才认它
+        db = deps.db(request)
+        if db is not None:
+            try:
+                from app.voice import catalog  # noqa: PLC0415
+
+                catalog.mark_verified(db, "fish", reference_id)
+            except Exception:  # noqa: BLE001
+                log.debug("voice-pool: mark_verified 失败 (%s)", reference_id, exc_info=True)
     return voice_pool.add_voice(
         reference_id,
         name=str(body.get("name") or ""),
@@ -256,6 +273,41 @@ async def add_voice_pool(request: Request, body: dict = Body(...)) -> dict:
         language=str(body.get("language") or ""),
         source=str(body.get("source") or "manual"),
     )
+
+@router.post("/voice-pool/verify")
+async def verify_voice_pool(request: Request) -> dict:
+    """逐个确认池内音色可合成，并写入 ``voice_catalog``（严格模式下的可用集合）。
+
+    已有试听缓存直接复用，不重复花 Fish 调用；对失败项只记录不删除。
+    """
+    from app.admin import voice_pool  # noqa: PLC0415
+    from app.voice import catalog  # noqa: PLC0415
+
+    db = deps.db(request)
+    if db is None:
+        return _DB_NOT_READY
+    pool = voice_pool.load_pool()
+    if not pool:
+        return {"ok": False, "issues": ["音色池为空，先到「音色池」加音色"]}
+    verified = 0
+    failed: list[dict[str, str]] = []
+    for item in pool:
+        reference_id = str(item.get("reference_id") or "")
+        if not reference_id:
+            continue
+        try:
+            await voice_pool.preview_audio(reference_id)
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"reference_id": reference_id, "error": f"{type(exc).__name__}: {exc}"[:200]})
+            continue
+        catalog.mark_verified(db, "fish", reference_id)
+        verified += 1
+    return {
+        "ok": True,
+        "total": len(pool),
+        "verified": verified,
+        "failed": failed,
+    }
 
 @router.post("/voice-pool/remove")
 async def remove_voice_pool(request: Request, body: dict = Body(...)) -> dict:

@@ -39,6 +39,25 @@ def verified_voice(db: Any, provider: str, reference_id: str) -> bool:
     return bool(row and float(row[0]) > 0)
 
 
+def mark_verified(db: Any, provider: str, reference_id: str) -> bool:
+    """把一次**已成功**的合成记为已验证（调用方负责确认合成本身成功）。
+
+    「加入音色池」/「试听」已经真实合成过一句，因此不需要再花一次 Fish 调用；
+    严格模式（``SE_VOICE_STRICT=1``）重分配音色时只认这里的 ``verified_at``。
+    """
+    rid = str(reference_id or "").strip()
+    if not rid:
+        return False
+    with db._lock, db.conn:
+        _ensure_catalog(db)
+        db.conn.execute(
+            "INSERT INTO voice_catalog(provider,reference_id,verified_at,last_error) VALUES (?,?,?,?) "
+            "ON CONFLICT(provider,reference_id) DO UPDATE SET verified_at=excluded.verified_at,last_error=''",
+            (str(provider), rid, time.time(), ""),
+        )
+    return True
+
+
 async def verify_voice(
     db: Any, provider: str, reference_id: str, *, language: str = "en", cfg: Any = None,
     edge_engine: Any = None,

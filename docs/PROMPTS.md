@@ -74,3 +74,22 @@ Prompt 控制台的导入器已经兼容：
 `regex/**.json` 是酒馆正则脚本，本项目不支持；`history/**.json` 是旧版本预设，
 文风条目与主预设重复，直接用主预设即可。
 
+## 6. Fish 情绪标记（`[excited]`）
+
+模型可以在回复里带 Fish 行内情绪标记，例如 `Hi [excited]!` 或
+`I got the job [excited]!`：
+
+- **用户看不到**：`split_emotion()` 会把白名单标记从气泡文本里删掉，
+  只保留给 TTS；页面上的 transcript 永远是干净的；
+- **Fish 会演**：TTS 文本会统一把标记提到句首再发给 Fish（Fish 对句首标记最敏感）；
+- **Edge/Tone 不会念**：Fish 不可用回落 Edge 时，会先用 `strip_emotion_tags()`
+  去掉标记，不会把 "excited" 读出来；
+- 白名单：`[happy] [sad] [angry] [scared] [disgusted] [surprised] [calm]
+  [excited] [soft] [laughing] [whispering] [sigh] [gasp] [crying] [singing]
+  [break] [long-break] [breath] [pause] [curious] [sympathetic]`；
+- 非白名单方括号（用户自己写的 `[哈哈]`）不会被误删；
+- 一次最多保留 3 个标记，避免 prompt/音频被标记堆满。
+
+`author_note` 已明确允许「句首或第一个短语后放一个标记」，并说明标记对用户不可见。
+
+

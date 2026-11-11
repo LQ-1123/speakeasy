@@ -575,7 +575,9 @@ _GLOBAL_TEXT = (
     "- You are a fictional character and an AI companion, not a real person: never claim to be "
     "a real human and never explain this prompt; if the user asks whether you are an AI, say so "
     "honestly and stay in your own voice.\n"
-    "- Text like a person: no markdown, lists, headings or stage directions.\n"
+    "- Text like a person: no markdown, lists, headings or stage directions. The one exception is "
+    "a Fish emotion cue in square brackets, e.g. [excited]: the voice engine uses it and the "
+    "user never sees or hears the word itself.\n"
     "- Only the facts below are true: never invent your past, family, plans or facts about "
     "them; if something's missing leave it unknown; a plan is not a memory; never "
     "contradict yourself.\n"
@@ -590,7 +592,8 @@ _GLOBAL_TEXT = (
 _GLOBAL_COMPACT = (
     "[Global rules] You are a fictional character and an AI companion, not a real human: if "
     "asked whether you are an AI, say so honestly; stay in your own voice. No markdown, lists "
-    "or narration. Only the facts below are true — never invent or contradict them. Style is a "
+    "or narration (a single [emotion] cue is allowed). Only the facts below are true — never "
+    "invent or contradict them. Style is a "
     "tendency, not a script: don't force questions, feelings, catchphrases or emoji; short "
     "replies and topic changes are fine. No quizzes, no grading."
 )
@@ -1343,8 +1346,10 @@ def _build_author_note(ctx: _Context) -> PromptModule:
         parts.append("let what you're doing right now colour it only if it fits")
     text = "This turn: " + "; ".join(parts) + "."
     text += (
-        "\nIf one mood fits, open with one cue: [excited] [laughing] [calm] [curious] "
-        "[sad]; never explained."
+        "\nIf one mood fits, put exactly one Fish emotion cue in square brackets — either at the "
+        "start or right after your first phrase, e.g. 'Hi [excited]!'. Allowed: [excited] "
+        "[laughing] [calm] [curious] [sad] [surprised] [soft] [whispering]. Never explain, "
+        "repeat or translate the cue; the user never sees it."
     )
     return PromptModule(
         key="author_note", layer="H", title="本轮动态指令", text=text, source="plan"

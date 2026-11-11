@@ -336,13 +336,39 @@ def _combine_wavs(paths: list[str], out_path: str) -> tuple[str, int]:
     return out_path, duration_ms
 
 
-#: LLM 允许使用的 Fish 行内情绪标记（只作提示，不读出）
+#: LLM 允许使用的 Fish 行内情绪标记（只作提示，不读出、不显示）
 ALLOWED_EMOTION_TAGS = {
-    "excited", "laughing", "whispering", "sad", "curious", "sympathetic",
-    "break", "pause", "surprised", "calm", "angry", "soft",
+    # Fish 官方常见情绪
+    "happy", "sad", "angry", "scared", "disgusted", "surprised",
+    "calm", "excited", "soft", "laughing", "whispering",
+    "sigh", "gasp", "crying", "singing",
+    # 停顿/换气控制
+    "break", "long-break", "breath", "pause",
+    # 兼容旧提示词里用过的词
+    "curious", "sympathetic",
 }
 
-_TAG_RE = re.compile(r"\[\s*([a-zA-Z_ ]+?)\s*\]")
+#: 允许字母、下划线、连字符和空格（long-break / no way 之类）
+_TAG_RE = re.compile(r"\[\s*([a-zA-Z_\- ]+?)\s*\]")
+
+
+def strip_emotion_tags(text: str) -> str:
+    """只保留「给用户看/给 Edge 读」的文本：去掉白名单情绪标记并收拾空格。
+
+    Fish 需要这些标记来表演；Edge/Tone 会把它们照字面念出来，所以放给
+    Edge 之前必须调用这个函数。非白名单方括号（用户写的 `[哈哈]`）原样保留。
+    """
+    raw = text or ""
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1).strip().lower()
+        return "" if name in ALLOWED_EMOTION_TAGS else m.group(0)
+
+    out = _TAG_RE.sub(_sub, raw)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    # 标记常紧贴标点：`hi [excited]!` → 去掉标记后别留 "hi !"
+    out = re.sub(r"\s+([,.!?;:，。！？；：])", r"\1", out)
+    return out
 
 
 def split_emotion(text: str) -> tuple[str, str]:
@@ -365,6 +391,7 @@ def split_emotion(text: str) -> tuple[str, str]:
 
     display = _TAG_RE.sub(_sub, raw)
     display = re.sub(r"\s{2,}", " ", display).strip()
+    display = re.sub(r"\s+([,.!?;:，。！？；：])", r"\1", display)
     if not keep:
         return display, display
     # 标记统一放到开头（多个用空格连接）：Fish 对句首标记最敏感
@@ -662,7 +689,7 @@ class ChatService:
         )
         try:
             path, duration_ms = await self.voice.synth_to_wav(
-                clean,
+                strip_emotion_tags(clean) or clean,
                 edge_voice,
                 rate=friend.get("voice_rate") or "+0%",
                 pitch=friend.get("voice_pitch") or "+0Hz",
@@ -1712,7 +1739,7 @@ class ChatService:
             if binding is not None and not binding.fish_enabled:
                 return None
             # LLM 已经给了 [tag] 就不再叠加，避免 "[excited] [sympathetic] ..."
-            has_tag = bool(re.search(r"^\s*\[", text or ""))
+            has_tag = any(f"[{tag}]" in (text or "").lower() for tag in ALLOWED_EMOTION_TAGS)
             tagged = text if has_tag else _tag_emotion(text, emotion)
             return await fish_tts.synthesize(
                 tagged,
@@ -1778,8 +1805,10 @@ class ChatService:
                     if binding is not None
                     else (friend.get("voice_id") or "en-GB-RyanNeural")
                 )
+                # Edge 不认识 [excited]：必须去掉标记，否则会把 "excited" 念出来
+                edge_text = strip_emotion_tags(speak_text) or strip_emotion_tags(text) or speak_text
                 path, duration_ms = await self.voice.synth_to_wav(
-                    speak_text,
+                    edge_text,
                     edge_voice,
                     rate=rate,
                     pitch=pitch,

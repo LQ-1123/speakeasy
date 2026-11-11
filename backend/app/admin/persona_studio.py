@@ -258,8 +258,14 @@ def persona_detail(db: Any, persona_id: str) -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- #
 # 写：单角色
 # --------------------------------------------------------------------------- #
-def _sync_friend_rows(db: Any, persona: dict[str, Any]) -> int:
-    """把 persona 的属性同步到 V2 ``friends`` 行（只更新存在的列）。"""
+def _sync_friend_rows(
+    db: Any, persona: dict[str, Any], *, sync_reply_language: bool = False
+) -> int:
+    """把 persona 的属性同步到 V2 ``friends`` 行（只更新存在的列）。
+
+    ``sync_reply_language=True`` 时同时更新 ``reply_language``：聊天与 TTS 用的是
+    好友的回复语言，改角色语言后必须一起改，否则文字/语音仍是旧语言。
+    """
     try:
         with db._lock:  # noqa: SLF001
             columns = {
@@ -284,6 +290,9 @@ def _sync_friend_rows(db: Any, persona: dict[str, Any]) -> int:
         "native_lang": str(persona.get("language") or "en"),
         "age": int(persona.get("age") or 25),
     }
+    if sync_reply_language:
+        # 聊天/TTS 的回复语言来自 friends.reply_language；改角色语言必须一起同步
+        mapping["reply_language"] = str(persona.get("language") or "en")
     fields = [(k, v) for k, v in mapping.items() if k in columns]
     if not fields:
         return 0
@@ -400,7 +409,8 @@ def update_persona(db: Any, persona_id: str, payload: dict[str, Any]) -> dict[st
     with db._lock, db.conn:  # noqa: SLF001
         db.conn.execute(f"UPDATE personas SET {', '.join(sets)} WHERE id=?", args)
     updated = persona_detail(db, persona_id) or {}
-    synced = _sync_friend_rows(db, updated)
+    # 改语言时同步好友的「回复语言」，否则聊天/TTS 仍用旧语言
+    synced = _sync_friend_rows(db, updated, sync_reply_language="language" in payload)
     return {"ok": True, "persona": updated, "friends_synced": synced}
 
 

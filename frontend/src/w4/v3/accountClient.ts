@@ -30,8 +30,13 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 export interface AdStatus {
   eligible: boolean;
   reason: string;
+  /** 是否可以主动开启（false 时 opt_in_reason 给出原因） */
+  can_opt_in?: boolean;
+  opt_in_reason?: string;
   ads_opt_in: boolean;
   age_gate: string;
+  /** 免登录设备身份（无邮箱账号） */
+  anonymous?: boolean;
   label: string;
 }
 

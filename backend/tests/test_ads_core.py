@@ -293,17 +293,18 @@ def test_feed_ad_spacing_and_shape(db):
     uid = _adult(db, "feed1@example.com")
     campaign = _campaign(db)
 
-    # 第一屏不足 3 条：不插，只累计间隔（8 条）
-    assert ads.try_feed_ad(db, user_id=uid, page_offset=0, items_in_page=8, now=NOW) is None
-    # 下一页：距上次广告已 8 条普通动态 → 插一条
-    result = ads.try_feed_ad(db, user_id=uid, page_offset=8, items_in_page=8, now=NOW)
+    # 首屏足够 8 条：前 3 张不插，第 4 张位置插一条
+    result = ads.try_feed_ad(db, user_id=uid, page_offset=0, items_in_page=8, now=NOW)
     assert result is not None
     assert result["kind"] == "sponsored" and result["delivery_id"].startswith("ad_")
     assert result["campaign_id"] == campaign["id"]
     assert result["label"] == "广告"
+    assert result["slot"] == 3
 
-    # 随后 8 条内不再插
-    assert ads.try_feed_ad(db, user_id=uid, page_offset=16, items_in_page=6, now=NOW) is None
+    # 随后 8 条内不再插（先累计到 8 条）
+    assert ads.try_feed_ad(db, user_id=uid, page_offset=8, items_in_page=8, now=NOW) is None
+    # 同品牌 7 天冷却：即使间隔已满也不会再插同一品牌
+    assert ads.try_feed_ad(db, user_id=uid, page_offset=16, items_in_page=8, now=NOW) is None
 
     stats = ads.campaign_stats(db, campaign["id"])
     row = stats["items"][0]

@@ -51,19 +51,40 @@ class AdEventIn(BaseModel):
 async def ad_status(request: Request, user_id: str = Depends(bind_current_user)) -> dict:
     db = _db(request)
     eligible, reason = await _run(ads.ad_eligible, db, user_id)
+    can_opt_in, opt_in_reason = await _run(ads.ad_opt_in_allowed, db, user_id)
     prefs = await _run(client_api.preferences, db, user_id)
     return {
         "eligible": bool(eligible),
         "reason": reason,
+        "can_opt_in": bool(can_opt_in),
+        "opt_in_reason": opt_in_reason,
         "ads_opt_in": bool(prefs.get("ads")),
         "age_gate": await _run(_age_group, db, user_id),
+        "anonymous": await _run(_is_anonymous, db, user_id),
         "label": "广告 · 品牌合作",
     }
 
 
+def _is_anonymous(db: Any, user_id: str) -> bool:
+    try:
+        from app.v3 import accounts  # noqa: PLC0415
+
+        return accounts.account_for_user(db, user_id) is None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _age_group(db: Any, user_id: str) -> str:
     try:
-        return str(accounts_caps(db, user_id)["age"]["group"])
+        caps = accounts_caps(db, user_id)
+        group = str(caps["age"]["group"] or "")
+        if group in ("adult", "teen"):
+            return group
+    except Exception:  # noqa: BLE001
+        pass
+    # 免登录：账号能力矩阵不知道年龄，按资料自报生日给出展示用分组
+    try:
+        return ads.profile_age_group(db, user_id)
     except Exception:  # noqa: BLE001
         return "unknown"
 
@@ -80,12 +101,15 @@ async def set_opt_in(
 ) -> dict:
     db = _db(request)
     if body.enabled:
-        eligible, reason = await _run(ads.ad_eligible, db, user_id)
-        caps = await _run(accounts_caps, db, user_id)
-        if caps["age"]["group"] != "adult" or not caps["age"]["verified"]:
-            raise HTTPException(status_code=403, detail="只有已核验成年账号才能开启合作推荐")
-        if not caps["features"].get("ads", False):
-            raise HTTPException(status_code=403, detail="当前账号不可用合作推荐能力")
+        allowed, reason = await _run(ads.ad_opt_in_allowed, db, user_id)
+        if not allowed:
+            messages = {
+                "no_account": "当前免登录模式不开放广告开关（需登录账号）",
+                "not_adult_verified": "只有成年用户才能开启合作推荐（请先填写真实年龄/完成核验）",
+                "ads_not_allowed": "当前账号不可用合作推荐能力",
+                "ads_disabled": "广告能力未启用",
+            }
+            raise HTTPException(status_code=403, detail=messages.get(reason, "暂时不能开启合作推荐"))
 
     def save() -> dict:
         data = client_api.preferences(db, user_id)

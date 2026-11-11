@@ -793,7 +793,8 @@ function DeliveriesPanel({
     <div className="admin-card">
       <h2 className="admin-card-title">投放记录（最近 {deliveries.length} 条）</h2>
       <p className="admin-muted">
-        当前免登录版本没有「成年 + 主动开启」的账号，因此这里应为空；等账号恢复后才会有真实投放。
+        投放需要「成年用户 + 主动开启合作推荐」：用户端「设置 → 推荐」打开开关后，推荐流第 4 条起或聊天需求命中时才会有记录。
+        免登录期间按资料里自填的生日判断成年（服务端 `SE_ADS_ANONYMOUS`，恢复账号登录后自动要求已核验成年账号）。
       </p>
       <div className="admin-inline">
         <Select value={campaignId} onChange={onSelect} options={campaignOptions} />

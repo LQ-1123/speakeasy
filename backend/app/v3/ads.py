@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -643,20 +644,76 @@ def list_assignments(db: Any, campaign_id: str) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # 资格与需求识别
 # --------------------------------------------------------------------------- #
-def ad_eligible(db: Any, user_id: str) -> tuple[bool, str]:
-    """成年 + 已核验 + 主动开启合作推荐，才可能看到广告。"""
+def anonymous_ads_enabled() -> bool:
+    """免登录期间的临时口径：允许「资料自报成年」的设备用户看广告。
+
+    - 显式 ``SE_ADS_ANONYMOUS=1/0`` 优先；
+    - 未显式设置时，只在免登录模式（``SE_REQUIRE_AUTH=0``，默认）开启；
+      恢复邮箱登录（``SE_REQUIRE_AUTH=1``）后自动回到「必须已核验成年账号」。
+    """
+    raw = str(os.getenv("SE_ADS_ANONYMOUS", "")).strip().lower()
+    if raw:
+        return raw in ("1", "true", "yes", "on")
+    require_auth = str(os.getenv("SE_REQUIRE_AUTH", "0")).strip().lower()
+    return require_auth not in ("1", "true", "yes")
+
+
+def _birthday_to_age(birthday: str) -> int | None:
+    """``YYYY-MM-DD``（也接受 ``YYYY/MM/DD``）→ 周岁；解析失败返回 None。"""
+    raw = str(birthday or "").strip()[:10].replace("/", "-")
+    if not raw:
+        return None
+    try:
+        birth = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    today = _now().date()
+    age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+    return age if 0 <= age <= 130 else None
+
+
+def profile_age_group(db: Any, user_id: str) -> str:
+    """按资料生日给出「adult / teen / child / unknown」，仅用于免登录广告口径。"""
+    try:
+        profile = db.get_profile(user_id=user_id) or {}
+    except Exception:  # noqa: BLE001
+        return "unknown"
+    age = _birthday_to_age(str(profile.get("birthday") or ""))
+    if age is None:
+        return "unknown"
+    if age >= 18:
+        return "adult"
+    if age >= 14:
+        return "teen"
+    return "child"
+
+
+def ad_opt_in_allowed(db: Any, user_id: str) -> tuple[bool, str]:
+    """能否**开启**合作推荐（未开启前也能用它给前端提示原因）。"""
     if not user_id or user_id == "local":
         return False, "no_account"
     if not _ensure(db):
         return False, "ads_disabled"
     account = accounts.account_for_user(db, user_id)
-    if account is None:
+    if account is not None:
+        caps = accounts.capabilities(db, user_id)
+        if caps["age"]["group"] != "adult" or not caps["age"]["verified"]:
+            return False, "not_adult_verified"
+        if not caps["features"].get("ads", False):
+            return False, "ads_not_allowed"
+        return True, ""
+    if not anonymous_ads_enabled():
         return False, "no_account"
-    caps = accounts.capabilities(db, user_id)
-    if caps["age"]["group"] != "adult" or not caps["age"]["verified"]:
+    if profile_age_group(db, user_id) != "adult":
         return False, "not_adult_verified"
-    if not caps["features"].get("ads", False):
-        return False, "ads_not_allowed"
+    return True, ""
+
+
+def ad_eligible(db: Any, user_id: str) -> tuple[bool, str]:
+    """可投放：成年（账号已核验，或免登录下自报成年）+ 主动开启合作推荐。"""
+    allowed, reason = ad_opt_in_allowed(db, user_id)
+    if not allowed:
+        return False, reason
     pref = _user_preferences(db, user_id)
     if not pref.get("ads"):
         return False, "ads_opt_out"
@@ -1021,16 +1078,17 @@ def try_feed_ad(
     since24 = _iso(moment - timedelta(hours=24))
     if _count_deliveries(db, user_id, since24) >= TOTAL_PER_24H:
         return None
-    # 前 3 条不插 + 两条广告之间至少 8 条普通动态
-    if page_offset < FEED_FIRST_SKIP:
+    # 首屏前 3 张不插；两条广告之间至少 8 条普通动态
+    if page_offset <= 0 and items_in_page < FEED_FIRST_SKIP:
         _bump_feed_state(db, user_id, items_in_page)
         return None
     with db._lock:  # noqa: SLF001
         row = db.conn.execute(
             "SELECT items_since_ad FROM ads_feed_state WHERE user_id=?", (user_id,)
         ).fetchone()
-    since_ad = int(row["items_since_ad"] if row is not None else page_offset)
-    if since_ad < FEED_POST_GAP and page_offset >= FEED_FIRST_SKIP:
+    # 新用户没有历史时视为已累积满间隔，允许首屏第 4 张位置插一条
+    since_ad = int(row["items_since_ad"] if row is not None else FEED_POST_GAP)
+    if since_ad < FEED_POST_GAP:
         _bump_feed_state(db, user_id, items_in_page)
         return None
     prefs = _user_preferences(db, user_id)

@@ -112,7 +112,7 @@ def _flat(pages: list[list[dict]]) -> list[dict]:
     return [item for page in pages for item in page]
 
 
-def test_sponsored_appears_after_spacing_not_in_first_screen(tmp_path):
+def test_sponsored_inserted_after_three_posts(tmp_path):
     db, service = _make(tmp_path)
     uid = _user(db)
     _campaign(db)
@@ -123,8 +123,9 @@ def test_sponsored_appears_after_spacing_not_in_first_screen(tmp_path):
         reset_current_user(token)
 
     first = pages[0]
-    assert len(first) == 5
-    assert all(item.get("kind") != "sponsored" for item in first)
+    # 5 条普通动态 + 第 4 张位置插入的 1 条广告
+    assert len(first) == 6
+    assert first[3].get("kind") == "sponsored"
 
     flat = _flat(pages)
     sponsored = [item for item in flat if item.get("kind") == "sponsored"]

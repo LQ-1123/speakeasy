@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * 设置 · 账号（邮箱登录、设备会话管理、合作推荐开关）。
+ * 设置 · 账号（**当前首版已停用，文件保留待恢复**）。
  *
- * 会话/广告接口都在 v3/session.ts 与 v3/accountClient.ts；本组件只负责状态与展示。
- * 未登录时通过 `sonder:open-auth` 事件唤起 AuthGate 的登录弹层。
+ * 2026-11 起产品免登录：设置页不再展示「账号」分区；多用户靠设备身份隔离，
+ * 首次进入只走 `Onboarding` 用户信息引导。恢复邮箱/密码登录时，把本组件
+ * 重新挂回 `SettingsPane` 即可（`session.ts` / `accountClient.ts` 与后端接口都还在）。
  */
 
 import { useCallback, useEffect, useState } from "react";

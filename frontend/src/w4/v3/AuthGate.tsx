@@ -1,12 +1,14 @@
 /**
- * 账号门：服务端要求登录（SE_REQUIRE_AUTH=1）且本地没有会话时自动弹登录；
- * 其他情况在右下角保留一个入口（内测用户可主动登录/注册）。
+ * 账号门（**当前首版已停用，文件保留待恢复**）。
  *
- * 打开方式：
- * - 自动：`authIdentity()` 返回 401（未登录/会话失效）；
- * - 手动：`window.dispatchEvent(new CustomEvent("sonder:open-auth"))`
- *   （设置页「账号」入口用的就是这个事件）；
- * - URL：`?login=1`。
+ * 2026-11 起产品改为免登录：多用户靠设备身份隔离，唯一门槛是首次用户信息引导
+ * （`Onboarding`）。`App.tsx` 不再挂载本组件；需要恢复邮箱/密码登录时，
+ * 把 `<AuthGate />` 加回 `App.tsx` 即可，后端接口与测试都还在。
+ *
+ * 原始行为：
+ * - 服务端要求登录（SE_REQUIRE_AUTH=1）且本地没有会话时自动弹登录；
+ * - 其他情况在右下角保留一个入口（内测用户可主动登录/注册）；
+ * - 手动：`sonder:open-auth` 事件；URL：`?login=1`。
  */
 
 import { useEffect, useState } from "react";

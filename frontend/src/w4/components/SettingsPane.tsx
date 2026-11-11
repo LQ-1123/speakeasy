@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Bell, ChevronLeft, Info, Palette, ShieldCheck, UserRound } from "lucide-react";
+import { Bell, ChevronLeft, Info, Palette, ShieldCheck } from "lucide-react";
 
 import { haptic } from "../../theme/haptics";
 import { themeStore, useTheme } from "../../theme/theme-store";
@@ -19,7 +19,6 @@ import type { ThemePreference } from "../../theme/types";
 
 import type { Route } from "../model";
 import { Segmented, Switch } from "../ui";
-import { AccountSection } from "./AccountSection";
 import { usePreferences } from "../v3/preferences";
 import { nativeBridge, type ClientPreferences, type NativeNotificationStatus } from "../v3/clientApi";
 import {
@@ -31,10 +30,9 @@ import {
 import "../styles/profile.css";
 import "../styles/notifications.css";
 
-type SettingsSectionKey = "account" | "notify" | "appearance" | "privacy" | "about";
+type SettingsSectionKey = "notify" | "appearance" | "privacy" | "about";
 
 const SECTIONS: ReadonlyArray<{ key: SettingsSectionKey; label: string; icon: ReactNode }> = [
-  { key: "account", label: "账号", icon: <UserRound size={18} strokeWidth={1.8} /> },
   { key: "notify", label: "提醒", icon: <Bell size={18} strokeWidth={1.8} /> },
   { key: "appearance", label: "外观与触感", icon: <Palette size={18} strokeWidth={1.8} /> },
   { key: "privacy", label: "隐私与数据", icon: <ShieldCheck size={18} strokeWidth={1.8} /> },
@@ -91,7 +89,6 @@ export function SettingsPane({
 
         <div className="w4-settings-body">
           <div className="w4-settings-card">
-            {active === "account" ? <AccountSection /> : null}
             {active === "notify" ? <NotifySection /> : null}
             {active === "appearance" ? <AppearanceSection /> : null}
             {active === "privacy" ? <PrivacySection /> : null}

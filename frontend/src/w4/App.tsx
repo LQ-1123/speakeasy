@@ -32,7 +32,6 @@ import { backToParent, closeTopOverlay, navigateTo, syncFromHash, useNavigation 
 import { usePreferences } from "./v3/preferences";
 import { PushOptIn } from "./v3/PushOptIn";
 import { GlobalNotification } from "./v3/GlobalNotification";
-import { AuthGate } from "./v3/AuthGate";
 import { TeenGate } from "./v3/TeenGate";
 import { installAudioBus } from "./audioBus";
 import { installApiIdentity } from "./v3/api";
@@ -439,7 +438,6 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <AppProvider>
           <Shell />
-          <AuthGate />
           <TeenGate />
           {preview ? <PreviewBridge variant={previewVariant()} /> : null}
         </AppProvider>

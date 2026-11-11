@@ -24,10 +24,11 @@ export type AdminRoute =
   | { name: "systemConfig" }
   | { name: "systemRelease" }
   | { name: "systemJobs" }
-  | { name: "systemAudit" };
+  | { name: "systemAudit" }
+  | { name: "commerceAds" };
 
-/** 四个域：侧栏按此分组。 */
-export type AdminDomain = "overview" | "users" | "world" | "personas" | "system";
+/** 侧栏按域分组。 */
+export type AdminDomain = "overview" | "users" | "world" | "personas" | "system" | "commerce";
 
 export const DOMAIN_LABEL: Record<AdminDomain, string> = {
   overview: "总览",
@@ -35,6 +36,7 @@ export const DOMAIN_LABEL: Record<AdminDomain, string> = {
   world: "AI 世界",
   personas: "捏人",
   system: "系统",
+  commerce: "商业运营",
 };
 
 export interface NavItem {
@@ -99,6 +101,18 @@ export const ADMIN_NAV: NavGroup[] = [
       { key: "system.audit", label: "操作日志", route: { name: "systemAudit" }, phase: 1, hint: "谁在什么时候改了什么" },
     ],
   },
+  {
+    domain: "commerce",
+    items: [
+      {
+        key: "commerce.ads",
+        label: "商业运营",
+        route: { name: "commerceAds" },
+        phase: 3,
+        hint: "品牌 / 活动 / 素材审核 / 角色分配 / 投放记录",
+      },
+    ],
+  },
 ];
 
 /** 路由 → 所属域（侧栏高亮用）。 */
@@ -126,6 +140,8 @@ export function domainOf(route: AdminRoute): AdminDomain {
     case "systemJobs":
     case "systemAudit":
       return "system";
+    case "commerceAds":
+      return "commerce";
   }
 }
 
@@ -166,6 +182,8 @@ export function adminRouteToHash(route: AdminRoute): string {
       return "#/system/jobs";
     case "systemAudit":
       return "#/system/audit";
+    case "commerceAds":
+      return "#/commerce/ads";
   }
 }
 
@@ -229,6 +247,8 @@ export function parseAdminRoute(hash: string): AdminRoute {
         default:
           return { name: "systemConfig" };
       }
+    case "commerce":
+      return { name: "commerceAds" };
     case "overview":
       return { name: "overview" };
     default:
@@ -289,6 +309,8 @@ const IMPLEMENTED_ROUTES: ReadonlySet<AdminRoute["name"]> = new Set([
   "personaPrompts",
   // P4：操作日志
   "systemAudit",
+  // 商业化：广告控制台
+  "commerceAds",
 ]);
 
 /** 该路由是否已经有可用的分区页面。 */

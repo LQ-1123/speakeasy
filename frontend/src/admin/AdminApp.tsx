@@ -91,6 +91,10 @@ const AuditSection = dynamic(() => import("./sections/AuditSection"), {
   ssr: false,
   loading: () => <LoadingState />,
 });
+const AdsSection = dynamic(() => import("./sections/AdsSection"), {
+  ssr: false,
+  loading: () => <LoadingState />,
+});
 
 function sectionFor(route: AdminRoute) {
   switch (route.name) {
@@ -130,6 +134,9 @@ function sectionFor(route: AdminRoute) {
     // P4
     case "systemAudit":
       return <AuditSection />;
+    // 商业化
+    case "commerceAds":
+      return <AdsSection />;
     default:
       // 所有分区都已交付（P4）；走到这里只能是未知 hash，由兜底组件提示。
       return <ComingSoonSection />;

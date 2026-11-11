@@ -1,4 +1,4 @@
-﻿"""LLM 客户端、mock 引擎、润色建议、角色库测试。"""
+"""LLM 客户端、mock 引擎、润色建议、角色库测试。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,33 @@ from app.config import LLMSettings
 
 def run(coro):
     return asyncio.run(coro)
+
+
+# --------------------------------------------------------------------------- #
+# 运行时配置：base_url 规范化（只填域名要自动补 /v1）
+# --------------------------------------------------------------------------- #
+def test_runtime_config_normalizes_base_url():
+    from app.llm.runtime_config import LLMRuntimeConfig
+
+    cases = {
+        "https://note3-prev-api.askdiandian.com": "https://note3-prev-api.askdiandian.com/v1",
+        "note3-prev-api.askdiandian.com/": "https://note3-prev-api.askdiandian.com/v1",
+        "http://127.0.0.1:8000": "http://127.0.0.1:8000/v1",
+        "https://api.deepseek.com/v1/": "https://api.deepseek.com/v1",
+        "https://api.deepseek.com/v1/chat/completions": "https://api.deepseek.com/v1",
+        "": "",
+    }
+    for raw, expected in cases.items():
+        assert LLMRuntimeConfig(base_url=raw, model="m").base_url == expected, raw
+
+
+def test_runtime_config_strips_pasted_whitespace():
+    from app.llm.runtime_config import LLMRuntimeConfig
+
+    cfg = LLMRuntimeConfig(base_url=" https://x.test/v1 ", api_key=" ak_x \n", model=" dots ")
+    assert cfg.base_url == "https://x.test/v1"
+    assert cfg.api_key == "ak_x"
+    assert cfg.model == "dots"
 
 
 # --------------------------------------------------------------------------- #

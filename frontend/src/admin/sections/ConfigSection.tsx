@@ -49,7 +49,7 @@ type Target = "llm" | "stt" | "tts" | "deepgram" | "jpush";
 /** 每张卡要显示的字段（顺序即表单顺序）。值来自后端 `_LLM_FIELDS` 等常量。 */
 const CARD_FIELDS: Record<Target, Array<{ key: string; label: string; secret?: boolean; hint?: string }>> = {
   llm: [
-    { key: "base_url", label: "Base URL", hint: "OpenAI 兼容端点，例如 https://api.deepseek.com" },
+    { key: "base_url", label: "Base URL", hint: "OpenAI 兼容端点，例如 https://api.deepseek.com/v1；只填域名会自动补 /v1" },
     { key: "model", label: "模型", hint: "主对话模型" },
     { key: "api_key", label: "API Key", secret: true, hint: "只显示指纹；留空表示不修改" },
     { key: "suggestion_model", label: "建议模型", hint: "可留空，默认跟随主模型" },

@@ -108,6 +108,13 @@ class LLMRuntimeConfig:
     # 来源标记（不持久化，仅供排查）
     source: str = field(default="env", compare=False)
 
+    def __post_init__(self) -> None:
+        """所有构造路径统一规范化：只填域名时补 /v1，去掉粘贴带进来的空白。"""
+        self.base_url = _norm_base_url(str(self.base_url or ""))
+        self.api_key = str(self.api_key or "").strip()
+        self.model = str(self.model or "").strip()
+        self.suggestion_model = str(self.suggestion_model or "").strip()
+
     def is_configured(self) -> bool:
         """有 base_url + model 即视为可尝试；key 是否必需取决于供应商（本地模型可空）。"""
         return bool(self.base_url.strip() and self.model.strip())
@@ -142,13 +149,25 @@ class LLMRuntimeConfig:
 
 
 def _norm_base_url(url: str) -> str:
-    """补全并规范化 base_url。"""
+    """补全并规范化 base_url（OpenAI 兼容端点通常需要 ``/v1``）。"""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
     u = (url or "").strip().rstrip("/")
     if not u:
         return ""
     if not u.startswith(("http://", "https://")):
         u = "https://" + u
-    return u
+    parts = urlsplit(u)
+    path = (parts.path or "").rstrip("/")
+    # 用户把完整端点粘进来时削回 base：…/v1/chat/completions → …/v1
+    for suffix in ("/chat/completions", "/completions"):
+        if path.endswith(suffix):
+            path = path[: -len(suffix)]
+            break
+    # 只填域名（或 http://host/）时补 /v1：OpenAI SDK 会拼 /chat/completions
+    if path in ("", "/"):
+        path = "/v1"
+    return f"{parts.scheme}://{parts.netloc}{path}" + (f"?{parts.query}" if parts.query else "")
 
 
 class LLMConfigStore:
@@ -330,9 +349,15 @@ async def verify_config(cfg: LLMRuntimeConfig, *, timeout_s: float = 20.0) -> di
         low = raw.lower()
 
         if "401" in raw or "invalid_api_key" in low or "unauthorized" in low or isinstance(exc, LLMConfigError):
-            msg = f"API Key 无效或无权限（{name}）：{raw[:160]}"
+            msg = (
+                f"API Key 无效、过期或复制不完整（{name}）：{raw[:160]}"
+                f"（当前 base_url={cfg.base_url}）"
+            )
         elif "404" in raw or "model_not_found" in low or "does not exist" in low:
-            msg = f"模型名不存在，或该端点不提供此模型（{name}）：{raw[:160]}"
+            msg = (
+                f"端点或模型不存在（{name}）：{raw[:160]}"
+                f"（base_url 通常需要以 /v1 结尾，当前 {cfg.base_url}）"
+            )
         elif "connect" in low or "timeout" in low or "timed out" in low or "getaddrinfo" in low:
             msg = f"连不上 base_url（{name}）：{raw[:160]}"
         elif "429" in raw or "rate" in low or "quota" in low:

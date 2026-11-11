@@ -52,3 +52,25 @@
 - 不支持酒馆的 `prompt_order`、深度插入、正则脚本、变量、世界书触发；需要这些行为要改代码；
 - 文风按「角色 × 模式」保存；模板套用只对可改写模块生效；
 - 单模块改写上限 4000 字符；`style` 实际注入上限 900 字符，超出按预算裁剪。
+
+## 5. Sudachi-Next 这类「多文风预设」的导入
+
+`LimeBlogs/Sudachi-Next` 的 `Sudachi-Next-Preset.json` / `Sudachi-Next-Preset-TW.json`
+不是「一个文风一个 JSON」，而是把多个文风写成 `prompts` 里互斥的
+`{{setvar::style:: ... }}` 条目（多数 `enabled:false`，靠变量切换）。
+
+Prompt 控制台的导入器已经兼容：
+
+- 支持 `prompts` 数组、纯数组、数据银行 `entries` 对象；
+- 识别 `{{setvar::style:: ... }}`，自动去掉注释 / 变量外层；
+- 跳过 `{{getvar::style}}` 模板、章节标题、<40 字符的占位；
+- 一次识别出多条时，用下拉框选**一条**填入，不会把互斥文风拼在一起。
+
+实测 `Sudachi-Next-Preset.json` 可识别 14 条：
+🔖轻小说、🔞黄文、🔥短剧式、🖋鲁迅式、🍡Galgame、⭐星野式、💬聊天、
+🌸番剧式（搞笑/恋爱/热血）、🎧日系ASMR、🪭舞台剧、✒自定义文风、🫠黄文x轻小说。
+
+`Sudachi-Next-DLC.json` 是数据银行（状态模板/资源表/格式限制），不是文风；
+`regex/**.json` 是酒馆正则脚本，本项目不支持；`history/**.json` 是旧版本预设，
+文风条目与主预设重复，直接用主预设即可。
+

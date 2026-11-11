@@ -29,6 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AdminApiError, apiDelete, apiGet, apiPost, apiPut, withQuery } from "../api";
 import { adminKeys } from "../queryKeys";
+import { extractTavernStyleCandidates, type TavernStyleCandidate } from "../promptStyleImport";
 import {
   Badge,
   Button,
@@ -275,30 +276,6 @@ function trimmedLines(trimmed: unknown): string[] {
 /* 分区                                                                        */
 /* -------------------------------------------------------------------------- */
 
-/** 从酒馆（SillyTavern）预设 JSON 中抽取「文风」草稿，供「角色文风」模块使用。 */
-function extractTavernStyle(raw: string): { text: string; count: number; error?: string } {
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return { text: "", count: 0, error: "不是合法 JSON" };
-  }
-  const container = data as { prompts?: unknown };
-  const list = Array.isArray(data) ? data : Array.isArray(container?.prompts) ? container.prompts : null;
-  if (!list) return { text: "", count: 0, error: "没找到 prompts 数组（请粘贴酒馆预设 JSON）" };
-  const entries = list.filter(
-    (entry): entry is { content: string; identifier?: string; name?: string; enabled?: boolean } =>
-      Boolean(entry) &&
-      typeof (entry as { content?: unknown }).content === "string" &&
-      String((entry as { content: string }).content).trim() !== "" &&
-      (entry as { enabled?: boolean }).enabled !== false,
-  );
-  const styleLike = /style|文风|main|jailbreak|author|writer|narrat/i;
-  const picked = entries.filter((entry) => styleLike.test(`${entry.identifier ?? ""} ${entry.name ?? ""}`));
-  const chosen = (picked.length > 0 ? picked : entries).map((entry) => entry.content.trim());
-  return { text: chosen.join("\n\n"), count: chosen.length };
-}
-
 export default function PromptSection() {
   const queryClient = useQueryClient();
   const { toasts, push } = useToasts();
@@ -313,6 +290,8 @@ export default function PromptSection() {
   const [styleImportOpen, setStyleImportOpen] = useState(false);
   const [styleImportText, setStyleImportText] = useState("");
   const [styleImportInfo, setStyleImportInfo] = useState("");
+  const [styleCandidates, setStyleCandidates] = useState<TavernStyleCandidate[]>([]);
+  const [styleCandidateIndex, setStyleCandidateIndex] = useState(0);
   const [saveIssues, setSaveIssues] = useState<string[]>([]);
   const [clearOpen, setClearOpen] = useState(false);
   const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<PromptTemplate | null>(null);
@@ -838,6 +817,22 @@ export default function PromptSection() {
                         </div>
                         {styleImportOpen ? (
                           <>
+                            <div className="admin-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                              <input
+                                type="file"
+                                accept=".json,application/json"
+                                onChange={async (event) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+                                  setStyleImportText(await file.text());
+                                  setStyleCandidates([]);
+                                  setStyleImportInfo(`已读取 ${file.name}（${file.size} 字节），点「解析」查看文风候选。`);
+                                }}
+                              />
+                              <span className="admin-muted" style={{ fontSize: 11 }}>
+                                也可以直接粘贴预设 JSON
+                              </span>
+                            </div>
                             <TextArea
                               value={styleImportText}
                               onChange={(value) => setStyleImportText(value)}
@@ -850,27 +845,47 @@ export default function PromptSection() {
                                 size="sm"
                                 disabled={!styleImportText.trim()}
                                 onClick={() => {
-                                  const result = extractTavernStyle(styleImportText);
-                                  if (result.error) {
-                                    setStyleImportInfo(`导入失败：${result.error}`);
+                                  const result = extractTavernStyleCandidates(styleImportText);
+                                  if (result.error || result.candidates.length === 0) {
+                                    setStyleCandidates([]);
+                                    setStyleImportInfo(`导入失败：${result.error ?? "没有可用的文风条目"}`);
                                     return;
                                   }
-                                  if (!result.text) {
-                                    setStyleImportInfo("没有可用的文风条目（enabled 且 content 非空）。");
-                                    return;
-                                  }
-                                  setDraft("style", result.text);
+                                  setStyleCandidates(result.candidates);
+                                  setStyleCandidateIndex(0);
+                                  setDraft("style", result.candidates[0].text);
                                   setStyleImportInfo(
-                                    `已提取 ${result.count} 条，共 ${result.text.length} 字符；超过 900 字会被截断，确认后点「保存改写」。`,
+                                    `识别到 ${result.candidates.length} 条文风候选（已填入第 1 条）；可在下方切换。超过 900 字会被截断，确认后点「保存改写」。`,
                                   );
                                 }}
                               >
-                                解析并填入
+                                解析文风候选
                               </Button>
                               {styleImportInfo ? (
                                 <span className="admin-muted" style={{ fontSize: 11 }}>{styleImportInfo}</span>
                               ) : null}
                             </div>
+                            {styleCandidates.length > 0 ? (
+                              <div className="admin-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                                <Select
+                                  value={String(styleCandidateIndex)}
+                                  options={styleCandidates.map((candidate, index) => ({
+                                    value: String(index),
+                                    label: `${candidate.name}（${candidate.text.length} 字）`,
+                                  }))}
+                                  onChange={(value) => {
+                                    const index = Number(value);
+                                    setStyleCandidateIndex(index);
+                                    const candidate = styleCandidates[index];
+                                    if (!candidate) return;
+                                    setDraft("style", candidate.text);
+                                    setStyleImportInfo(
+                                      `已填入：${candidate.name}（${candidate.text.length} 字；超 900 会截断）`,
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
                           </>
                         ) : null}
                       </div>

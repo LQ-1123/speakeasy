@@ -74,3 +74,12 @@ Protocol amendments: native startCall/state includes friendId. Call audio URLs u
 - 产物：`deliverables/SpeakEasy-v4.2.1-release.apk`，15,214,446 bytes，SHA-256 `5a619e7de83c16372dcc49c9597dc7d1aefbfbdac9f7320b2ad15ab7c7b8f9c9`。
 - 已通过管理台 `/api/admin/app-release/upload` 发布：线上文件名 `speakeasy-4.2.1-421.apk`，`GET /api/app/latest` 返回 421 / 4.2.1。
 - 验证：aapt2 包名/版本、apksigner 证书与 4.2.0 一致、公开 HTTPS Range 下载返回 206、管理台上传返回 200。未做真机安装验收。
+
+## 4.2.2 release (2026-11-12)
+
+- 修复 Fish 合成慢导致的「消息迟迟不出现」：后端先落文字消息并立即返回，后台再补 `audio_path/msg_type=voice`；前端发送后短轮询把音频取回。测试环境 `SE_TTS_DEFER_AUDIO=0` 保持同步语义。
+- 修复「朗读每次都要等 Fish」：`voice_registry.synthesize` 增加按「角色音色 + 文案 + 模型」的磁盘缓存（`data/audio/.tts_cache`），重复朗读直接命中。实测同一段中文：首次 2.55 s，第二次 54 ms。
+- 实测消息：聊天接口返回 **1.94 s**（此前需等 Fish 约 6 s 才落库），音频在 **6.71 s** 后异步补齐；页面先显示文字，不再空白等待。
+- Android：versionCode 422 / versionName 4.2.2；签名证书不变（`fac7e179…69b1`）。
+- 产物：`deliverables/SpeakEasy-v4.2.2-release.apk`，15,214,618 bytes，SHA-256 `fb091daf2ed243c977c77d0bdb44cdc478192c1a70fbe575bdc1ff769f0d0b73`。
+- 已通过管理台发布：线上文件名 `speakeasy-4.2.2-422.apk`，`GET /api/app/latest` 返回 422 / 4.2.2。

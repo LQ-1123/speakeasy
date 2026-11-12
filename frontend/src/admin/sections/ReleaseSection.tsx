@@ -300,8 +300,11 @@ export default function ReleaseSection() {
           </Button>
         </div>
         <p className="admin-muted" style={{ fontSize: 12, marginBottom: 0 }}>
-          注意：Android 侧载<strong>不能静默安装</strong>，用户必须点一次确认。另外，
-          <strong>只改界面不需要发 APK</strong>——界面是服务器远程加载的。
+          注意：Android 侧载<strong>不能静默安装</strong>，用户必须点一次确认。
+          <br />
+          <strong>Web 浏览器</strong>的界面由服务器加载，改界面不需要发 APK；
+          <strong>手机 App 的界面打包在 APK 里</strong>，改前端后必须在这里上传新 APK，
+          旧客户端启动时通过 <code>/api/app/latest</code> 才会看到更新提示。
         </p>
       </div>
 

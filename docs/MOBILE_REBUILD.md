@@ -92,3 +92,13 @@ Protocol amendments: native startCall/state includes friendId. Call audio URLs u
 - Android：versionCode 423 / versionName 4.2.3；签名证书不变（`fac7e179…69b1`）。
 - 产物：`deliverables/SpeakEasy-v4.2.3-release.apk`，15,214,938 bytes，SHA-256 `fc0f9965a968e5552814babbbd15fad3214e9727a9fd30586f5b4f1dffadcf75`。
 - 已通过管理台发布：线上文件名 `speakeasy-4.2.3-423.apk`，`GET /api/app/latest` 返回 423 / 4.2.3。
+
+## 4.2.4 release (2026-11-12)
+
+- **真机复现「字幕永远只有两条」的真实根因**：4.2.3 只修了前端渲染（保留 `captions[]`），但手机走原生通话，`turn_id` 由原生层生成，Web 层只能从服务端的第一个事件里学到它。旧逻辑 `eventTurn && this.turnId !== eventTurn → return` 把第一轮之后的所有 `transcript` / `responding` / `audio` 全部丢弃，于是字幕恰好停在「用户第一句 + Chloe 第一句」，状态也卡在「正在聆听」。浏览器通话的 `turn_id` 是本端生成的，所以只在真机出现。
+- 修复 `callSession.ts`：新增 `adoptTurn()`，当前轮已结束（`turn_done` / `interrupted` / 错误）时允许新 turn 接管并重置播放；`interrupted` 会把该 turn 记为失效，被打断后迟到的旧 audio 不再混进字幕；原生重连/暂停时 `resetTurn()` 作废旧 turn，重连后仍能继续记字幕。
+- 回归测试：新增「原生多轮字幕」与「barge-in 迟到音频隔离」两个用例（先红后绿，修复前分别只有 2 条字幕 / 混入旧回复）；前端 152 passed，`tsc --noEmit` 通过。
+- 同时重建同源 Web（`backend/app/static/app`，相对 API origin）与 APK 内置 Web（`https://47-104-24-236.sslip.io`）。
+- Android：versionCode 424 / versionName 4.2.4；签名证书不变（`fac7e179…69b1`），4.2.3 可直接覆盖升级。
+- 产物：`deliverables/SpeakEasy-v4.2.4-release.apk`，15,215,030 bytes，SHA-256 `6af44bc747bef2d0835e72c45e9fee2ba506cc8d6eb3ae0d10953efbddb9df12`。
+

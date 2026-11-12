@@ -42,6 +42,35 @@ describe("native session ownership", () => {
     controller.handleNativeEvent({ detail: { type: "call", state: { state: "idle" } } } as never);
     expect(controller.getSnapshot()).toBeNull();
   });
+
+  it("keeps the full transcript instead of only the last two lines", () => {
+    vi.stubGlobal("window", { location: { origin: "https://fixture.test" } });
+    const controller = new CallSessionController();
+    controller.startPreview({ id: "friend1", name: "Chloe" });
+    const event = (payload: Record<string, unknown>) =>
+      ({ detail: { type: "call", event: payload } }) as never;
+
+    controller.handleNativeEvent(event({ type: "transcript", text: "partial", final: false, turn_id: "t1" }));
+    controller.handleNativeEvent(event({ type: "transcript", text: "first line", final: true, turn_id: "t1" }));
+    controller.handleNativeEvent(event({ type: "transcript", text: "second line", final: true, turn_id: "t2" }));
+    for (const [index, text] of ["reply one", "reply two", "reply three"].entries()) {
+      controller.handleNativeEvent(event({
+        type: "audio", turn_id: "t2", audio_url: `/audio/${index}.wav`,
+        audio_id: `a${index}`, text, index,
+      }));
+    }
+
+    expect(controller.getSnapshot()?.captions.map((item) => [item.role, item.text])).toEqual([
+      ["me", "I tried that little coffee shop you mentioned. It was exactly as quiet as you said."],
+      ["friend", "That's the whole point of it. What did you order?"],
+      ["me", "first line"],
+      ["me", "second line"],
+      ["friend", "reply one"],
+      ["friend", "reply two"],
+      ["friend", "reply three"],
+    ]);
+    expect(controller.getSnapshot()?.captions.some((item) => item.text === "partial")).toBe(false);
+  });
 });
 
 describe("browser authentication handshake", () => {

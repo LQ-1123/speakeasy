@@ -104,6 +104,8 @@ class LLMRuntimeConfig:
     temperature: float | None = None
     max_tokens: int | None = None
     suggestion_model: str = ""
+    #: 直接透传给 OpenAI 兼容接口的额外字段（例如 Qwen3 关闭 thinking）。
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
     # 来源标记（不持久化，仅供排查）
     source: str = field(default="env", compare=False)
@@ -114,6 +116,8 @@ class LLMRuntimeConfig:
         self.api_key = str(self.api_key or "").strip()
         self.model = str(self.model or "").strip()
         self.suggestion_model = str(self.suggestion_model or "").strip()
+        if not isinstance(self.extra_body, dict):
+            self.extra_body = {}
 
     def is_configured(self) -> bool:
         """有 base_url + model 即视为可尝试；key 是否必需取决于供应商（本地模型可空）。"""
@@ -136,6 +140,7 @@ class LLMRuntimeConfig:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "suggestion_model": self.suggestion_model,
+            "extra_body": dict(self.extra_body),
             "api_key_set": bool(self.api_key.strip()),
             "api_key_masked": self.masked_key(),
             "configured": self.is_configured(),
@@ -199,6 +204,8 @@ class LLMConfigStore:
                 for k in ("base_url", "api_key", "model", "suggestion_model"):
                     if raw.get(k):
                         setattr(cfg, k, str(raw[k]))
+                if isinstance(raw.get("extra_body"), dict):
+                    cfg.extra_body = dict(raw["extra_body"])
                 if raw.get("temperature") is not None:
                     cfg.temperature = float(raw["temperature"])
                 if raw.get("max_tokens") is not None:
@@ -234,6 +241,8 @@ class LLMConfigStore:
                 cfg.temperature = float(changes["temperature"])
             if "max_tokens" in changes and changes["max_tokens"] is not None:
                 cfg.max_tokens = int(changes["max_tokens"])
+            if "extra_body" in changes and isinstance(changes["extra_body"], dict):
+                cfg.extra_body = dict(changes["extra_body"])
             # key 单独处理：空字符串 = 不改；"_CLEAR_" = 清空
             if "api_key" in changes and changes["api_key"] is not None:
                 k = str(changes["api_key"]).strip()
@@ -296,6 +305,8 @@ def apply_to_settings(settings: Any, cfg: LLMRuntimeConfig) -> Any:
         settings.max_tokens = int(cfg.max_tokens)
     if cfg.suggestion_model:
         settings.suggestion_model = cfg.suggestion_model
+    if cfg.extra_body:
+        settings.extra_body = dict(cfg.extra_body)
     return settings
 
 
@@ -323,12 +334,15 @@ async def verify_config(cfg: LLMRuntimeConfig, *, timeout_s: float = 20.0) -> di
             max_retries=0,
         )
         try:
-            resp = await client.chat.completions.create(
-                model=cfg.model,
-                messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-                max_tokens=64,
-                temperature=0,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": cfg.model,
+                "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                "max_tokens": 64,
+                "temperature": 0,
+            }
+            if cfg.extra_body:
+                request_kwargs["extra_body"] = dict(cfg.extra_body)
+            resp = await client.chat.completions.create(**request_kwargs)
         finally:
             await client.close()
 

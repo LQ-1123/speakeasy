@@ -220,9 +220,9 @@ class LLMClient:
             "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
             "top_p": self.cfg.top_p,
         }
-        if extra:
-            _eb = dict(kwargs.get("extra_body") or {})
-            _eb.update(extra)
+        if extra or getattr(self.cfg, "extra_body", None):
+            _eb = dict(getattr(self.cfg, "extra_body", None) or {})
+            _eb.update(extra or {})
             kwargs["extra_body"] = _eb
         if self.cfg.extra_headers:
             kwargs["extra_headers"] = dict(self.cfg.extra_headers)
@@ -331,6 +331,8 @@ class LLMClient:
         }
         if timeout_s is not None:
             base_kwargs["timeout"] = timeout_s
+        if getattr(self.cfg, "extra_body", None):
+            base_kwargs["extra_body"] = dict(self.cfg.extra_body)
 
         # 先尝试 JSON mode；网关不支持时退回普通调用
         try:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -125,6 +125,8 @@ class LLMSettings(BaseModel):
     suggestion_max_tokens: int = 800
     suggestion_timeout_s: float = 20.0
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    # 供应商特有的 OpenAI 兼容开关（如 Qwen3 的 enable_thinking=False）
+    extra_body: dict[str, Any] = Field(default_factory=dict)
     # 调试/离线：不调用真实 API，用本地规则生成回复（便于无 key 演示)
     mock_when_missing_key: bool = True
 

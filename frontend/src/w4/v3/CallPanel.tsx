@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ChevronDown, ChevronUp, Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -75,6 +75,12 @@ function CallOverlay() {
   const friend = useApp((state) =>
     call?.friendId ? state.friends.find((f) => f.id === call.friendId) : undefined,
   );
+  const captionRef = useRef<HTMLDivElement>(null);
+  const captionCount = call?.captions.length ?? 0;
+  useEffect(() => {
+    const node = captionRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [captionCount]);
   if (!call || call.minimized) return null;
 
   const speaking = call.phase === "speaking" || call.phase === "responding";
@@ -121,22 +127,17 @@ function CallOverlay() {
           {PHASE_TEXT[call.phase]}
         </p>
 
-        <div className="se-call-captions" aria-live="polite">
-          {call.userText ? (
-            <p className="is-me">
-              <small>{profile.name || "我"}</small>
-              {call.userText}
-            </p>
-          ) : null}
-          {call.friendText ? (
-            <p>
-              <small>{call.friendName}</small>
-              {call.friendText}
-            </p>
-          ) : null}
-          {!call.userText && !call.friendText ? (
+        <div className="se-call-captions" ref={captionRef} aria-live="polite">
+          {call.captions.length ? (
+            call.captions.map((caption) => (
+              <p key={caption.key} className={caption.role === "me" ? "is-me" : undefined}>
+                <small>{caption.role === "me" ? profile.name || "我" : call.friendName}</small>
+                {caption.text}
+              </p>
+            ))
+          ) : (
             <p className="is-hint">开始说话，字幕会出现在这里</p>
-          ) : null}
+          )}
         </div>
         {call.error ? (
           <p role="alert" className="se-call-error">

@@ -1,4 +1,4 @@
-﻿/* ===========================================================================
+/* ===========================================================================
    Voice call: in-flow mini dock + expressive full-screen call
    =========================================================================== */
 
@@ -301,8 +301,13 @@
 .se-call-captions {
   width: min(100%, 520px);
   margin: clamp(20px, 4vh, 36px) auto 0;
-  padding: 4px;
+  padding: 4px 4px 10px;
   text-align: left;
+  max-height: min(38vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .se-call-captions p {

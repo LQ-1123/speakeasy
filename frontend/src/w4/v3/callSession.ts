@@ -4,6 +4,12 @@ import { OrderedPlayback } from "./orderedPlayback";
 import { SpeechGate } from "./speechGate";
 
 export type CallPhase = "idle" | "connecting" | "listening" | "responding" | "speaking" | "reconnecting" | "error";
+export interface CallCaption {
+  /** 去重键：同一 turn 的同一句只出现一次。 */
+  key: string;
+  role: "me" | "friend";
+  text: string;
+}
 export interface CallSnapshot {
   callId: string;
   friendId: string;
@@ -15,6 +21,8 @@ export interface CallSnapshot {
   native?: boolean;
   userText: string;
   friendText: string;
+  /** 完整通话字幕，按时间顺序保留；UI 滚动展示，不再只保留最后两条。 */
+  captions: CallCaption[];
   error?: string;
 }
 type Listener = (snapshot: CallSnapshot | null) => void;
@@ -161,6 +169,16 @@ export class CallSessionController {
     for (const listener of this.listeners) listener(this.snapshot);
   }
 
+  /** 追加一条字幕；按 key 去重，保证重连/重放事件不会无限复制。 */
+  private appendCaption(role: "me" | "friend", text: string, key: string): void {
+    const clean = text.trim();
+    if (!clean || !this.snapshot) return;
+    if (this.snapshot.captions.some((item) => item.key === key)) return;
+    this.update({
+      captions: [...this.snapshot.captions, { key, role, text: clean }],
+    });
+  }
+
   /** Preview-only snapshot. Never opens a socket or touches the call protocol. */
   startPreview(friend: { id: string; name: string }, phase: CallPhase = "listening"): void {
     this.disposed = false;
@@ -173,6 +191,10 @@ export class CallSessionController {
       muted: false,
       userText: "I tried that little coffee shop you mentioned. It was exactly as quiet as you said.",
       friendText: "That's the whole point of it. What did you order?",
+      captions: [
+        { key: "preview-user", role: "me", text: "I tried that little coffee shop you mentioned. It was exactly as quiet as you said." },
+        { key: "preview-friend", role: "friend", text: "That's the whole point of it. What did you order?" },
+      ],
       native: false,
     };
     this.update(this.snapshot);
@@ -203,7 +225,7 @@ export class CallSessionController {
     this.turnId = "";
     this.invalidTurns.clear();
     this.speechGate.reset();
-    this.snapshot = { callId: "", friendId: friend.id, friendName: friend.name, phase: "connecting", minimized: false, muted: false, userText: "", friendText: "" };
+    this.snapshot = { callId: "", friendId: friend.id, friendName: friend.name, phase: "connecting", minimized: false, muted: false, userText: "", friendText: "", captions: [] };
     this.update(this.snapshot);
     try {
       const requestId = crypto.randomUUID();
@@ -340,7 +362,16 @@ export class CallSessionController {
     if (eventTurn && (this.invalidTurns.has(eventTurn) || this.turnId && this.turnId !== eventTurn)) return;
     switch (event.type) {
       case "ready": this.update({ phase: "listening" }); break;
-      case "transcript": this.update({ userText: String(event.text ?? "") }); break;
+      case "transcript": {
+        const text = String(event.text ?? "");
+        this.update({ userText: text });
+        /* final=false 是流式识别的中间结果：只更新当前气泡，不写进完整字幕，
+           否则同一句话会被切成很多碎片。 */
+        if (event.final !== false) {
+          this.appendCaption("me", text, `${eventTurn || this.turnId || "turn"}:user`);
+        }
+        break;
+      }
       case "responding": {
         const turnId = String(event.turn_id ?? "");
         if (turnId !== this.turnId) { this.audio?.stopPlayback(); this.playback?.invalidate(); }
@@ -358,7 +389,9 @@ export class CallSessionController {
         const index = Number(event.index ?? 0);
         const audioId = String(event.audio_id ?? "");
         if (url && this.turnId) {
-          this.update({ phase: "speaking", friendText: String(event.text ?? "") });
+          const text = String(event.text ?? "");
+          this.update({ phase: "speaking", friendText: text });
+          this.appendCaption("friend", text, `${eventTurn || this.turnId}:friend:${index}`);
           this.playback?.enqueue(index, { url, audioId, turnId: this.turnId });
         }
         break;
@@ -459,7 +492,7 @@ export class CallSessionController {
       const nativePhase = String(state.state ?? state.phase ?? "");
       if (nativePhase === "idle" || nativePhase === "ended") { this.snapshot = null; this.update(null); return; }
       const callId = String(state.callId ?? state.call_id ?? "");
-      if (!this.snapshot && callId) this.snapshot = { callId, friendId: String(state.friendId ?? state.friend_id ?? ""), friendName: String(state.friendName ?? state.friend_name ?? ""), phase: "listening", minimized: true, muted: Boolean(state.muted), native: true, speaker: Boolean(state.speaker), userText: "", friendText: "" };
+      if (!this.snapshot && callId) this.snapshot = { callId, friendId: String(state.friendId ?? state.friend_id ?? ""), friendName: String(state.friendName ?? state.friend_name ?? ""), phase: "listening", minimized: true, muted: Boolean(state.muted), native: true, speaker: Boolean(state.speaker), userText: "", friendText: "", captions: [] };
       const phase: CallPhase = nativePhase === "active" || nativePhase === "connected" ? this.snapshot?.phase === "connecting" || this.snapshot?.phase === "reconnecting" ? "listening" : this.snapshot?.phase ?? "listening" : nativePhase === "connecting" || nativePhase === "reconnecting" || nativePhase === "error" ? nativePhase : this.snapshot?.phase ?? "listening";
       if (this.snapshot) this.update({ phase, muted: Boolean(state.muted), speaker: state.speaker === undefined ? this.snapshot.speaker : Boolean(state.speaker), error: state.message ? String(state.message) : undefined });
     }

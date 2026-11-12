@@ -83,3 +83,12 @@ Protocol amendments: native startCall/state includes friendId. Call audio URLs u
 - Android：versionCode 422 / versionName 4.2.2；签名证书不变（`fac7e179…69b1`）。
 - 产物：`deliverables/SpeakEasy-v4.2.2-release.apk`，15,214,618 bytes，SHA-256 `fb091daf2ed243c977c77d0bdb44cdc478192c1a70fbe575bdc1ff769f0d0b73`。
 - 已通过管理台发布：线上文件名 `speakeasy-4.2.2-422.apk`，`GET /api/app/latest` 返回 422 / 4.2.2。
+
+## 4.2.3 release (2026-11-12)
+
+- 修复通话字幕「永远只显示两条」：`CallSnapshot` 新增 `captions[]`，用户 final transcript 与角色逐句 audio 全部追加；中间识别结果不写入字幕；按 turn/index 去重，重连/重放不重复。
+- 字幕区域限制高度并自动滚到底部，可回看整通电话历史；不再只保留最后一条用户和最后一条角色。
+- 前端测试 150 passed（新增完整字幕回归用例）；后端 LLM 配置新增 `extra_body` 透传，生产已切到 SiliconFlow `Qwen/Qwen3-8B`（`enable_thinking=false`）。
+- Android：versionCode 423 / versionName 4.2.3；签名证书不变（`fac7e179…69b1`）。
+- 产物：`deliverables/SpeakEasy-v4.2.3-release.apk`，15,214,938 bytes，SHA-256 `fc0f9965a968e5552814babbbd15fad3214e9727a9fd30586f5b4f1dffadcf75`。
+- 已通过管理台发布：线上文件名 `speakeasy-4.2.3-423.apk`，`GET /api/app/latest` 返回 423 / 4.2.3。

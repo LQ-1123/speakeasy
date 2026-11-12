@@ -1,4 +1,4 @@
-﻿"""Persona 音色的**唯一来源**：一个角色 = 一个声音。
+"""Persona 音色的**唯一来源**：一个角色 = 一个声音。
 
 为什么需要这个模块
 ------------------
@@ -289,6 +289,86 @@ def _estimate_duration_ms(data: bytes, ext: str) -> int:
     return max(300, int(len(data) / (24_000 * 2) * 1000))
 
 
+# --------------------------------------------------------------------------- #
+# Fish 合成结果磁盘缓存
+# --------------------------------------------------------------------------- #
+#: 同一角色 + 同一段文字 + 同一模型只合成一次。朗读按钮、信息流、聊天
+#: 重复播放同一段时直接命中磁盘，避免每次都等 Fish 3–8 秒。
+_TTS_CACHE_DIR = ".tts_cache"
+_TTS_CACHE_MAX_FILES = 1200
+
+
+def _tts_cache_enabled() -> bool:
+    return str(os.getenv("SE_TTS_CACHE", "1")).strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _tts_cache_key(
+    binding: VoiceBinding,
+    cfg: Any,
+    text: str,
+    ext: str,
+    emotion_tag: str,
+) -> str:
+    payload = "|".join(
+        (
+            "tts-cache-v1",
+            binding.token,
+            binding.ref if binding.fish_enabled else "",
+            str(getattr(cfg, "fish_model", "") or ""),
+            str(getattr(cfg, "fish_base_url", "") or ""),
+            ext,
+            emotion_tag,
+            text,
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:40]
+
+
+def _tts_cache_path(out_dir: str, key: str, ext: str) -> str:
+    return os.path.join(out_dir, _TTS_CACHE_DIR, f"{key}.{ext}")
+
+
+def _tts_cache_read(out_dir: str, key: str, ext: str) -> bytes | None:
+    if not out_dir or not _tts_cache_enabled():
+        return None
+    path = _tts_cache_path(out_dir, key, ext)
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+        return data if len(data) > 512 else None
+    except OSError:
+        return None
+
+
+def _tts_cache_write(out_dir: str, key: str, ext: str, data: bytes) -> None:
+    if not out_dir or not data or not _tts_cache_enabled():
+        return
+    cache_dir = os.path.join(out_dir, _TTS_CACHE_DIR)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        path = _tts_cache_path(out_dir, key, ext)
+        tmp = f"{path}.{os.getpid()}.{time.time_ns()}.tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+        # 简单上限：超过上限时按 mtime 清掉最旧的 1/4，避免磁盘无限增长。
+        try:
+            names = [n for n in os.listdir(cache_dir) if not n.endswith(".tmp")]
+            if len(names) > _TTS_CACHE_MAX_FILES:
+                names.sort(key=lambda n: os.path.getmtime(os.path.join(cache_dir, n)))
+                for name in names[: max(1, len(names) // 4)]:
+                    os.remove(os.path.join(cache_dir, name))
+        except OSError:
+            pass
+    except OSError as exc:  # noqa: BLE001 - 缓存失败绝不影响合成
+        log.debug("TTS 缓存写入失败: %s", exc)
+
+
 async def synthesize(
     persona_or_friend: dict,
     text: str,
@@ -312,12 +392,21 @@ async def synthesize(
     if binding is None:
         binding = binding_for_persona(persona_or_friend, cfg)
 
+    ext = (str(getattr(cfg, "fish_format", "") or audio_format) or "mp3").lower()
+    cache_key = ""
+    if binding.fish_enabled and out_dir:
+        cache_key = _tts_cache_key(binding, cfg, _tagged(text, emotion_tag), ext, emotion_tag)
+        cached = _tts_cache_read(out_dir, cache_key, ext)
+        if cached is not None:
+            return SynthResult(
+                cached, "fish", binding.token, ext, _estimate_duration_ms(cached, ext)
+            )
+
     # 1) Fish
     if binding.fish_enabled and fish_usable(cfg):
         try:
             from app.voice import fish_tts  # noqa: PLC0415
 
-            ext = (str(getattr(cfg, "fish_format", "") or audio_format) or "mp3").lower()
             data = await fish_tts.synthesize(
                 _tagged(text, emotion_tag),
                 api_key=str(getattr(cfg, "fish_api_key", "") or ""),
@@ -329,6 +418,8 @@ async def synthesize(
             )
             if data:
                 mark_fish_success()
+                if cache_key:
+                    _tts_cache_write(out_dir, cache_key, ext, data)
                 return SynthResult(data, "fish", binding.token, ext, _estimate_duration_ms(data, ext))
         except Exception as exc:  # noqa: BLE001 - Fish 不可用是常态，统一降级
             mark_fish_failure(exc)

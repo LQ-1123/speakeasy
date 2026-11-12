@@ -14,6 +14,8 @@ import pytest
 
 # 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
 os.environ.setdefault("SE_TTS_FISH", "0")
+# 测试保持同步语义：好友语音在回复里立即可用；生产默认先落文字、后台补音频
+os.environ.setdefault("SE_TTS_DEFER_AUDIO", "0")
 
 # 测试离线：不抓开放图库（Wikimedia/Openverse 在无网环境下会一直等超时，
 # 曾导致 test_v3_world 整体挂起）。纯文字生活动态仍会生成，测试语义不受影响。

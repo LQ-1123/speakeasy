@@ -370,7 +370,7 @@ def test_add_event_is_idempotent(world):
     assert again_id == event_id
     assert _count(world, "SELECT COUNT(*) AS n FROM persona_events") == 1
 
-    stored = le.events_for_persona(world, "p_designer")
+    stored = le.events_for_persona(world, "p_designer", since_days=0)
     assert len(stored) == 1
     assert stored[0]["title"] == event["title"]
     assert stored[0]["id"] == event_id

@@ -497,6 +497,20 @@ def _tag_emotion(text: str, emotion: str) -> str:
     return f"{tag} {body}"
 
 
+def _tts_defer_audio_enabled() -> bool:
+    """是否把好友语音合成放到后台，先落文字消息再补音频。
+
+    线上默认开启：Fish 合成 3-8 秒，阻塞回复会让消息迟迟不出现。
+    测试环境在 ``backend/tests/conftest.py`` 里显式关闭，保持同步语义。
+    """
+    return os.getenv("SE_TTS_DEFER_AUDIO", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
 class ChatService:
     def __init__(
         self,
@@ -1759,7 +1773,72 @@ class ChatService:
     async def store_friend_voice(
         self, friend: dict, text: str, tts_text: str | None = None
     ) -> dict:
+        """保存好友消息；线上默认先落文字，再把 Fish/Edge 音频补到同一条消息。
+
+        这不是「异步返回音频」：客户端拿到消息后立即显示文字/气泡，
+        随后前端短轮询一次把 ``audio_url`` 取回来。这样 Fish 的 3-8 秒
+        不再阻塞消息出现。
+        """
         fid = friend["id"]
+        if _tts_defer_audio_enabled():
+            msg = await asyncio.to_thread(
+                self.db.add_message,
+                fid,
+                "friend",
+                text,
+                msg_type="text",
+                audio_path=None,
+                duration_ms=0,
+                is_read=False,
+            )
+            await asyncio.to_thread(self.db.touch_friend, fid)
+            self.spawn_bg(self._deferred_voice_worker(msg["id"], friend, text, tts_text))
+            return msg
+
+        audio_filename, duration_ms = await self._synth_friend_audio(friend, text, tts_text)
+        msg = await asyncio.to_thread(
+            self.db.add_message,
+            fid,
+            "friend",
+            text,
+            msg_type="voice" if audio_filename else "text",
+            audio_path=audio_filename,
+            duration_ms=int(duration_ms or 0),
+            is_read=False,
+        )
+        await asyncio.to_thread(self.db.touch_friend, fid)
+        return msg
+
+    async def _deferred_voice_worker(
+        self,
+        message_id: str,
+        friend: dict,
+        text: str,
+        tts_text: str | None,
+    ) -> None:
+        try:
+            audio_filename, duration_ms = await self._synth_friend_audio(
+                friend, text, tts_text
+            )
+            if not audio_filename:
+                return
+            await asyncio.to_thread(
+                self.db.update_message,
+                message_id,
+                msg_type="voice",
+                audio_path=audio_filename,
+                duration_ms=int(duration_ms or 0),
+            )
+            log.debug("后台语音补全 message=%s audio=%s", message_id, audio_filename)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 音频失败不能影响已显示的消息
+            log.warning("后台语音补全失败 message=%s: %s: %s", message_id, type(exc).__name__, exc)
+
+    async def _synth_friend_audio(
+        self, friend: dict, text: str, tts_text: str | None = None
+    ) -> tuple[str | None, int]:
+        """合成一条好友语音，返回 (音频文件名, 时长毫秒)；失败时返回 (None, 0)。"""
         audio_filename: str | None = None
         duration_ms = 0
         try:
@@ -1829,18 +1908,7 @@ class ChatService:
                 log.warning("tone 兜底也失败（无音频）: %s", exc2)
                 audio_filename = None
 
-        msg = await asyncio.to_thread(
-            self.db.add_message,
-            fid,
-            "friend",
-            text,
-            msg_type="voice" if audio_filename else "text",
-            audio_path=audio_filename,
-            duration_ms=int(duration_ms or 0),
-            is_read=False,
-        )
-        await asyncio.to_thread(self.db.touch_friend, fid)
-        return msg
+        return audio_filename, int(duration_ms or 0)
 
     # ------------------------------------------------------------------ #
     # 裂变推荐

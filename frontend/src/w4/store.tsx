@@ -316,6 +316,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* 同一好友 600ms 内重复提交同一句（双击/回车连发）直接忽略 */
   const lastSend = useRef<Record<string, { text: string; at: number }>>({});
 
+  /* 生产后端会先落文字、后台补 Fish 语音：短轮询把 audio_url 取回来，
+     用户先看到文字，不必等 3–8 秒合成；最多轮询 6 次（约 10 秒）。 */
+  const scheduleAudioRefresh = useCallback((friendId: string, fresh: Message[]) => {
+    const lastFriend = [...fresh].reverse().find((m) => m.from === "friend");
+    if (!lastFriend || lastFriend.audio) return;
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      void apiFetchMessages(friendId).then((more) => {
+        if (!more || !more.length) return;
+        setMessages((list) => mergeMessages(list, more));
+        const latest = [...more].reverse().find((m) => m.from === "friend");
+        if ((!latest || !latest.audio) && attempts < 6) {
+          window.setTimeout(tick, 1500);
+        }
+      });
+    };
+    window.setTimeout(tick, 1000);
+  }, []);
+
   const postText = useCallback(
     async (friendId: string, text: string, clientId: string, tempId: string) => {
       if (inFlightSends.current.has(clientId)) return;
@@ -333,9 +353,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       setMessages((list) => mergeMessages(list, fresh, [tempId]));
+      scheduleAudioRefresh(friendId, fresh);
       setFriends((list) => list.map((friend) => friend.id === friendId ? { ...friend, unread: 0 } : friend));
     },
-    [showToast],
+    [showToast, scheduleAudioRefresh],
   );
 
   const sendText = useCallback((friendId: string, text: string) => {
@@ -420,9 +441,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       setMessages((list) => mergeMessages(list, merged, [tempId]));
+      scheduleAudioRefresh(friendId, merged);
 
     },
-    [showToast],
+    [showToast, scheduleAudioRefresh],
   );
 
   const sendImage = useCallback(

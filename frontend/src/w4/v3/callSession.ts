@@ -356,10 +356,45 @@ export class CallSessionController {
     }
   }
 
+  /**
+   * 采纳一条事件所属的 turn。
+   *
+   * 浏览器里 turn_id 由本端生成，服务端事件必然属于当前 turn；但原生通话由原生层
+   * 生成 turn_id，Web 层只能从服务端的第一个事件里学到它。旧实现只要「事件 turn
+   * 与已知 turn 不同」就直接丢弃，于是第一轮之后的所有 transcript / audio 全被滤掉，
+   * 字幕永远停在两条。当前轮已经结束（turn_done / interrupted / 错误）时，新 turn
+   * 应当接管；当前轮仍在进行时，其它 turn 的事件视为迟到重放。
+   */
+  private adoptTurn(eventTurn: string): boolean {
+    if (!eventTurn) return true;
+    if (this.invalidTurns.has(eventTurn)) return false;
+    if (!this.turnId || eventTurn === this.turnId) return true;
+    if (!this.turnFinished) return false;
+    this.audio?.stopPlayback();
+    this.playback?.invalidate();
+    this.turnId = eventTurn;
+    this.turnFinished = false;
+    this.awaitingReply = false;
+    return true;
+  }
+
+  /** 通话中断/重连时作废当前 turn，允许下一轮重新接管字幕。 */
+  private resetTurn(): void {
+    if (this.turnId) this.invalidTurns.add(this.turnId);
+    this.turnId = "";
+    this.turnFinished = true;
+    this.awaitingReply = false;
+    this.bargePreRoll = [];
+    this.bargeSamples = 0;
+    this.speechGate.reset();
+    this.audio?.stopPlayback();
+    this.playback?.invalidate();
+  }
+
   private onServerEvent(event: ServerEvent): void {
     if (typeof event.sequence === "number") this.sequence = Math.max(this.sequence, event.sequence);
     const eventTurn = typeof event.turn_id === "string" ? event.turn_id : "";
-    if (eventTurn && (this.invalidTurns.has(eventTurn) || this.turnId && this.turnId !== eventTurn)) return;
+    if (!this.adoptTurn(eventTurn)) return;
     switch (event.type) {
       case "ready": this.update({ phase: "listening" }); break;
       case "transcript": {
@@ -397,7 +432,17 @@ export class CallSessionController {
         break;
       }
       case "turn_done": this.turnFinished = true; this.awaitingReply = false; if (!this.playback?.isBusy) this.update({ phase: "listening" }); break;
-      case "interrupted": this.audio?.stopPlayback(); this.playback?.invalidate(); this.awaitingReply = false; this.update({ phase: "listening" }); break;
+      case "interrupted": {
+        /* 被打断的 turn 之后可能还有在途 audio；标记作废，避免混进字幕，
+            同时允许下一轮 turn 接管。 */
+        if (eventTurn) this.invalidTurns.add(eventTurn);
+        this.audio?.stopPlayback();
+        this.playback?.invalidate();
+        this.awaitingReply = false;
+        this.turnFinished = true;
+        this.update({ phase: "listening" });
+        break;
+      }
       case "error": {
         if (this.turnId) this.invalidTurns.add(this.turnId);
         this.turnId = "";
@@ -495,6 +540,8 @@ export class CallSessionController {
       if (!this.snapshot && callId) this.snapshot = { callId, friendId: String(state.friendId ?? state.friend_id ?? ""), friendName: String(state.friendName ?? state.friend_name ?? ""), phase: "listening", minimized: true, muted: Boolean(state.muted), native: true, speaker: Boolean(state.speaker), userText: "", friendText: "", captions: [] };
       const phase: CallPhase = nativePhase === "active" || nativePhase === "connected" ? this.snapshot?.phase === "connecting" || this.snapshot?.phase === "reconnecting" ? "listening" : this.snapshot?.phase ?? "listening" : nativePhase === "connecting" || nativePhase === "reconnecting" || nativePhase === "error" ? nativePhase : this.snapshot?.phase ?? "listening";
       if (this.snapshot) this.update({ phase, muted: Boolean(state.muted), speaker: state.speaker === undefined ? this.snapshot.speaker : Boolean(state.speaker), error: state.message ? String(state.message) : undefined });
+      /* 原生重连/被系统打断后，旧 turn 已失效：清掉它，重连后的新 turn 才能接管字幕。 */
+      if (nativePhase === "reconnecting" || nativePhase === "paused") this.resetTurn();
     }
     if (detail.type === "call" && detail.event) this.onServerEvent(detail.event);
   }

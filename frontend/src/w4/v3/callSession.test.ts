@@ -43,6 +43,59 @@ describe("native session ownership", () => {
     expect(controller.getSnapshot()).toBeNull();
   });
 
+  it("keeps captioning every turn of a native call, where the server owns turn ids", () => {
+    vi.stubGlobal("window", { location: { origin: "https://fixture.test" } });
+    const controller = new CallSessionController();
+    const native = (detail: Record<string, unknown>) => controller.handleNativeEvent({ detail: { type: "call", ...detail } } as never);
+    native({ state: { state: "connected", callId: "call-native", friendId: "friend1", friendName: "Chloe", muted: false } });
+    const event = (payload: Record<string, unknown>) =>
+      native({ event: payload, state: { state: "connected", callId: "call-native" } });
+
+    /* 原生通话的真实事件顺序：字幕 turn_id 由原生/服务端生成，Web 层从第一个事件里学到它。 */
+    for (const turn of ["t1", "t2", "t3"]) {
+      event({ type: "transcript", turn_id: turn, text: `user ${turn}`, final: true });
+      event({ type: "responding", turn_id: turn });
+      event({ type: "audio", turn_id: turn, audio_url: `/audio/${turn}.mp3`, audio_id: `a-${turn}`, text: `friend ${turn}`, index: 0 });
+      event({ type: "turn_done", turn_id: turn });
+    }
+
+    expect(controller.getSnapshot()?.captions.map((item) => [item.role, item.text])).toEqual([
+      ["me", "user t1"],
+      ["friend", "friend t1"],
+      ["me", "user t2"],
+      ["friend", "friend t2"],
+      ["me", "user t3"],
+      ["friend", "friend t3"],
+    ]);
+    expect(controller.getSnapshot()?.phase).toBe("listening");
+  });
+
+  it("drops a barge-in turn's late audio and still captions the next turn", () => {
+    vi.stubGlobal("window", { location: { origin: "https://fixture.test" } });
+    const controller = new CallSessionController();
+    const native = (detail: Record<string, unknown>) => controller.handleNativeEvent({ detail: { type: "call", ...detail } } as never);
+    native({ state: { state: "connected", callId: "call-barge", friendName: "Chloe" } });
+    const event = (payload: Record<string, unknown>) => native({ event: payload, state: { state: "connected", callId: "call-barge" } });
+
+    event({ type: "transcript", turn_id: "t1", text: "first", final: true });
+    event({ type: "responding", turn_id: "t1" });
+    event({ type: "audio", turn_id: "t1", audio_url: "/a1.mp3", audio_id: "a1", text: "reply one", index: 0 });
+    event({ type: "interrupted", turn_id: "t1" });
+    /* 打断后在途的旧 turn audio 不能混进字幕。 */
+    event({ type: "audio", turn_id: "t1", audio_url: "/a1b.mp3", audio_id: "a1b", text: "late old reply", index: 1 });
+    event({ type: "transcript", turn_id: "t2", text: "second", final: true });
+    event({ type: "responding", turn_id: "t2" });
+    event({ type: "audio", turn_id: "t2", audio_url: "/a2.mp3", audio_id: "a2", text: "reply two", index: 0 });
+    event({ type: "turn_done", turn_id: "t2" });
+
+    expect(controller.getSnapshot()?.captions.map((item) => item.text)).toEqual([
+      "first",
+      "reply one",
+      "second",
+      "reply two",
+    ]);
+  });
+
   it("keeps the full transcript instead of only the last two lines", () => {
     vi.stubGlobal("window", { location: { origin: "https://fixture.test" } });
     const controller = new CallSessionController();

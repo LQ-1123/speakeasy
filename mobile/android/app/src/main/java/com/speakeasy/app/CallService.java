@@ -87,7 +87,7 @@ public final class CallService extends Service {
             callId = config.getString("callId"); origin = config.getString("apiOrigin"); socketPath = config.getString("wsPath"); friendName = config.optString("friendName", "Sonder"); friendId = config.optString("friendId");
             if (!origin.equals(BuildConfig.API_BASE)) throw new SecurityException("Unconfigured API origin");
             NativePolicy.socketUrl(origin, socketPath, callId);
-            identity = new NativeIdentityStore(this).read();
+            identity = new NativeIdentityStore(this).callIdentity();
             if (identity == null) throw new SecurityException("Saved identity unavailable");
             startNotification();
             running = true; stopping = false; muted = false; interruptedBySystem = false; generation++; connectionGeneration++;
@@ -189,8 +189,13 @@ public final class CallService extends Service {
     }
 
     private Request.Builder auth(String url) throws Exception {
-        JSONObject saved = new NativeIdentityStore(this).read();
+        JSONObject saved = new NativeIdentityStore(this).callIdentity();
         if (saved != null && saved.optString("user_id").equals(identity.optString("user_id"))) identity = saved;
+        if (identity.has("session_token")) {
+            if (saved == null || !saved.optString("user_id").equals(identity.optString("user_id")))
+                throw new SecurityException("Account session expired");
+            return new Request.Builder().url(url).header("X-Session-Token", identity.getString("session_token"));
+        }
         return new Request.Builder().url(url).header("X-User-Id", identity.getString("user_id")).header("X-User-Token", identity.getString("token"));
     }
 

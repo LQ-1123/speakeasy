@@ -102,3 +102,16 @@ Protocol amendments: native startCall/state includes friendId. Call audio URLs u
 - Android：versionCode 424 / versionName 4.2.4；签名证书不变（`fac7e179…69b1`），4.2.3 可直接覆盖升级。
 - 产物：`deliverables/SpeakEasy-v4.2.4-release.apk`，15,215,030 bytes，SHA-256 `6af44bc747bef2d0835e72c45e9fee2ba506cc8d6eb3ae0d10953efbddb9df12`。
 
+## 4.3.0 release（邮箱验证码账号，2026-11-12）
+
+- 账号体系切换为**邮箱验证码登录 + 邀请码内测**：`v3_accounts.email` 为 `UNIQUE COLLATE NOCASE` 主键；同一邮箱始终映射同一 `user_id`（第二次登录 `created=false`、不重复扣邀请），新账号不继承旧设备身份；会话 30 天、Web HttpOnly Cookie + CSRF、Android Keystore 加密会话；旧设备身份/密码登录/旧全局接口在 `SE_EMAIL_CODE_AUTH=1` 下关闭。真实邮件验证：同一邮箱两轮真实验证码（SMTP 发送 + IMAP 读码）得到 `accounts=1 / sessions=2 / invite_used=1`。
+- 配置加载根因修复：[config.py](backend/app/config.py) 启动时 `load_dotenv(PROJECT_ROOT/.env, override=False)`，否则 `SE_EMAIL_CODE_* / SE_SMTP_* / SE_MEDIA_SECRET` 对 `os.getenv` 不可见（验证码请求会 503）；`backend/tests/conftest.py` 设 `SE_LOAD_DOTENV=0` 隔离测试（否则本机 `.env` 会污染 40 个既有用例）。
+- 发布脚本适配登录模式：[deploy/deploy_v3.sh](deploy/deploy_v3.sh) 关键链路自检接受业务接口 401/403，并新增 `/api/v3/auth/config` 200 检查，避免邮箱模式下误判回滚。
+- 生产部署（2026-11-12 21:57，47.104.24.236）：代码 + 同源 Web 静态发布，systemd 服务重启；`/api/v3/health` 200、`/api/v3/auth/config` 返回 `{email_code_auth:true,invite_required:true}`；旧接口 `/api/conversations` 410、`/api/v3/auth/register` 403；数据库迁移前后计数一致（21 身份 / 28 人物 / 142 帖子 / 31 消息），备份 `data/_backup/deploy-20261112-215738`。
+- 生产 `.env` 已配置验证码密钥、媒体密钥、QQ SMTP（smtp.qq.com:465）；真实发信成功（`auth_email_code_request outcome=success`）。内测邀请码已通过管理台创建；有效邀请码不提交到源码仓库。
+- Android：versionCode 430 / versionName 4.3.0；签名证书不变（`fac7e179…69b1`），4.2.4 可直接覆盖升级。
+- 产物：`deliverables/SpeakEasy-v4.3.0-release.apk`，15,219,995 bytes，SHA-256 `33badede6262005af70850ab32faa7df73e532aabe92f95e26e6008f24070464`。
+- 已通过管理台发布：线上文件名 `speakeasy-4.3.0-430.apk`，`GET /api/app/latest` 返回 430 / 4.3.0（公开 HTTPS Range 下载 206 验证通过）。
+- 未执行：旧身份归档脚本（`scripts/archive_legacy_users.py --apply`）与真机安装验收；旧数据保留但新账号不继承，管理台可用「历史身份」查看。
+
+

@@ -92,6 +92,9 @@ async def get_media_access(
     db = _services_db(request)
     ensure_media_schema(db)
     owner = owner_of(db, kind_value, name)
+    from app.v3.auth_policy import email_code_auth_enabled
+    if owner is None and email_code_auth_enabled():
+        raise HTTPException(status_code=403, detail="媒体归属未登记")
     if owner is not None and owner != user_id:
         raise HTTPException(status_code=403, detail="无权访问该媒体资产")
 

@@ -117,6 +117,27 @@ def _headers(user: dict) -> dict[str, str]:
     return {"X-User-Id": user["user_id"], "X-User-Token": user["token"]}
 
 
+def test_email_mode_signed_audio_bypasses_header_gate_but_not_archived_owner(env, monkeypatch):
+    from app.v3.account_archive import archive_users
+    db, http, uid = env.db, env.http, env.a["user_id"]
+    with db._lock, db.conn:
+        db.conn.execute("INSERT INTO v3_accounts(user_id,email,password_hash,email_verified_at,created_at,updated_at) VALUES (?,?,'','verified','','')", (uid, "a@example.com"))
+    monkeypatch.setenv("SE_EMAIL_CODE_AUTH", "1")
+    monkeypatch.setenv("SE_REQUIRE_AUTH", "1")
+    path = Path(env.services.audio.audio_dir) / "signed.wav"
+    path.write_bytes(b"RIFFtest")
+    register_asset(db, uid, "audio", path.name)
+    token = issue_media_token(db, uid, "audio", path.name)
+    response = http.get(f"/api/v2/audio/{path.name}", params={"t": token})
+    assert response.status_code == 200, response.text
+    http.cookies.set("sonder_session", "stale-webview-cookie")
+    assert http.get(f"/api/v2/audio/{path.name}", params={"t": token}).status_code == 200
+    http.cookies.clear()
+    assert http.get(f"/api/v2/audio/{path.name}").status_code in (401, 403)
+    archive_users(db, [uid], migration_id="test")
+    assert http.get(f"/api/v2/audio/{path.name}", params={"t":token}).status_code in (401, 403)
+
+
 # --------------------------------------------------------------------------- #
 # fixture：真实 DB + v2 路由 + 媒体令牌路由，离线引擎
 # --------------------------------------------------------------------------- #

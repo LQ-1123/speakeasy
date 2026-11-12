@@ -162,6 +162,18 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def legacy_account_gate(request, call_next):
+        from app.v3.auth_policy import email_code_auth_enabled
+        from fastapi.responses import JSONResponse
+        path = request.url.path
+        if email_code_auth_enabled() and (
+            path == "/api/conversations" or path.startswith("/api/conversations/")
+            or path.startswith("/api/uploads/") or path in ("/api/echo", "/api/suggest")
+        ):
+            return JSONResponse({"detail": "旧版接口已停用，请更新客户端"}, status_code=410)
+        return await call_next(request)
+
     app.include_router(http_api.router)
     app.include_router(llm_config_api.router)
     app.include_router(voice_api.router)

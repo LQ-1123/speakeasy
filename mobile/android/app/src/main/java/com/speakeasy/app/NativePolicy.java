@@ -1,6 +1,10 @@
 package com.speakeasy.app;
 
 import java.net.URI;
+import java.text.ParsePosition;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 final class NativePolicy {
     private NativePolicy() { }
@@ -20,6 +24,15 @@ final class NativePolicy {
     }
     private static int port(URI uri) { return uri.getPort() == -1 ? 443 : uri.getPort(); }
     static boolean backHandled(String result) { return "true".equals(result); }
+
+    static boolean validSession(String userId, String token, String expiresAt, long now) {
+        if (userId == null || userId.isEmpty() || token == null || token.isEmpty() || expiresAt == null) return false;
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US);
+        format.setLenient(false);
+        ParsePosition position = new ParsePosition(0);
+        Date expiry = format.parse(expiresAt, position);
+        return expiry != null && position.getIndex() == expiresAt.length() && expiry.getTime() > now;
+    }
 
     /**
      * Internal hash routes only. Mirrors the frontend router's top-level names so

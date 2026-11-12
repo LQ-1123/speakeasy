@@ -20,7 +20,7 @@ interface ServiceStatus {
 }
 
 interface OverviewPayload {
-  users: { total: number; real: number; empty: number; registered: number; active_today: number };
+  users: { total: number; formal: number; history: number; sessions: number; devices: number; active_today: number };
   personas: { total: number; active: number };
   today: { events: number; posts_pending: number; posts_published: number };
   services: Record<string, ServiceStatus>;
@@ -121,23 +121,18 @@ export default function OverviewSection() {
       </div>
 
       <div className="admin-stat-grid">
-        {/* 「用户」这一格必须诚实。v3_users 的行数 != 人数：客户端在空白
-            localStorage 里启动（无痕窗口 / 重装 / 清数据）就会新造一个身份。
-            所以主数字用"有使用痕迹的"，原始行数降级为副标题。 */}
         <Stat
-          label="真实用户"
-          value={data.users.real}
-          hint={
-            data.users.empty > 0
-              ? `共 ${data.users.total} 条注册记录，${data.users.empty} 条无使用痕迹`
-              : `共 ${data.users.total} 条注册记录`
-          }
+          label="正式账号"
+          value={data.users.formal}
+          hint="已验证邮箱；同账号多设备只计一次"
         />
         <Stat
-          label="注册设备"
-          value={data.users.registered}
-          hint="装过 App 并授权通知"
+          label="推送设备"
+          value={data.users.devices}
+          hint="当前启用的设备绑定"
         />
+        <Stat label="有效会话" value={data.users.sessions} />
+        <Stat label="历史身份" value={data.users.history} hint="旧设备身份及归档账号" />
         <Stat label="今日活跃" value={data.users.active_today} />
         <Stat label="AI 角色" value={data.personas.total} hint={`其中 ${data.personas.active} 个在用`} />
         <Stat label="今日事件" value={data.today.events} />

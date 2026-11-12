@@ -3,6 +3,7 @@ import hashlib
 import json
 
 from app.v3.identity import set_current_user, reset_current_user
+from app.v3.account_archive import user_is_available
 
 
 def schedule_followups(services, queue):
@@ -12,6 +13,8 @@ def schedule_followups(services, queue):
             "SELECT * FROM friends WHERE status='active' AND open_loops<>'[]'")]
     scheduled=0
     for friend in friends:
+        if not user_is_available(db, friend['owner_user_id']):
+            continue
         due=services.memory.due_open_loops(friend)
         if not due: continue
         loop=due[0]
@@ -27,6 +30,8 @@ def schedule_followups(services, queue):
 
 
 async def deliver_followup(services,payload):
+    if not user_is_available(services.db, payload['user_id']):
+        return
     token=set_current_user(payload['user_id'])
     try:
         friend=services.db.get_friend(payload['friend_id'],owner_user_id=payload['user_id'])
@@ -36,6 +41,8 @@ async def deliver_followup(services,payload):
                    x.get('follow_up_after')==payload['follow_up_after']),None)
         if not loop:return
         text=await services.memory.followup_message(friend,loop)
+        if not user_is_available(services.db, payload['user_id']):
+            return
         if not text.strip(): raise RuntimeError('empty-followup')
         await services.chat.store_friend_voice(friend,text)
         services.memory.mark_open_loop_done(friend['id'],loop['index'])

@@ -102,10 +102,21 @@ for i in $(seq 1 24); do
 done
 
 log "7/8 关键链路自检（无模型调用）"
-curl -fsS "http://127.0.0.1:8000/" | grep -q "<!DOCTYPE html" || rollback
-curl -fsS "http://127.0.0.1:8000/api/v3/feed?limit=1" >/dev/null || rollback
-curl -fsS "http://127.0.0.1:8000/api/v3/personas?limit=1" >/dev/null || rollback
-echo "   首页 / feed / persona 均 200"
+# 邮箱验证码模式下业务接口会返回 401/403（需要登录），这属正常；
+# 这里只要求「路由存在且按预期响应」，不把 401/403 当失败。
+status() { curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$1"; }
+[[ "$(status /)" == "200" ]] || { echo "   首页非 200"; rollback; }
+case "$(status '/api/v3/auth/config')" in
+  200) echo "   /api/v3/auth/config -> 200" ;;
+  *) echo "   /api/v3/auth/config 异常"; rollback ;;
+esac
+for path in "/api/v3/feed?limit=1" "/api/v3/personas?limit=1"; do
+  code="$(status "$path")"
+  case "$code" in
+    200|401|403) echo "   $path -> $code（登录模式下 401/403 正常）" ;;
+    *) echo "   $path -> $code"; rollback ;;
+  esac
+done
 
 log "8/8 完成"
 echo "   公网入口：http://<服务器IP>:8000"

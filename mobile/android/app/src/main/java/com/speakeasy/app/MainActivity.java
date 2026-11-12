@@ -166,6 +166,9 @@ public class MainActivity extends BridgeActivity {
 
     private void handleNotificationIntent(Intent intent) {
         if (intent == null) return;
+        if ((intent.hasExtra("event_id") || intent.hasExtra("route")) && !PushReceiver.acceptsOwner(this, intent.getStringExtra("user_id"))) {
+            intent.removeExtra("route"); intent.removeExtra("event_id"); pendingRoute = null; return;
+        }
         String eventId = intent.getStringExtra("event_id");
         if (eventId != null && !eventId.isEmpty()) {
             LocalNotifications.cancel(this, eventId);
@@ -212,7 +215,7 @@ public class MainActivity extends BridgeActivity {
     public final class NativeBridge {
         @JavascriptInterface public String getCapabilities() {
             boolean pushConfigured = PushCoordinator.available();
-            return new Json().put("version", 1).put("nativeCalls", true).put("dynamicColor", Build.VERSION.SDK_INT >= 31)
+            return new Json().put("version", 1).put("nativeCalls", true).put("accountSessions", true).put("dynamicColor", Build.VERSION.SDK_INT >= 31)
                     .put("haptics", true).put("localNotifications", true)
                     .put("push", pushConfigured).put("pushProvider", pushConfigured ? "jpush" : JSONObject.NULL)
                     .put("pushState", PushCoordinator.state(MainActivity.this))
@@ -245,6 +248,27 @@ public class MainActivity extends BridgeActivity {
             return new Json().put("accent", String.format("#%06X", (0xFFFFFF & accent))).put("onAccent", dark() ? "#10251B" : "#FFFFFF")
                     .put("dark", dark()).put("insets", inset).toString();
         }
+        @JavascriptInterface public String readSession() {
+            try { JSONObject session = identities == null ? null : identities.readSession(); return session == null ? "null" : session.toString(); }
+            catch (Exception failure) { return "null"; }
+        }
+        @JavascriptInterface public boolean saveSession(String json) {
+            try { return identities != null && identities.saveSession(new JSONObject(json)); }
+            catch (Exception failure) { return false; }
+        }
+        @JavascriptInterface public String getInstallationId() {
+            return identities == null ? "" : identities.installationId();
+        }
+        @JavascriptInterface public void clearSession() {
+            pendingCall = null; pendingRoute = null;
+            runOnUiThread(() -> {
+                stopService(new Intent(MainActivity.this, CallService.class));
+                androidx.core.app.NotificationManagerCompat.from(MainActivity.this).cancelAll();
+                cn.jpush.android.api.JPushInterface.clearAllNotifications(MainActivity.this);
+                getWindow().getDecorView().removeCallbacks(deliverRoute);
+            });
+            if (identities != null) identities.clearSession();
+        }
         @JavascriptInterface public String getIdentity() { try {
             if (identities == null || "pending".equals(migration) || "failed".equals(migration)) return "null";
             JSONObject identity = identities.read();
@@ -265,8 +289,10 @@ public class MainActivity extends BridgeActivity {
                 if (!call.optString("apiOrigin").equals(BuildConfig.API_BASE)) throw new SecurityException("Unconfigured API origin");
                 if (!call.optString("wsPath").startsWith("/api/v3/calls/")) throw new SecurityException("Invalid call socket path");
                 NativePolicy.socketUrl(call.getString("apiOrigin"), call.getString("wsPath"), call.getString("callId"));
-                JSONObject identity = identities == null ? null : identities.read();
-                if (identity == null || !identity.optString("user_id").equals(call.optString("userId")) || !identity.optString("token").equals(call.optString("token"))) throw new SecurityException("Call identity unavailable");
+                JSONObject identity = identities == null ? null : identities.callIdentity();
+                String requested = call.optString("sessionToken", call.optString("token"));
+                String saved = identity == null ? "" : identity.optString("session_token", identity.optString("token"));
+                if (identity == null || !identity.optString("user_id").equals(call.optString("userId")) || saved.isEmpty() || !saved.equals(requested)) throw new SecurityException("Call identity unavailable");
                 if (Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED && !getPreferences(MODE_PRIVATE).getBoolean("bluetoothAsked", false)) {
                     pendingCall = json; getPreferences(MODE_PRIVATE).edit().putBoolean("bluetoothAsked", true).apply();
                     runOnUiThread(() -> requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, 43)); return;

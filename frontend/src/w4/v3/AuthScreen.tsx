@@ -1,33 +1,8 @@
-/**
- * 登录 / 注册 / 找回密码弹层（内测：邀请码 + 邮箱验证）。
- *
- * 只负责交互与错误展示，所有校验/文案映射在 `authFlow.ts`（有单测），
- * 网络与凭证持久化在 `session.ts`。成功后回调方决定是否刷新/继续。
- */
+"use client";
 
-import { useState, type FormEvent } from "react";
-
-import {
-  authNotice,
-  describeAuthFailure,
-  hasErrors,
-  normalizeEmail,
-  validateAuthForm,
-  validateEmail,
-  type AuthMode,
-} from "./authFlow";
-import {
-  loginEmail,
-  registerEmail,
-  requestPasswordReset,
-  resetPassword,
-} from "./session";
-
-const MODES: Array<{ key: AuthMode; label: string }> = [
-  { key: "login", label: "登录" },
-  { key: "register", label: "注册" },
-  { key: "forgot", label: "找回密码" },
-];
+import { useEffect, useState, type FormEvent } from "react";
+import { normalizeEmail, validateEmail } from "./authFlow";
+import { AuthError, requestEmailCode, verifyEmailCode, type EmailCodeChallenge } from "./session";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -68,290 +43,69 @@ const linkStyle: React.CSSProperties = {
   padding: 0,
 };
 
-export function AuthScreen({
-  onClose,
-  onAuthenticated,
-}: {
-  onClose?: () => void;
-  onAuthenticated?: () => void;
-}) {
-  const [mode, setMode] = useState<AuthMode>("login");
+export function AuthScreen({ onClose, onAuthenticated }: { onClose?: () => void; onAuthenticated?: () => void }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState("");
+  const [code, setCode] = useState("");
+  const [invite, setInvite] = useState("");
+  const [challenge, setChallenge] = useState<EmailCodeChallenge | null>(null);
+  const [inviteRequired, setInviteRequired] = useState(false);
+  const [retryAt, setRetryAt] = useState(0);
+  const [seconds, setSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const tick = () => setSeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [retryAt]);
 
-  const switchMode = (next: AuthMode) => {
-    setMode(next);
-    setErrors({});
-    setNotice("");
-  };
+  async function send() {
+    if (busy || Date.now() < retryAt) return;
+    const invalid = validateEmail(email);
+    if (invalid) { setError(invalid); return; }
+    setBusy(true); setError("");
+    try {
+      const next = await requestEmailCode(normalizeEmail(email));
+      setChallenge(next); setCode(""); setInvite(""); setInviteRequired(false);
+      setRetryAt(Date.now() + next.retry_after * 1000);
+    } catch (err) {
+      if (err instanceof AuthError && err.retryAfter) setRetryAt(Date.now() + err.retryAfter * 1000);
+      setError(err instanceof Error ? err.message : "发送失败，请稍后重试");
+    } finally { setBusy(false); }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!challenge) { await send(); return; }
     if (busy) return;
-    const form = { email, password, confirm, inviteCode };
-    const fieldErrors = validateAuthForm(mode, form);
-    if (mode === "forgot" && !validateEmail(email)) {
-      setErrors({ form: "请输入邮箱" });
-      return;
-    }
-    if (hasErrors(fieldErrors)) {
-      setErrors(fieldErrors as Record<string, string>);
-      return;
-    }
-    setErrors({});
-    setBusy(true);
+    if (!/^\d{6}$/.test(code)) { setError("请输入 6 位邮箱验证码"); return; }
+    if (inviteRequired && !invite.trim()) { setError("请输入邀请码"); return; }
+    setBusy(true); setError("");
     try {
-      if (mode === "login") {
-        await loginEmail(normalizeEmail(email), password, {
-          device_key: "web",
-          platform: "web",
-        });
-        onAuthenticated?.();
-      } else if (mode === "register") {
-        const result = await registerEmail({
-          email: normalizeEmail(email),
-          password,
-          invite_code: inviteCode.trim(),
-          device_key: "web",
-        });
-        setNotice(authNotice(result) || "注册成功，请到邮箱完成验证");
-        onAuthenticated?.();
-      } else if (!resetToken) {
-        const result = await requestPasswordReset(normalizeEmail(email));
-        setResetToken(result.dev_reset_token ?? "");
-        setNotice(authNotice({ dev_reset_token: result.dev_reset_token }) || "重置链接已发送，请查收邮箱");
-      }
-    } catch (error) {
-      setErrors({ form: describeAuthFailure(error instanceof Error ? error.message : String(error)) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submitReset(event: FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-    if (!resetToken.trim()) {
-      setErrors({ form: "请填写邮件里的重置码" });
-      return;
-    }
-    if (password.length < 8) {
-      setErrors({ form: "新密码至少 8 位" });
-      return;
-    }
-    setBusy(true);
-    setErrors({});
-    try {
-      await resetPassword(resetToken.trim(), password);
-      setNotice("密码已重置，请用新密码登录");
-      setMode("login");
-      setPassword("");
-      setResetToken("");
-    } catch (error) {
-      setErrors({ form: describeAuthFailure(error instanceof Error ? error.message : String(error)) });
-    } finally {
-      setBusy(false);
-    }
+      await verifyEmailCode({ challenge_id: challenge.challenge_id, code, ...(inviteRequired ? { invite_code: invite.trim() } : {}) });
+      onAuthenticated?.();
+    } catch (err) {
+      if (err instanceof AuthError && err.code === "INVITE_REQUIRED") setInviteRequired(true);
+      setError(err instanceof Error ? err.message : "验证失败，请重试");
+    } finally { setBusy(false); }
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="账号"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-        background: "rgba(0,0,0,.42)",
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose?.();
-      }}
-    >
-      <div
-        style={{
-          width: "min(420px, 100%)",
-          borderRadius: 18,
-          padding: "22px 22px 18px",
-          background: "var(--w4-surface, #fff)",
-          color: "var(--w4-fg, #111)",
-          boxShadow: "0 24px 60px rgba(0,0,0,.28)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {MODES.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => switchMode(item.key)}
-              style={{
-                ...linkStyle,
-                fontWeight: mode === item.key ? 700 : 500,
-                opacity: mode === item.key ? 1 : 0.6,
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-          <span style={{ flex: 1 }} />
-          {onClose ? (
-            <button type="button" onClick={onClose} aria-label="关闭" style={linkStyle}>
-              关闭
-            </button>
-          ) : null}
-        </div>
-
-        {mode === "forgot" && resetToken ? (
-          <form onSubmit={submitReset} style={{ display: "grid", gap: 12 }}>
-            <div>
-              <label style={labelStyle} htmlFor="auth-reset-token">
-                重置码
-              </label>
-              <input
-                id="auth-reset-token"
-                style={inputStyle}
-                value={resetToken}
-                onChange={(event) => setResetToken(event.target.value)}
-                autoComplete="one-time-code"
-              />
-            </div>
-            <div>
-              <label style={labelStyle} htmlFor="auth-reset-password">
-                新密码（至少 8 位）
-              </label>
-              <input
-                id="auth-reset-password"
-                style={inputStyle}
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-            {errors.form ? (
-              <div role="alert" style={{ color: "#d33", fontSize: 13 }}>
-                {errors.form}
-              </div>
-            ) : null}
-            {notice ? (
-              <div role="status" style={{ fontSize: 12, opacity: 0.8, wordBreak: "break-all" }}>
-                {notice}
-              </div>
-            ) : null}
-            <button type="submit" style={primaryStyle} disabled={busy}>
-              {busy ? "处理中…" : "重置密码"}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-            <div>
-              <label style={labelStyle} htmlFor="auth-email">
-                邮箱
-              </label>
-              <input
-                id="auth-email"
-                style={inputStyle}
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="username"
-                placeholder="you@example.com"
-              />
-              {errors.email ? <div style={{ color: "#d33", fontSize: 12 }}>{errors.email}</div> : null}
-            </div>
-
-            {mode !== "forgot" ? (
-              <div>
-                <label style={labelStyle} htmlFor="auth-password">
-                  密码{mode === "register" ? "（至少 8 位）" : ""}
-                </label>
-                <input
-                  id="auth-password"
-                  style={inputStyle}
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                />
-                {errors.password ? (
-                  <div style={{ color: "#d33", fontSize: 12 }}>{errors.password}</div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {mode === "register" ? (
-              <>
-                <div>
-                  <label style={labelStyle} htmlFor="auth-confirm">
-                    确认密码
-                  </label>
-                  <input
-                    id="auth-confirm"
-                    style={inputStyle}
-                    type="password"
-                    value={confirm}
-                    onChange={(event) => setConfirm(event.target.value)}
-                    autoComplete="new-password"
-                  />
-                  {errors.confirm ? (
-                    <div style={{ color: "#d33", fontSize: 12 }}>{errors.confirm}</div>
-                  ) : null}
-                </div>
-                <div>
-                  <label style={labelStyle} htmlFor="auth-invite">
-                    邀请码（内测）
-                  </label>
-                  <input
-                    id="auth-invite"
-                    style={inputStyle}
-                    value={inviteCode}
-                    onChange={(event) => setInviteCode(event.target.value)}
-                    autoComplete="off"
-                    placeholder="向运营领取"
-                  />
-                  {errors.inviteCode ? (
-                    <div style={{ color: "#d33", fontSize: 12 }}>{errors.inviteCode}</div>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-
-            {errors.form ? (
-              <div role="alert" style={{ color: "#d33", fontSize: 13 }}>
-                {errors.form}
-              </div>
-            ) : null}
-            {notice ? (
-              <div role="status" style={{ fontSize: 12, opacity: 0.8, wordBreak: "break-all" }}>
-                {notice}
-              </div>
-            ) : null}
-
-            <button type="submit" style={primaryStyle} disabled={busy}>
-              {busy
-                ? "处理中…"
-                : mode === "login"
-                  ? "登录"
-                  : mode === "register"
-                    ? "注册"
-                    : "发送重置邮件"}
-            </button>
-            <p style={{ margin: 0, fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
-              账号仅用于多设备同步与数据隔离；你的动态、私聊情绪和人物关系互相不可见。
-            </p>
-          </form>
-        )}
+    <div role="dialog" aria-modal="true" aria-label="邮箱登录" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(0,0,0,.42)" }}>
+      <div style={{ width: "min(420px, 100%)", borderRadius: 18, padding: "22px 22px 18px", background: "var(--w4-surface, #fff)", color: "var(--w4-fg, #111)", boxShadow: "0 24px 60px rgba(0,0,0,.28)" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}><strong>邮箱验证码登录</strong><span style={{ flex: 1 }} />{onClose ? <button type="button" onClick={onClose} style={linkStyle}>关闭</button> : null}</div>
+        <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
+          <div><label htmlFor="auth-email" style={labelStyle}>邮箱</label><input id="auth-email" type="email" required autoComplete="email" placeholder="you@example.com" value={email} disabled={Boolean(challenge)} onChange={(e) => setEmail(e.target.value)} style={inputStyle} /></div>
+          {challenge ? <>
+            <div><label htmlFor="auth-code" style={labelStyle}>邮箱验证码（10 分钟内有效）</label><input id="auth-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setInviteRequired(false); }} style={inputStyle} /></div>
+            {inviteRequired ? <div><label htmlFor="auth-invite" style={labelStyle}>新账号邀请码（内测）</label><input id="auth-invite" autoComplete="off" value={invite} onChange={(e) => setInvite(e.target.value)} style={inputStyle} /><p style={{ fontSize: 12, opacity: .72 }}>验证码已通过。首次创建账号需要邀请码，填写后继续即可。</p></div> : null}
+            <div style={{ display: "flex", justifyContent: "space-between" }}><button type="button" disabled={busy || seconds > 0} onClick={() => void send()} style={linkStyle}>{seconds > 0 ? `${seconds} 秒后重发` : "重新发送验证码"}</button><button type="button" disabled={busy} onClick={() => { setChallenge(null); setInviteRequired(false); setError(""); }} style={linkStyle}>更换邮箱</button></div>
+          </> : null}
+          {error ? <div role="alert" style={{ color: "#d33", fontSize: 13 }}>{error}</div> : null}
+          <button type="submit" disabled={busy || (!challenge && seconds > 0)} style={primaryStyle}>{busy ? "处理中…" : challenge ? inviteRequired ? "创建账号并登录" : "验证并登录" : seconds > 0 ? `${seconds} 秒后重试` : "发送验证码"}</button>
+          <p style={{ margin: 0, fontSize: 12, opacity: .7, lineHeight: 1.5 }}>登录后保存你的聊天、表达和人物关系。已有账号直接登录，新账号在验证邮箱后填写邀请码。</p>
+        </form>
       </div>
     </div>
   );

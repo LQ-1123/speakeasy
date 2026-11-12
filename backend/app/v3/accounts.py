@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.logging_utils import get_logger
+from app.v3.auth_policy import email_code_auth_enabled
 from app.v3.identity import LOCAL_USER_ID, current_user_id
 
 log = get_logger(__name__)
@@ -237,6 +238,9 @@ CREATE INDEX IF NOT EXISTS idx_v3_age_audit_user ON v3_age_audit(user_id, create
 
 
 def ensure_accounts_schema(db: Any) -> None:
+    from app.v3.account_archive import ensure_archive_schema
+
+    ensure_archive_schema(db)
     with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层同一把锁
         db.conn.executescript(DDL)
     try:
@@ -456,7 +460,8 @@ def authenticate_session(db: Any, token: str) -> dict | None:
         return None
     row = _read_one(
         db,
-        "SELECT s.id, s.user_id, s.expires_at, s.revoked_at, a.status AS account_status"
+        "SELECT s.id, s.user_id, s.expires_at, s.revoked_at, a.status AS account_status,"
+        " a.email_verified_at, a.user_id AS account_user_id"
         " FROM v3_sessions s LEFT JOIN v3_accounts a ON a.user_id=s.user_id"
         " WHERE s.token_hash=?",
         (_hash_token(raw),),
@@ -466,10 +471,18 @@ def authenticate_session(db: Any, token: str) -> dict | None:
     account_status = str(row["account_status"] or "active")
     if account_status != "active":
         return None
+    from app.v3.account_archive import user_is_available
+
+    if not user_is_available(db, str(row["user_id"])):
+        return None
+    if email_code_auth_enabled() and (
+        not row["account_user_id"] or not str(row["email_verified_at"] or "")
+    ):
+        return None
     expires = str(row["expires_at"] or "")
     if expires and expires <= _now():
         return None
-    return {"user_id": str(row["user_id"]), "session_id": str(row["id"])}
+    return {"user_id": str(row["user_id"]), "session_id": str(row["id"]), "expires_at": expires}
 
 
 def touch_session(db: Any, session_id: str) -> None:
@@ -479,6 +492,11 @@ def touch_session(db: Any, session_id: str) -> None:
                 "UPDATE v3_sessions SET last_seen_at=? WHERE id=?"
                 " AND (last_seen_at='' OR last_seen_at<=?)",
                 (_now(), session_id, _iso_after(minutes=-1)),
+            )
+            db.conn.execute(
+                "UPDATE v3_users SET last_seen_at=? WHERE id=(SELECT user_id FROM v3_sessions WHERE id=?)"
+                " AND (last_seen_at='' OR last_seen_at IS NULL OR datetime(last_seen_at)<datetime('now','-1 minute'))",
+                (_now(), session_id),
             )
     except Exception:  # noqa: BLE001 - 活跃时间只用于展示
         pass
@@ -512,6 +530,8 @@ def revoke_session(db: Any, user_id: str, session_id: str) -> bool:
             (_now(), session_id, user_id),
         )
         changed = cur.rowcount
+        from app.v3.device_sessions import release_revoked_devices
+        release_revoked_devices(db, user_id)
     return bool(changed)
 
 
@@ -527,7 +547,10 @@ def revoke_user_sessions(db: Any, user_id: str, *, except_session_id: str = "") 
                 "UPDATE v3_sessions SET revoked_at=? WHERE user_id=? AND revoked_at=''",
                 (_now(), user_id),
             )
-        return int(cur.rowcount or 0)
+        changed = int(cur.rowcount or 0)
+        from app.v3.device_sessions import release_revoked_devices
+        release_revoked_devices(db, user_id)
+        return changed
 
 
 def count_active_sessions(db: Any, user_id: str) -> int:
@@ -576,10 +599,9 @@ def consume_email_token(db: Any, token: str, purpose: str) -> str | None:
 
 
 def _send_mail(to: str, subject: str, body: str) -> bool:
-    """极简邮件出口：默认只记日志（内测人工转发），SMTP 配置齐全时发信。"""
+    """SMTP transport. Credentials, message bodies and tokens are never logged."""
     host = os.getenv("SE_SMTP_HOST", "").strip()
     if not host:
-        log.info("邮件(未配置 SMTP，仅记录): to=%s subject=%s body=%s", to, subject, body[:400])
         return False
     try:  # pragma: no cover - 真实发信不在测试覆盖内
         import smtplib
@@ -598,8 +620,8 @@ def _send_mail(to: str, subject: str, body: str) -> bool:
                 smtp.login(user, password)
             smtp.send_message(msg)
         return True
-    except Exception as exc:  # noqa: BLE001
-        log.warning("邮件发送失败: %s", exc)
+    except Exception:  # noqa: BLE001 - SMTP errors may contain message contents
+        log.warning("邮件发送失败")
         return False
 
 

@@ -149,6 +149,8 @@ final class LocalNotifications {
     static boolean post(Context context, String payloadJson) {
         try {
             JSONObject payload = new JSONObject(payloadJson);
+            JSONObject session = new NativeIdentityStore(context).readSession();
+            if (session == null) return false;
             String id = payload.optString("id", "").trim();
             if (id.isEmpty() || id.length() > 512) return false;
             String route = NativePolicy.routeOr(payload.optString("route", ""), "#/chats");
@@ -168,7 +170,7 @@ final class LocalNotifications {
                notification for the same event id is suppressed instead of showing twice. */
             if (!PushEvents.claimDisplay(context, id, 0)) return false;
             try {
-                postClaimed(context, id, route, title, body);
+                postClaimed(context, id, route, title, body, session.getString("userId"));
                 return true;
             } catch (Throwable failure) {
                 PushEvents.releaseLocalClaim(context, id);
@@ -179,7 +181,7 @@ final class LocalNotifications {
         }
     }
 
-    private static void postClaimed(Context context, String id, String route, String title, String body) {
+    private static void postClaimed(Context context, String id, String route, String title, String body, String userId) {
         boolean message = route.startsWith("#/chat");
         boolean sound = prefs(context).getBoolean("sound", true);
         String channel = (message ? CHANNEL_MESSAGES : CHANNEL_SOCIAL) + (sound ? "" : "_silent");
@@ -189,7 +191,8 @@ final class LocalNotifications {
                 .setAction("com.speakeasy.app.NOTIFICATION_OPEN")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra("route", route)
-                .putExtra("event_id", id);
+                .putExtra("event_id", id)
+                .putExtra("user_id", userId);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT
                 | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent pending = PendingIntent.getActivity(context, notificationId, open, flags);

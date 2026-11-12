@@ -12,6 +12,7 @@ import httpx
 
 from app.v3 import teen
 from app.v3.client_api import preferences
+from app.v3.account_archive import user_is_available
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ def collect_events(db) -> int:
              JOIN friends f ON f.id=m.friend_id WHERE m.rowid>? ORDER BY m.rowid LIMIT 500""", (int(state[0]),)).fetchall()
         count = 0
         for row in rows:
+            if not user_is_available(db, row['owner_user_id']):
+                continue
             if row['sender'] == 'friend' and not row['is_read'] and row['msg_type'] != 'call_summary':
                 cursor = db.conn.execute("""INSERT OR IGNORE INTO client_events
                     (id,user_id,type,friend_id,payload,created_at,next_attempt) VALUES (?,?,'message',?,?,?,?)""",
@@ -67,6 +70,8 @@ def collect_events(db) -> int:
              AND NOT EXISTS(SELECT 1 FROM client_events e WHERE e.id='social:'||s.id)
              ORDER BY s.scheduled_at LIMIT 100""",(now,installed)).fetchall()
         for row in social:
+            if not user_is_available(db, row['user_id']):
+                continue
             kind = 'friend_request' if row['event_type']=='friend_request' else 'social'
             detail = json.loads(row['payload'] or '{}')
             detail.update(name=row['nickname'] or '',event_type=row['event_type'],
@@ -88,6 +93,9 @@ async def dispatch_push(db) -> int:
     global _unconfigured_warned
     from app.config import get_settings
     from app.v3 import push_config
+    from app.v3.device_sessions import release_revoked_devices
+    with db._lock, db.conn:
+        release_revoked_devices(db)
 
     # 凭据来源（env > 管理台保存 > .env）统一由 push_config 解析。
     # 以前这里内联读 env/settings，导致管理台根本改不了推送配置。
@@ -108,6 +116,10 @@ async def dispatch_push(db) -> int:
     sent = 0
     async with httpx.AsyncClient(timeout=8, auth=(key,secret)) as client:
         for event in rows:
+            if not user_is_available(db, event['user_id']):
+                with db._lock, db.conn:
+                    db.conn.execute("UPDATE client_events SET push_status='suppressed' WHERE id=?", (event['id'],))
+                continue
             # 青少年模式：宵禁 / 当日超时 / 未核验 / 未绑监护期间不主动推送。
             # 不标 failed/suppressed，只把 next_attempt 推后，等允许时再发。
             if teen.push_suppressed(db, event['user_id']):
@@ -129,14 +141,14 @@ async def dispatch_push(db) -> int:
                     db.conn.execute("UPDATE client_events SET next_attempt=? WHERE id=?",(time.time()+300,event['id']))
                 continue
             info=json.loads(event['payload'])
-            title=info.get('name') or 'SpeakEasy'
+            title='Sonder'
             text=(info.get('text') or '').strip()
             # Real chat apps show the message preview. Keep it single-line and short
             # so the collapsed notification stays readable on every OEM skin.
-            alert=text or ('发来一条消息' if event['type']=='message' else '有新的动态互动')
+            alert='你有一条新消息' if event['type']=='message' else '你有新的动态互动'
             if len(alert) > 120:
                 alert = alert[:119] + '…'
-            android={'alert':alert,'title':title,'extras':{'event_id':event['id'],'route':info.get('route','#/events')},
+            android={'alert':alert,'title':title,'extras':{'event_id':event['id'],'route':info.get('route','#/events'), 'user_id':event['user_id']},
                      'channel_id':'speakeasy_messages' if event['type']=='message' else 'speakeasy_social'}
             # 通知栏右侧大图：优先发信人/AI 头像；没有形象时用 Dynamic 渐变图标。
             avatar=(info.get('avatar') or '').strip()
@@ -148,9 +160,6 @@ async def dispatch_push(db) -> int:
             else:
                 avatar_png=base + '/icons/brand-512.png'
             android['large_icon']=avatar_png
-            if event['type']=='message' and text:
-                android['style']=1
-                android['big_text']=text
             if not pref['sound']:
                 android['channel_id'] += '_silent'
             request={'platform':'android','audience':{'registration_id':devices},
@@ -185,6 +194,8 @@ async def event_worker(db, service=None):
                     with db._lock:
                         owners=[r[0] for r in db.conn.execute('SELECT DISTINCT user_id FROM social_events WHERE processed_at IS NULL AND scheduled_at<=? LIMIT 100',(now,))]
                     for user in owners:
+                        if not user_is_available(db, user):
+                            continue
                         service.materialize_due_events(user)
                 await asyncio.to_thread(materialize)
             await asyncio.to_thread(collect_events,db)

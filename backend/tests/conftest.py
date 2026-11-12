@@ -12,10 +12,17 @@ from pathlib import Path
 
 import pytest
 
+# 测试不读取仓库根的 .env：开发者本机可能配了 SE_REQUIRE_AUTH=1 / 真实 SMTP /
+# 真实 LLM key，加载进来会污染既有用例（曾导致 40 个用例失败）。
+# 需要新配置的用例请显式 monkeypatch.setenv(...)。
+os.environ.setdefault("SE_LOAD_DOTENV", "0")
 # 测试不调用真实 Fish TTS（避免网络/计费），走 edge/本地合成兜底
 os.environ.setdefault("SE_TTS_FISH", "0")
 # 测试保持同步语义：好友语音在回复里立即可用；生产默认先落文字、后台补音频
 os.environ.setdefault("SE_TTS_DEFER_AUDIO", "0")
+# Historical fixtures exercise the device/password compatibility mode explicitly.
+# The new account suite opts into the production email-code mode per test.
+os.environ.setdefault("SE_EMAIL_CODE_AUTH", "0")
 
 # 测试离线：不抓开放图库（Wikimedia/Openverse 在无网环境下会一直等超时，
 # 曾导致 test_v3_world 整体挂起）。纯文字生活动态仍会生成，测试语义不受影响。

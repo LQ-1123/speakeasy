@@ -17,6 +17,7 @@ it("refreshes a stale native token using the migrated device key", async () => {
       saveIdentity: (json: string) => { stored = JSON.parse(json); },
     },
   });
+  (await import("./authMode")).configureEmailCodeAuth(false);
   const { ensureIdentity } = await import("./api");
   expect((await ensureIdentity())?.token).toBe("stale");
   expect(fetch).not.toHaveBeenCalled();
@@ -34,6 +35,7 @@ it("does not create a replacement user when a stale native identity lacks its mi
     localStorage: { getItem: () => null },
     SpeakEasyNative: { getCapabilities: () => "{}", getIdentity: () => JSON.stringify({ user_id: "existing", token: "stale" }) },
   });
+  (await import("./authMode")).configureEmailCodeAuth(false);
   const { ensureIdentity } = await import("./api");
   await expect(ensureIdentity(true)).rejects.toThrow("existing account");
   expect(fetch).not.toHaveBeenCalled();

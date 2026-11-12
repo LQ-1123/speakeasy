@@ -657,6 +657,10 @@ async def _send_suggestions(conn: _Connection, text: str, turn_id: int) -> None:
 # --------------------------------------------------------------------------- #
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    from app.v3.auth_policy import email_code_auth_enabled
+    if email_code_auth_enabled():
+        await ws.close(code=4401, reason="请更新客户端并使用邮箱登录")
+        return
     await ws.accept()
     conn = _Connection(ws)
     peer = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"

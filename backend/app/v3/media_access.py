@@ -286,7 +286,6 @@ def verify_media_token(db: Any, token: str) -> tuple[str, str, str] | None:
 
     校验内容：版本前缀、HMAC 签名（常量时间比较）、``exp`` 未过期、payload 字段合法。
     """
-    del db  # 预留参数：与 issue_media_token 对称；令牌无状态
     parts = str(token or "").strip().split(".")
     if len(parts) != 3 or parts[0] != _TOKEN_VERSION:
         return None
@@ -316,6 +315,11 @@ def verify_media_token(db: Any, token: str) -> tuple[str, str, str] | None:
         return None
     if exp <= int(time.time()):
         return None
+    from app.v3.auth_policy import email_code_auth_enabled
+    if email_code_auth_enabled():
+        from app.v3.account_archive import user_is_available
+        if db is None or not user_is_available(db, user):
+            return None
     return user, kind, name
 
 

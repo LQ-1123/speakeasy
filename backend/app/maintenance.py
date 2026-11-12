@@ -69,6 +69,9 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
 
     async def call_memory_job(payload):
         from app.v3.identity import set_current_user, reset_current_user
+        from app.v3.account_archive import user_is_available
+        if not user_is_available(db, payload['user_id']):
+            return
         token = set_current_user(payload['user_id'])
         try:
             friend = db.get_friend(payload['friend_id'], owner_user_id=payload['user_id'])

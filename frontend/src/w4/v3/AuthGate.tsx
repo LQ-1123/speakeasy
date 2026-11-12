@@ -1,84 +1,53 @@
-/**
- * 账号门（**当前首版已停用，文件保留待恢复**）。
- *
- * 2026-11 起产品改为免登录：多用户靠设备身份隔离，唯一门槛是首次用户信息引导
- * （`Onboarding`）。`App.tsx` 不再挂载本组件；需要恢复邮箱/密码登录时，
- * 把 `<AuthGate />` 加回 `App.tsx` 即可，后端接口与测试都还在。
- *
- * 原始行为：
- * - 服务端要求登录（SE_REQUIRE_AUTH=1）且本地没有会话时自动弹登录；
- * - 其他情况在右下角保留一个入口（内测用户可主动登录/注册）；
- * - 手动：`sonder:open-auth` 事件；URL：`?login=1`。
- */
+"use client";
 
-import { useEffect, useState } from "react";
-
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AuthScreen } from "./AuthScreen";
-import { looksLikeAuthRequired } from "./authFlow";
-import { authIdentity, hasSession } from "./session";
+import { AUTH_EXPIRED_EVENT, AUTH_LOGOUT_EVENT, clearSession, loadAuthConfig, restoreAccountSession, subscribeAccountChanges } from "./session";
+import { cleanupAccountClient } from "./logoutFlow";
 
-export function AuthGate() {
-  const [open, setOpen] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return new URLSearchParams(window.location.search).get("login") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const [loggedIn, setLoggedIn] = useState(() => hasSession());
-
+/** Business providers are mounted only after the Cookie/native session is restored. */
+export function AuthGate({ children, preview = false }: { children?: ReactNode; preview?: boolean }) {
+  const [status, setStatus] = useState<"restoring" | "login" | "ready" | "error">(preview ? "ready" : "restoring");
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const cleaning = useRef(false);
   useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener("sonder:open-auth", onOpen);
-    if (!hasSession()) {
-      void (async () => {
-        try {
-          await authIdentity();
-        } catch (error) {
-          if (looksLikeAuthRequired(error instanceof Error ? error.message : String(error))) {
-            setOpen(true);
-          }
-        }
-      })();
-    }
-    return () => window.removeEventListener("sonder:open-auth", onOpen);
-  }, []);
-
-  if (open) {
-    return (
-      <AuthScreen
-        onClose={() => setOpen(false)}
-        onAuthenticated={() => {
-          setLoggedIn(true);
-          setOpen(false);
-          /* 账号切换会改变数据隔离范围：整页重载最稳妥 */
-          if (typeof window !== "undefined") window.location.reload();
-        }}
-      />
-    );
-  }
-  if (loggedIn) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => setOpen(true)}
-      style={{
-        position: "fixed",
-        right: 14,
-        bottom: 74,
-        zIndex: 55,
-        padding: "8px 14px",
-        borderRadius: 999,
-        border: "1px solid rgba(120,120,120,.3)",
-        background: "var(--w4-surface, #fff)",
-        color: "inherit",
-        fontSize: 12,
-        cursor: "pointer",
-        boxShadow: "0 6px 20px rgba(0,0,0,.14)",
-      }}
-    >
-      登录 / 注册
-    </button>
-  );
+    if (preview) return;
+    let alive = true;
+    let generation = 0;
+    const expired = () => {
+      generation += 1;
+      setStatus("login");
+      if (cleaning.current) return;
+      cleaning.current = true;
+      clearSession();
+      cleanupAccountClient();
+      cleaning.current = false;
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+    window.addEventListener(AUTH_LOGOUT_EVENT, expired);
+    const unsubscribeChanges = subscribeAccountChanges(expired, () => {
+      generation += 1;
+      clearSession();
+      cleanupAccountClient();
+      setStatus("restoring");
+      setRetry((value) => value + 1);
+    });
+    const attempt = generation;
+    void (async () => {
+      try {
+        const config = await loadAuthConfig();
+        if (!alive || generation !== attempt) return;
+        if (!config.email_code_auth) { setStatus("ready"); return; }
+        const restored = await restoreAccountSession();
+        if (alive && generation === attempt) setStatus(restored ? "ready" : "login");
+      } catch (err) {
+        if (alive && generation === attempt) { setError(err instanceof Error ? err.message : "无法连接，请重试"); setStatus("error"); }
+      }
+    })();
+    return () => { alive = false; unsubscribeChanges(); window.removeEventListener(AUTH_EXPIRED_EVENT, expired); window.removeEventListener(AUTH_LOGOUT_EVENT, expired); };
+  }, [retry, preview]);
+  if (status === "ready") return <>{children}</>;
+  if (status === "login") return <AuthScreen onAuthenticated={() => { setError(""); setStatus("ready"); }} />;
+  return <div role="status" style={{ padding: 32, textAlign: "center" }}>{status === "restoring" ? "正在恢复登录…" : <><p>{error}</p><button type="button" onClick={() => { setStatus("restoring"); setRetry((value) => value + 1); }}>重新连接</button></>}</div>;
 }

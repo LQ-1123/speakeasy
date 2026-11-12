@@ -1,17 +1,8 @@
 "use client";
 
-/**
- * 设置 · 账号（**当前首版已停用，文件保留待恢复**）。
- *
- * 2026-11 起产品免登录：设置页不再展示「账号」分区；多用户靠设备身份隔离，
- * 首次进入只走 `Onboarding` 用户信息引导。恢复邮箱/密码登录时，把本组件
- * 重新挂回 `SettingsPane` 即可（`session.ts` / `accountClient.ts` 与后端接口都还在）。
- */
-
 import { useCallback, useEffect, useState } from "react";
 import { LogOut, ShieldCheck, UserRound } from "lucide-react";
 
-import { adStatus, setAdsOptIn, teenStatus, type AdStatus, type TeenStatus } from "../v3/accountClient";
 import {
   authIdentity,
   hasSession,
@@ -64,8 +55,6 @@ export function AccountSection() {
   const [sessions, setSessions] = useState<AuthSessionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [ads, setAds] = useState<AdStatus | null>(null);
-  const [teen, setTeen] = useState<TeenStatus | null>(null);
 
   const refresh = useCallback(async () => {
     if (!hasSession()) {
@@ -80,16 +69,6 @@ export function AccountSection() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-    try {
-      setAds(await adStatus());
-    } catch {
-      setAds(null);
-    }
-    try {
-      setTeen(await teenStatus());
-    } catch {
-      setTeen(null);
-    }
   }, []);
 
   useEffect(() => {
@@ -100,12 +79,12 @@ export function AccountSection() {
     setBusy(true);
     setError("");
     try {
-      /* 退出会清理本地缓存/音频/事件游标，并 reload 断开事件连接、重绑推送 */
+      /* AuthGate 收到退出事件后卸载业务界面和事件连接。 */
       await performLogout(all);
       setSignedIn(false);
       setIdentity(null);
       setSessions([]);
-      if (typeof window !== "undefined") window.location.reload();
+
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -118,18 +97,6 @@ export function AccountSection() {
     try {
       await revokeSession(sessionId);
       setSessions((prev) => prev.filter((row) => row.session_id !== sessionId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleAds(next: boolean) {
-    setBusy(true);
-    try {
-      await setAdsOptIn(next);
-      setAds(await adStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -153,12 +120,6 @@ export function AccountSection() {
             登录 / 注册
           </button>
         </div>
-        {teen && teen.access && teen.access.allowed === false ? (
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 600 }}>青少年模式</div>
-            <p style={muted}>{teenReasonText(teen)}</p>
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -172,17 +133,8 @@ export function AccountSection() {
         </div>
         <p style={muted}>
           用户 ID：{session?.user_id || identity?.user_id || "-"}
-          {identity?.email_verified ? " · 邮箱已验证" : " · 邮箱未验证"}
-          {identity?.age ? ` · 年龄组 ${ageLabel(identity.age.group)}` : ""}
+          {(identity?.email_verified ?? session?.email_verified) ? " · 邮箱已验证" : " · 邮箱未验证"}
         </p>
-        {teen && teen.access && teen.access.allowed === false ? (
-          <p style={{ ...muted, color: "#c26a00" }}>{teenReasonText(teen)}</p>
-        ) : null}
-        {teen && teen.access && teen.access.reminder ? (
-          <p style={{ ...muted, color: "#c26a00" }}>
-            已连续使用 30 分钟，休息一下再继续吧。
-          </p>
-        ) : null}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" style={buttonStyle} disabled={busy} onClick={() => void signOut(false)}>
             <LogOut size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
@@ -234,56 +186,6 @@ export function AccountSection() {
           </div>
         )}
       </div>
-
-      <div style={cardStyle}>
-        <div style={{ fontWeight: 600 }}>合作推荐</div>
-        <p style={muted}>
-          仅成年且已核验的账号可开启；默认关闭，随时可以关掉。开启后聊天与动态里可能看到
-          标注「广告 · 品牌合作」的内容，关闭或举报会屏蔽该活动 30 天。
-        </p>
-        {ads ? (
-          ads.eligible || ads.ads_opt_in ? (
-            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={Boolean(ads.ads_opt_in)}
-                disabled={busy || !ads.eligible}
-                onChange={(event) => void toggleAds(event.target.checked)}
-              />
-              接收合作推荐
-              {ads.eligible ? "" : `（${adReasonText(ads.reason)}）`}
-            </label>
-          ) : (
-            <p style={muted}>当前账号不可开启：{adReasonText(ads.reason)}</p>
-          )
-        ) : (
-          <p style={muted}>登录后可查看。</p>
-        )}
-      </div>
     </div>
   );
-}
-
-function ageLabel(group: string): string {
-  if (group === "adult") return "成年";
-  if (group === "teen") return "14–17 岁";
-  return "待核验";
-}
-
-function teenReasonText(status: TeenStatus): string {
-  const reason = status.access?.reason || "";
-  if (reason === "age_unverified") return "请先完成年龄核验（可联系运营）。";
-  if (reason === "guardian_required") return "14–17 岁需要先完成监护人绑定。";
-  if (reason === "curfew") return "青少年模式：22:00–06:00 暂停使用，明早再来。";
-  if (reason === "daily_limit") return "今日使用时间已用完，明天再来吧。";
-  if (reason === "persona_blocked") return "监护人限制了该人物的访问。";
-  return "青少年模式已开启。";
-}
-
-function adReasonText(reason: string): string {
-  if (reason === "no_account") return "需要登录邮箱账号";
-  if (reason === "ads_opt_out") return "未开启";
-  if (reason === "not_adult_verified") return "仅已核验成年账号可用";
-  if (reason === "ads_not_allowed") return "当前账号不可用该能力";
-  return reason || "不可用";
 }

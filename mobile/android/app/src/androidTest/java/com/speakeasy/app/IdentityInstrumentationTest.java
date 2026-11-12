@@ -15,6 +15,23 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class IdentityInstrumentationTest {
+    @Test public void accountSessionSurvivesRecreationAndLogoutKeepsInstallation() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String name = "session_instrumentation_" + System.nanoTime();
+        try {
+            NativeIdentityStore store = new NativeIdentityStore(context, name);
+            String installation = store.installationId();
+            assertTrue(store.saveSession(new JSONObject().put("userId", "u_one").put("sessionToken", "secure-token")
+                    .put("expiresAt", "2099-01-01T00:00:00+00:00")));
+            NativeIdentityStore restored = new NativeIdentityStore(context, name);
+            assertEquals("secure-token", restored.readSession().getString("sessionToken"));
+            assertEquals("secure-token", restored.callIdentity().getString("session_token"));
+            assertFalse(context.getSharedPreferences(name, Context.MODE_PRIVATE).getAll().toString().contains("secure-token"));
+            assertTrue(restored.clearSession());
+            assertNull(restored.callIdentity());
+            assertEquals(installation, restored.installationId());
+        } finally { context.deleteSharedPreferences(name); }
+    }
     @Test public void encryptedIdentitySurvivesRecreationAndInvalidWritePreservesAccount() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         String name = "identity_instrumentation_" + System.nanoTime();

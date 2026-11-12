@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallSessionController, downsample, pcm16le } from "./callSession";
 import { clientApi } from "./clientApi";
+import { configureEmailCodeAuth } from "./authMode";
+import { saveSession, clearSession } from "./session";
 
+beforeEach(() => configureEmailCodeAuth(false));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("browser PCM transport", () => {
@@ -15,6 +18,35 @@ describe("browser PCM transport", () => {
 });
 
 describe("native session ownership", () => {
+  it("uses account session ownership even when the legacy identity migration failed", async () => {
+    configureEmailCodeAuth(true);
+    const startCall = vi.fn();
+    vi.stubGlobal("window", { clearInterval, SpeakEasyNative: {
+      getCapabilities: () => JSON.stringify({ nativeCalls: true, identityMigration: "failed" }),
+      readSession: () => null, saveSession: () => true, clearSession: () => undefined,
+      getIdentity: () => JSON.stringify({ user_id: "legacy-user", token: "legacy-secret" }), startCall,
+    } });
+    saveSession({ user_id: "account-user", session_token: "account-secret" });
+    vi.spyOn(clientApi, "createCall").mockResolvedValue({ call_id: "account-call", ticket: "ticket", ws_path: "/stream", expires_in: 60 });
+    const controller = new CallSessionController();
+    await controller.start({ id: "friend", name: "Callum" });
+    expect(JSON.parse(startCall.mock.calls[0][0])).toMatchObject({ userId: "account-user", sessionToken: "account-secret" });
+    expect(JSON.parse(startCall.mock.calls[0][0]).token).toBeUndefined();
+    clearSession();
+  });
+
+  it("tears down a call on account loss without an unauthenticated HTTP request", () => {
+    const callAction = vi.fn();
+    vi.stubGlobal("window", { clearInterval, SpeakEasyNative: { callAction } });
+    const end = vi.spyOn(clientApi, "endCall");
+    const controller = new CallSessionController();
+    controller.handleNativeEvent({ detail: { type: "call", state: { state: "connected", callId: "existing" } } } as never);
+    controller.endLocally();
+    expect(controller.getSnapshot()).toBeNull();
+    expect(callAction).toHaveBeenCalledWith(JSON.stringify({ type: "end", callId: "existing" }));
+    expect(end).not.toHaveBeenCalled();
+  });
+
   it("keeps the call alive after a view unsubscribes and dispatches server detail.event", async () => {
     const startCall = vi.fn();
     vi.stubGlobal("window", { clearInterval, SpeakEasyNative: {

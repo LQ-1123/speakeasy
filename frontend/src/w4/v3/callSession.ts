@@ -1,5 +1,6 @@
 import { API_ORIGIN } from "../api";
 import { clientApi, currentClientIdentity, nativeBridge, websocketUrl, type CallTicket } from "./clientApi";
+import { emailCodeAuthEnabled } from "./authMode";
 import { OrderedPlayback } from "./orderedPlayback";
 import { SpeechGate } from "./speechGate";
 
@@ -240,7 +241,7 @@ export class CallSessionController {
       try { capabilities = JSON.parse(native?.getCapabilities?.() || "{}"); } catch { /* optional bridge */ }
       if (capabilities.nativeCalls && native?.startCall) {
         this.update({ native: true, speaker: false });
-        native.startCall(JSON.stringify({ apiOrigin: API_ORIGIN, callId: ticket.call_id, friendId: friend.id, ticket: ticket.ticket, wsPath: ticket.ws_path, friendName: friend.name, userId: identity.user_id, token: identity.token }));
+        native.startCall(JSON.stringify({ apiOrigin: API_ORIGIN, callId: ticket.call_id, friendId: friend.id, ticket: ticket.ticket, wsPath: ticket.ws_path, friendName: friend.name, userId: identity.user_id, ...(emailCodeAuthEnabled() ? { sessionToken: identity.token } : { token: identity.token }) }));
         return;
       }
       await this.connect(ticket);
@@ -509,6 +510,12 @@ export class CallSessionController {
   }
 
   async end(): Promise<void> { await this.finish(true); }
+
+  endLocally(): void {
+    const callId = this.snapshot?.callId;
+    if (callId) nativeBridge()?.callAction?.(JSON.stringify({ type: "end", callId }));
+    void this.finish(false);
+  }
 
   private async finish(notifyServer: boolean): Promise<void> {
     const callId = this.snapshot?.callId;

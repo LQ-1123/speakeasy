@@ -48,6 +48,7 @@ from app.v3.media_access import (
     verify_media_token,
 )
 from app.v3.security import bind_current_user
+from app.v3.media_auth import bind_v2_user
 from app.voice.stt_config import (
     STT_PRESETS,
     STTRuntimeConfig,
@@ -61,7 +62,7 @@ router = APIRouter(
     prefix="/api/v2",
     tags=["v2"],
     # V3 多用户：每个请求先绑定当前用户（不带身份头 = local，兼容老客户端）
-    dependencies=[Depends(bind_current_user)],
+    dependencies=[Depends(bind_v2_user)],
 )
 
 V2_VERSION = "2.0.0"
@@ -376,6 +377,9 @@ def _authorize_media_read(
         owner, matched_kind = found if found is not None else (None, None)
 
     if owner is None:
+        from app.v3.auth_policy import email_code_auth_enabled
+        if email_code_auth_enabled():
+            raise HTTPException(status_code=403, detail="历史媒体仅可在归档中访问")
         return True
     current = current_user_id()
     if owner == current:
@@ -2159,7 +2163,7 @@ async def get_audio(request: Request, filename: str, t: str = "") -> FileRespons
     if not os.path.isfile(path):
         log.warning("音频文件不存在: %s", filename)
         raise HTTPException(status_code=404, detail="音频不存在")
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"Cache-Control": "private, no-store"}
     if _authorize_media_read(
         services.db, filename=filename, token=t, kind=KIND_AUDIO
     ):
@@ -2339,7 +2343,7 @@ async def get_media(request: Request, filename: str, t: str = "") -> FileRespons
         raise HTTPException(status_code=404, detail="图片不存在") from None
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="图片不存在")
-    headers: dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+    headers: dict[str, str] = {"Cache-Control": "private, no-store"}
     if _authorize_media_read(
         services.db, filename=filename, token=t, kinds=MEDIA_IMAGE_KINDS
     ):

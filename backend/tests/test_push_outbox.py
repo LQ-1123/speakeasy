@@ -156,7 +156,7 @@ async def test_legacy_pending_rows_are_also_marked_unconfigured(db, monkeypatch)
 # -------------------------------------------------------------------- configured
 
 @pytest.mark.asyncio
-async def test_configured_push_sends_message_preview_and_avatar(db, monkeypatch):
+async def test_configured_push_sends_account_tagged_generic_notice_and_avatar(db, monkeypatch):
     event = seed_event(db)
     register_device(db)
     configure_credentials(monkeypatch)
@@ -178,11 +178,11 @@ async def test_configured_push_sends_message_preview_and_avatar(db, monkeypatch)
     assert body['platform'] == 'android'
     assert body['audience'] == {'registration_id': ['rid-1']}
     android = body['notification']['android']
-    # Real chat-app style: sender name as title, message text as body/big text.
-    assert android['alert'] == 'private transcript text'
-    assert android['title'] == 'Mia'
-    assert android['style'] == 1
-    assert android['big_text'] == 'private transcript text'
+    # Provider-delayed notifications must not expose a previous account's text.
+    assert android['alert'] == '你有一条新消息'
+    assert android['title'] == 'Sonder'
+    assert 'private transcript text' not in json.dumps(body)
+    assert android['extras']['user_id'] == USER
     # Deterministic avatar becomes an absolute PNG URL for JPush to download.
     assert android['large_icon'] == 'https://47-104-24-236.sslip.io/api/v3/avatar/seed1.png?g=female'
     assert android['extras']['event_id'] == event['id']

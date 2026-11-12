@@ -1,19 +1,19 @@
 /**
- * SpeakEasy V3 · 客户端 API + 设备身份。
+ * SpeakEasy V3 · 客户端 API 与账号会话。
  *
  * 身份模型
  * --------
- * - 首次启动生成一个随机 `device_key`，调 `/api/v3/auth/register` 换 (user_id, token)；
- * - 之后所有 `/api/**` 请求自动带 `X-User-Id` / `X-User-Token`；
- * - 注册失败（离线/老服务端）时退化为「无身份」= 服务端按 `local` 用户处理，
- *   保证页面仍可打开（与 V2 行为一致）。
+ * - 邮箱验证码模式只使用 Cookie / 原生安全存储中的账号会话；401 返回登录页。
+ * - 功能开关关闭时保留旧设备注册和身份刷新，兼容已有部署与回归测试。
  *
  * `installApiIdentity()` 会包装 `window.fetch`，因此**已有的 v2 请求**
- * （好友/聊天/动态）也会自动带上身份头，不需要逐个改动。
+ * （好友/聊天/动态）也会自动使用同一会话与 CSRF，不需要逐个改动。
  */
 
 import { API_ORIGIN } from "../api";
-import { readSession, sessionHeaders } from "./session";
+import { readSession, sessionHeaders, expireAccountSession } from "./session";
+
+import { emailCodeAuthEnabled } from "./authMode";
 
 const ID_STORE = "speakeasy.identity.v1";
 const DEVICE_STORE = "speakeasy.device_key.v1";
@@ -219,6 +219,7 @@ function deviceKey(): string {
 /** 注册/取回设备身份（幂等；同一 device_key 永远同一 user_id）。 */
 export function ensureIdentity(forceRefresh = false): Promise<Identity | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
+  if (emailCodeAuthEnabled()) { const session = readSession(); return Promise.resolve(session ? { user_id: session.user_id, token: session.token } : null); }
   if (forceRefresh && refreshReady) return refreshReady;
   if (ready && !forceRefresh) return ready;
   const stored = readLocal<Identity>(ID_STORE);
@@ -257,6 +258,7 @@ export function ensureIdentity(forceRefresh = false): Promise<Identity | null> {
 }
 
 export function currentIdentity(): Identity | null {
+  if (emailCodeAuthEnabled()) { const session = readSession(); return session ? { user_id: session.user_id, token: session.token } : null; }
   return identity;
 }
 
@@ -288,23 +290,17 @@ export function installApiIdentity(): void {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (!isOurApi(url)) return original(input, init);
-    /* 登录/注册本身不需要（也不应该带）身份：否则会被设备身份兜底抢先 */
-    if (url.includes("/api/v3/auth/login") || url.includes("/api/v3/auth/register")) {
-      return original(input, init);
-    }
-    /* 账号会话优先于设备身份：登录后所有请求改用 X-Session-Token */
+    const publicAuth = /\/api\/v3\/auth\/(?:config|email-code\/(?:request|verify)|login|register(?:\/email)?|password\/(?:forgot|reset))(?:[?]|$)/.test(url);
+    if (publicAuth) return original(input, { ...init, credentials: "include" });
     const session = readSession();
-    if (session) {
-      const method = (
-        init?.method ?? (input instanceof Request ? input.method : "GET")
-      ).toUpperCase();
-      const headers = new Headers(
-        init?.headers ?? (input instanceof Request ? input.headers : undefined),
-      );
-      for (const [key, value] of Object.entries(sessionHeaders(method))) {
-        headers.set(key, value);
-      }
-      return original(input, { ...(init ?? {}), headers });
+    if (emailCodeAuthEnabled() || session) {
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      headers.delete("X-User-Id"); headers.delete("X-User-Token"); headers.delete("X-Session-Token");
+      for (const [key, value] of Object.entries(sessionHeaders(method))) headers.set(key, value);
+      const response = await original(input, { ...init, headers, credentials: "include" });
+      if (response.status === 401 && emailCodeAuthEnabled() && session === readSession()) expireAccountSession();
+      return response;
     }
     let id: Identity | null = null;
     try {
@@ -369,7 +365,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401 && !retried && !readSession()) {
+  if (res.status === 401 && !emailCodeAuthEnabled() && !retried && !readSession()) {
     resetIdentity();
     await ensureIdentity();
     return request<T>(path, init, true);

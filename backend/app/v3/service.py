@@ -1840,6 +1840,9 @@ class V3Service:
 
     def materialize_due_events(self, user_id: str) -> int:
         """把到期的 pending 事件真正落地（点赞/评论/好友申请），幂等。"""
+        from app.v3.account_archive import user_is_available
+        if not user_is_available(self.db, user_id):
+            return 0
         now = _iso()
         with self.lock:
             rows = self.conn.execute(

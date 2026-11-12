@@ -54,6 +54,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 
@@ -141,8 +142,18 @@ def _users(db: Any) -> dict[str, int]:
     91 行里 75 行是残留。``registered`` 是注册过推送设备的数量，最接近
     "真的装了 App 并授权通知的人"。
     """
+    from app.v3.auth_policy import email_code_auth_enabled
     scope = user_scope.counts(db)
+    formal = user_scope.account_counts(db)
+    if email_code_auth_enabled():
+        return {
+            **scope, **formal, "total": formal["formal"],
+            "active_today": _count(db, "SELECT COUNT(*) FROM v3_users u JOIN v3_accounts a ON a.user_id=u.id"
+                                   " WHERE u.archived_at='' AND a.email_verified_at<>'' AND a.status='active'"
+                                   " AND datetime(u.last_seen_at)>=datetime(?)", (_account_day_start_utc(),)),
+        }
     return {
+        **formal,
         "total": scope["total"],
         "real": scope["real"],
         "empty": scope["empty"],
@@ -151,6 +162,10 @@ def _users(db: Any) -> dict[str, int]:
             db, "SELECT COUNT(*) FROM v3_users WHERE last_seen_at >= ?", (_local_day_start_utc(),)
         ),
     }
+
+
+def _account_day_start_utc() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
 
 def _personas(db: Any) -> dict[str, int]:
     return {

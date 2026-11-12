@@ -51,6 +51,9 @@ interface UserCounts {
 
 interface UserRow {
   id: string;
+  email?: string;
+  archived_at?: string;
+  account_type?: string;
   display_name?: string;
   /** 设备 key 尾号（后端已脱敏，只给尾部几位）。 */
   device_key_tail?: string;
@@ -65,6 +68,10 @@ interface UserRow {
 
 /** 后端返回的口径汇总（不受 `scope` 过滤影响）。 */
 interface UsersSummary {
+  formal?: number;
+  history?: number;
+  sessions?: number;
+  devices?: number;
   total?: number;
   real?: number;
   empty?: number;
@@ -91,7 +98,7 @@ type SortKey = "last_seen" | "created" | "posts";
  * （无痕窗口、重装 App、清应用数据），所以 `v3_users` 行数远大于人数。
  * 默认停在 `real`——运营想看的是"有多少人在用"，不是"有多少条注册记录"。
  */
-type ScopeKey = "all" | "real" | "empty";
+type ScopeKey = "formal" | "history" | "all" | "real" | "empty";
 
 const PAGE_SIZE = 20;
 
@@ -102,6 +109,8 @@ const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
 ];
 
 const SCOPE_OPTIONS: Array<{ value: ScopeKey; label: string }> = [
+  { value: "formal", label: "正式邮箱账号" },
+  { value: "history", label: "历史身份记录" },
   { value: "real", label: "有使用痕迹" },
   { value: "empty", label: "仅注册未使用" },
   { value: "all", label: "全部" },
@@ -181,7 +190,7 @@ export default function UsersSection() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("last_seen");
   // 默认只看"有使用痕迹"的：空注册记录会把真正要找的人淹掉
-  const [scope, setScope] = useState<ScopeKey>("real");
+  const [scope, setScope] = useState<ScopeKey>("formal");
   const [offset, setOffset] = useState(0);
 
   const params = { search, offset, limit: PAGE_SIZE, sort, scope };
@@ -223,7 +232,7 @@ export default function UsersSection() {
         <div>
           <h1 className="admin-section-title">用户管理</h1>
           <p className="admin-section-desc">
-            按昵称或设备尾号搜索；点任意一行查看该用户的设备、推送状态与好友。
+            按邮箱、昵称或设备尾号搜索；点任意一行查看账号的设备、推送状态与好友。
             管理台不读取用户与角色的聊天记录。
           </p>
         </div>
@@ -274,14 +283,10 @@ export default function UsersSection() {
           "为什么有 91 个用户"这种误读。数字来自后端 summary（不受 scope 影响）。 */}
       {summary && asNumber(summary.total) > 0 ? (
         <p className="admin-muted" style={{ margin: 0, fontSize: 12 }}>
-          有使用痕迹 <strong>{asNumber(summary.real)}</strong> 个
-          {asNumber(summary.registered) > 0
-            ? `（其中 ${asNumber(summary.registered)} 个注册了推送设备）`
-            : ""}
-          ；仅注册未使用 <strong>{asNumber(summary.empty)}</strong> 个，合计{" "}
-          {asNumber(summary.total)} 条注册记录。
+          正式账号 <strong>{asNumber(summary.formal)}</strong> 个；历史身份 <strong>{asNumber(summary.history)}</strong> 条；
+          有效会话 {asNumber(summary.sessions)} 个；推送设备 {asNumber(summary.devices)} 台。
           <br />
-          说明：客户端在无痕窗口、重装 App 或清数据后会重新生成身份，因此「注册记录」会多于真实人数。
+          同一邮箱跨设备使用只计一个账号；历史身份保留查询，不计入正式账号数。
         </p>
       ) : null}
 
@@ -308,10 +313,12 @@ export default function UsersSection() {
                 description={
                   search
                     ? "换个昵称关键词或设备尾号试试，或点「清除」看全部。"
+                    : scope === "formal" ? "验证邮箱并完成首次注册后，这里会出现正式账号。"
+                    : scope === "history" ? "旧设备身份和归档账号会保留在这里。"
                     : scope === "real"
                       ? "还没有任何用户产生过好友、动态或设备注册。想看到空注册记录，把「范围」切到「全部」。"
                       : scope === "empty"
-                        ? "所有注册记录都有使用痕迹，没有可清理的空壳。"
+                        ? "没有缺少使用痕迹的身份记录。"
                         : "用户首次在 App 里登录后，这里会出现账号记录。"
                 }
               />
@@ -329,6 +336,11 @@ export default function UsersSection() {
                     </span>
                   </div>
                 ),
+              },
+              {
+                key: "email",
+                header: "邮箱 / 身份",
+                render: (row) => <div>{row.email || "设备身份"}<div className="admin-muted">{row.archived_at ? "已归档" : row.account_type === "email" ? "邮箱账号" : "历史身份"}</div></div>,
               },
               {
                 // 后端判定，前端只展示：避免前后端各算一遍导致"筛出来是空壳但没标出来"

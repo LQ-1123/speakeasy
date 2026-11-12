@@ -1,4 +1,6 @@
 import { API_ORIGIN } from "../api";
+import { emailCodeAuthEnabled } from "./authMode";
+import { readSession } from "./session";
 import type { Identity } from "./api";
 
 export interface ClientBootstrap {
@@ -86,7 +88,8 @@ export interface NativeCallPayload {
   wsPath: string;
   friendName: string;
   userId: string;
-  token: string;
+  token?: string;
+  sessionToken?: string;
 }
 
 export interface NativeNotificationStatus {
@@ -125,6 +128,10 @@ export interface SpeakEasyNative {
   getTheme?: () => string;
   /** Returns true when the platform actually vibrated (native, not just JS). */
   performHaptic?: (type: string) => boolean;
+  readSession?: () => string | null;
+  saveSession?: (json: string) => boolean;
+  clearSession?: () => void;
+  getInstallationId?: () => string;
   getIdentity?: () => string;
   saveIdentity?: (json: string) => void;
   startCall?: (json: string) => void;
@@ -190,6 +197,10 @@ export async function nativeClientIdentity(): Promise<Identity | null> {
 }
 
 export async function currentClientIdentity(): Promise<Identity | null> {
+  if (emailCodeAuthEnabled()) {
+    const session = readSession();
+    return session ? { user_id: session.user_id, token: session.token } : null;
+  }
   const native = await nativeClientIdentity();
   if (native) return native;
   const { ensureIdentity } = await import("./api");

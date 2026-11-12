@@ -22,6 +22,18 @@ import org.json.JSONObject;
 public final class PushReceiver extends JPushMessageReceiver {
     private static final String TAG = "SpeakEasyPush";
 
+    static boolean acceptsOwner(Context context, String userId) {
+        try {
+            JSONObject session = new NativeIdentityStore(context).readSession();
+            return session != null && userId != null && !userId.isEmpty() && userId.equals(session.optString("userId"));
+        } catch (Exception failure) { return false; }
+    }
+
+    private static boolean accepts(Context context, NotificationMessage message) {
+        try { return acceptsOwner(context, new JSONObject(message.notificationExtras).optString("user_id")); }
+        catch (Exception failure) { return false; }
+    }
+
     private static String eventId(Context context, NotificationMessage message) {
         try {
             String id = new JSONObject(message.notificationExtras).optString("event_id", "");
@@ -36,6 +48,7 @@ public final class PushReceiver extends JPushMessageReceiver {
      * notification is suppressed; read events never reappear.
      */
     @Override public boolean isNeedShowNotification(Context context, NotificationMessage message, String content) {
+        if (!accepts(context, message)) return false;
         String id = eventId(context, message);
         if (id.isEmpty()) return true;
         if (MainActivity.isForeground()) return false;
@@ -43,6 +56,7 @@ public final class PushReceiver extends JPushMessageReceiver {
     }
 
     @Override public void onNotifyMessageArrived(Context context, NotificationMessage message) {
+        if (!accepts(context, message)) { JPushInterface.clearNotificationById(context, message.notificationId); return; }
         String id = eventId(context, message);
         if (id.isEmpty()) return;
         try {
@@ -63,6 +77,7 @@ public final class PushReceiver extends JPushMessageReceiver {
 
     @Override public void onNotifyMessageOpened(Context context, NotificationMessage message) {
         try {
+            if (!accepts(context, message)) { JPushInterface.clearNotificationById(context, message.notificationId); return; }
             JSONObject extra = new JSONObject(message.notificationExtras);
             String id = extra.optString("event_id", message.msgId == null ? "" : message.msgId);
             int notificationId = PushEvents.isRead(context, id) ? -1 : PushEvents.markRead(context, id);
@@ -73,7 +88,8 @@ public final class PushReceiver extends JPushMessageReceiver {
             Intent open = new Intent(context, MainActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     .putExtra("route", route)
-                    .putExtra("event_id", id);
+                    .putExtra("event_id", id)
+                    .putExtra("user_id", extra.optString("user_id"));
             context.startActivity(open);
         } catch (Exception failure) {
             Log.w(TAG, "open handling failed: " + failure);

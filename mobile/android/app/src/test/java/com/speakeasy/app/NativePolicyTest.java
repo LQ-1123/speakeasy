@@ -4,6 +4,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NativePolicyTest {
+    @Test public void expiredOrIncompleteAccountSessionsCannotCallOrReceiveNotifications() {
+        assertTrue(NativePolicy.validSession("u_one", "secret-token", "2099-01-01T00:00:00+00:00", 1_000));
+        assertFalse(NativePolicy.validSession("u_one", "secret-token", "2020-01-01T00:00:00+00:00", 1_700_000_000_000L));
+        assertFalse(NativePolicy.validSession("", "secret-token", "2099-01-01T00:00:00+00:00", 1_000));
+        assertFalse(NativePolicy.validSession("u_one", "", "2099-01-01T00:00:00+00:00", 1_000));
+        assertFalse(NativePolicy.validSession("u_one", "secret-token", "invalid", 1_000));
+    }
     @Test public void socketUsesOnlyConfiguredOriginAndPath() {
         assertEquals("wss://api.example/api/v3/calls/c1/stream", NativePolicy.socketUrl("https://api.example", "/api/v3/calls/c1/stream", "c1"));
         assertThrows(IllegalArgumentException.class, () -> NativePolicy.socketUrl("http://api.example", "/api/v3/calls/c1/stream", "c1"));

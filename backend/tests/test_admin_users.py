@@ -191,7 +191,8 @@ def test_list_users_scope_separates_shells_from_traced_users(client, db):
     assert everything["total"] == 2
     assert everything["scope"] == "all"
     # 汇总不受 scope 过滤影响
-    assert everything["summary"] == {"total": 2, "real": 1, "empty": 1, "registered": 1}
+    assert everything["summary"] == {"total": 2, "real": 1, "empty": 1, "registered": 1,
+                                     "formal": 0, "history": 2, "sessions": 0, "devices": 0}
     by_id = {item["id"]: item for item in everything["items"]}
     assert by_id["u_real"]["has_trace"] is True
     assert by_id["u_shell"]["has_trace"] is False

@@ -27,7 +27,7 @@ DEFAULT_PREFERENCES = {
     # 合作推荐（广告）默认关闭：只有成年且主动开启的用户才可能看到
     "ads": False,
 }
-EVENT_TICKETS: dict[str, tuple[str, float]] = {}
+EVENT_TICKETS: dict[str, tuple[str, float, str]] = {}
 DDL = """
 CREATE TABLE IF NOT EXISTS client_preferences(user_id TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS client_devices(registration_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS client_event_state(key TEXT PRIMARY KEY,value TEXT NO
 def ensure_client_schema(db):
     with db._lock, db.conn:
         db.conn.executescript(DDL)
+        from app.v3.device_sessions import DDL as binding_ddl
+        db.conn.execute(binding_ddl)
 
 
 def preferences(db, user):
@@ -131,13 +133,26 @@ class DeviceIn(BaseModel):
 async def register_device(body: DeviceIn, request: Request):
     user = await require_user(request)
     db = request.app.state.v2.db
+    from app.v3.security import _session_from_request
+    from app.v3 import accounts
+    from app.v3.auth_policy import email_code_auth_enabled
+    from app.v3.device_sessions import release_revoked_devices
+    session_token, _ = _session_from_request(request)
+    session = await asyncio.to_thread(accounts.authenticate_session, db, session_token) if session_token else None
     def save():
         with db._lock, db.conn:
+            if email_code_auth_enabled():
+                if session is None:
+                    raise HTTPException(401, '请先登录')
+                release_revoked_devices(db)
             existing = db.conn.execute('SELECT user_id FROM client_devices WHERE registration_id=?', (body.registration_id,)).fetchone()
             if existing and existing[0] != user:
                 raise HTTPException(409, '设备已绑定其他身份')
             db.conn.execute('INSERT INTO client_devices VALUES (?,?,?,?,?,?) ON CONFLICT(registration_id) DO UPDATE SET enabled=excluded.enabled,vendor=excluded.vendor,updated_at=excluded.updated_at',
                             (body.registration_id,user,body.platform,body.vendor,int(body.enabled),time.time()))
+            if session:
+                db.conn.execute('INSERT INTO client_device_sessions VALUES (?,?,?) ON CONFLICT(registration_id) DO UPDATE SET user_id=excluded.user_id,session_id=excluded.session_id',
+                                (body.registration_id, user, session['session_id']))
     await asyncio.to_thread(save)
     return {'registered': True}
 
@@ -147,13 +162,13 @@ async def event_ticket(request: Request):
     user = await require_user(request)
     minor_gate(request.app.state.v2.db, user, feature="feed")
     now = time.time()
-    for key, (_, expiry) in list(EVENT_TICKETS.items()):
-        if expiry < now:
+    for key, entry in list(EVENT_TICKETS.items()):
+        if entry[1] < now:
             EVENT_TICKETS.pop(key, None)
     if len(EVENT_TICKETS) >= 2000:
         raise HTTPException(429, '连接繁忙')
     ticket = secrets.token_urlsafe(32)
-    EVENT_TICKETS[hashlib.sha256(ticket.encode()).hexdigest()] = (user, now+60)
+    EVENT_TICKETS[hashlib.sha256(ticket.encode()).hexdigest()] = (user, now+60, getattr(request.state, 'session_id', ''))
     db=request.app.state.v2.db
     with db._lock:
         sequence=db.conn.execute('SELECT COALESCE(MAX(sequence),0) FROM client_events WHERE user_id=?',(user,)).fetchone()[0]
@@ -176,13 +191,17 @@ async def event_socket(ws: WebSocket):
         if auth.get('type') != 'auth' or not entry or entry[1] < time.time():
             await ws.close(code=4401)
             return
-        user, _ = entry
+        user, _, session_id = entry
         cursor = max(0, int(auth.get('last_sequence') or 0))
     except (ValueError, AttributeError, asyncio.TimeoutError, WebSocketDisconnect):
         with contextlib.suppress(Exception):
             await ws.close(code=4401)
         return
     db = ws.app.state.v2.db
+    from app.v3.session_liveness import session_is_live
+    if not await asyncio.to_thread(session_is_live, db, user, session_id):
+        await ws.close(code=4401)
+        return
     # 青少年模式：事件流属于"主动内容"，建连前再判一次（ticket 可能在允许时段签发）。
     try:
         teen.enforce(db, user, feature="feed")
@@ -193,6 +212,9 @@ async def event_socket(ws: WebSocket):
     try:
         await ws.send_json({'type':'ready','sequence':cursor})
         while True:
+            if not await asyncio.to_thread(session_is_live, db, user, session_id):
+                await ws.close(code=4401)
+                return
             rows = await asyncio.to_thread(event_rows, db, user, cursor)
             for event in rows:
                 await ws.send_json(event)

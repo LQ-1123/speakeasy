@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v3/calls", tags=["calls"])
 REGISTRY = CallSessionRegistry(max_active=max(1, int(os.getenv("SE_MAX_ACTIVE_CALLS", "3"))))
 RUNTIMES: dict[str, CallRuntime] = {}
+CALL_SESSIONS: dict[str, str] = {}
 MAX_PCM_BYTES = 16000 * 2 * 30
 
 
@@ -82,6 +83,7 @@ async def create_call(body: CallIn, request: Request) -> dict:
     except ValueError:
         raise HTTPException(409, "请求编号已用于其他通话") from None
     RUNTIMES.setdefault(call.call_id, CallRuntime(started_at=time.time(), user_id=user, friend_id=body.friend_id))
+    CALL_SESSIONS[call.call_id] = getattr(request.state, 'session_id', '')
     return payload(call, REGISTRY.take_initial_ticket(call))
 
 
@@ -93,6 +95,7 @@ async def renew_ticket(call_id: str, request: Request) -> dict:
         ticket = REGISTRY.issue_ticket(call_id, user)
     except (PermissionError, KeyError):
         raise HTTPException(410, "通话已结束或恢复超时") from None
+    CALL_SESSIONS[call_id] = getattr(request.state, 'session_id', '')
     # Authenticated takeover beats the old connection's heartbeat timeout.
     runtime = RUNTIMES.get(call_id)
     if runtime and runtime.socket:
@@ -107,6 +110,7 @@ async def renew_ticket(call_id: str, request: Request) -> dict:
 
 
 async def finish_call(app, call_id: str, user: str) -> None:
+    CALL_SESSIONS.pop(call_id, None)
     call = REGISTRY.owned(call_id, user)
     runtime = RUNTIMES.pop(call_id, None)
     if call:
@@ -166,8 +170,12 @@ async def end_call(call_id: str, request: Request) -> dict:
 
 
 @router.get("/{call_id}/audio/{audio_id}")
-async def private_call_audio(call_id: str, audio_id: str, ticket: str = ""):
+async def private_call_audio(call_id: str, audio_id: str, request: Request, ticket: str = ""):
     runtime = RUNTIMES.get(call_id)
+    if runtime:
+        from app.v3.session_liveness import session_is_live
+        if not await asyncio.to_thread(session_is_live, request.app.state.v2.db, runtime.user_id, CALL_SESSIONS.get(call_id, '')):
+            raise HTTPException(403, '会话已失效')
     media = runtime.media.get(audio_id) if runtime else None
     if not media or time.time() >= media['expires']:
         raise HTTPException(404, '音频已过期')
@@ -219,6 +227,14 @@ async def call_stream(ws: WebSocket, call_id: str) -> None:
     runtime.disconnect_version += 1
     socket_version = runtime.disconnect_version
     services = ws.app.state.v2
+    from app.v3.session_liveness import session_is_live
+    session_id = CALL_SESSIONS.get(call_id, '')
+    if not await asyncio.to_thread(session_is_live, services.db, call.user_id, session_id):
+        await ws.close(code=4401)
+        REGISTRY.end(call_id, call.user_id)
+        RUNTIMES.pop(call_id, None)
+        reset_current_user(context)
+        return
     friend = await asyncio.to_thread(services.db.get_friend, call.friend_id, owner_user_id=call.user_id)
     if not friend or friend.get("owner_user_id") != call.user_id:
         await ws.close(code=4404)
@@ -339,6 +355,9 @@ async def call_stream(ws: WebSocket, call_id: str) -> None:
     async def keepalive():
         while True:
             await asyncio.sleep(10)
+            if not await asyncio.to_thread(session_is_live, services.db, call.user_id, session_id):
+                await ws.close(code=4401, reason='session-expired')
+                return
             if time.monotonic()-last_received > 35:
                 await ws.close(code=1011, reason="heartbeat-timeout")
                 return

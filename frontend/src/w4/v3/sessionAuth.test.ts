@@ -48,6 +48,7 @@ it("login stores the session and later requests use session headers", async () =
   vi.stubGlobal("fetch", mockFetch);
   vi.stubGlobal("window", { fetch: mockFetch, localStorage: store });
 
+  (await import("./authMode")).configureEmailCodeAuth(false);
   const api = await import("./api");
   api.installApiIdentity();
   const session = await import("./session");
@@ -88,6 +89,7 @@ it("logout revokes the session and clears local state", async () => {
   });
   vi.stubGlobal("fetch", mockFetch);
   vi.stubGlobal("window", { fetch: mockFetch, localStorage: store });
+  (await import("./authMode")).configureEmailCodeAuth(false);
   await import("./api");
   const session = await import("./session");
 

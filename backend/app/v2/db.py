@@ -112,6 +112,9 @@ def legacy_shared_enabled() -> bool:
     默认关闭（多用户隔离优先）；部署旧库的单用户服务器时设置
     ``SE_LEGACY_SHARED_OWNER=1`` 打开。
     """
+    from app.v3.auth_policy import email_code_auth_enabled
+    if email_code_auth_enabled():
+        return False
     return str(os.getenv("SE_LEGACY_SHARED_OWNER", "0")).strip().lower() in {
         "1",
         "true",

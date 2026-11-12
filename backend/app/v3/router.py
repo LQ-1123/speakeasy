@@ -191,6 +191,9 @@ async def health(request: Request) -> dict:
 
 @router.post("/auth/register")
 async def auth_register(request: Request, body: RegisterIn | None = None) -> dict:
+    from app.v3.auth_policy import require_legacy_auth
+
+    require_legacy_auth()
     payload = body or RegisterIn()
     services = getattr(request.app.state, "v2", None)
     db = getattr(services, "db", None)

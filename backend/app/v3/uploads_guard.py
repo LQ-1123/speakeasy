@@ -59,12 +59,18 @@ class ProtectedUploads(StaticFiles):
     async def get_response(self, path: str, scope: dict):  # type: ignore[override]
         rel = normalize_filename(path)
         db = self._db(scope)
+        from app.v3.auth_policy import email_code_auth_enabled
+        code_mode = email_code_auth_enabled()
         if not rel or db is None:
+            if code_mode:
+                return JSONResponse({"detail": "媒体不可用"}, status_code=404)
             # 非法路径 / 没有库：交给 StaticFiles 的默认行为（404 或读取）
             return await super().get_response(path, scope)
 
         owner = self._owner(db, rel)
         if owner is None:
+            if code_mode:
+                return JSONResponse({"detail": "历史媒体仅可在归档中访问"}, status_code=403)
             response = await super().get_response(path, scope)
             response.headers["X-Legacy-Asset"] = "1"
             return response
@@ -76,8 +82,10 @@ class ProtectedUploads(StaticFiles):
             verified = verify_media_token(db, token)
             if verified is not None:
                 token_user, token_kind, token_file = verified
-                if token_file == rel and token_user == owner_user:
-                    return await super().get_response(path, scope)
+                if token_file == rel and token_user == owner_user and token_kind == owner_kind:
+                    response = await super().get_response(path, scope)
+                    response.headers["Cache-Control"] = "private, no-store"
+                    return response
             return JSONResponse({"detail": "媒体令牌无效或已过期"}, status_code=403)
 
         # 无 token：用统一身份解析（会话凭据 / 旧设备身份 / local 单用户模式）
@@ -91,7 +99,9 @@ class ProtectedUploads(StaticFiles):
             log.debug("uploads 身份解析失败: %s", exc)
             return JSONResponse({"detail": "需要登录后访问该媒体"}, status_code=401)
         if user_id and user_id == owner_user:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
         return JSONResponse(
             {"detail": f"无权访问该媒体（owner={owner_kind}）"}, status_code=403
         )

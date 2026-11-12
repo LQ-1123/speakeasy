@@ -16,14 +16,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.logging_utils import get_logger
-from app.v3 import accounts
+from app.v3 import accounts, email_codes
+from app.v3.auth_policy import email_code_auth_enabled, require_legacy_auth
 from app.v3.identity import LOCAL_USER_ID, current_user_id
-from app.v3.security import authenticate, bind_current_user
-from fastapi import Depends
+from app.v3.security import _session_from_request, authenticate, bind_current_user
 
 log = get_logger(__name__)
 
@@ -120,11 +120,71 @@ class ChangePasswordIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class EmailCodeVerifyIn(BaseModel):
+    challenge_id: str = Field(min_length=1, max_length=128)
+    code: str = Field(max_length=128)
+    invite_code: str = Field(default="", max_length=64)
+    device_key: str = Field(default="", max_length=128)
+    platform: str = Field(default="web", max_length=32)
+
+
+def _code_error(exc: email_codes.CodeError) -> HTTPException:
+    headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+    return HTTPException(status_code=exc.status, detail=exc.detail, headers=headers)
+
+
+def _require_email_code_mode() -> None:
+    if not email_code_auth_enabled():
+        raise HTTPException(status_code=404, detail="邮箱验证码登录未启用")
+
+
+@router.get("/config")
+async def auth_config() -> dict:
+    return {"email_code_auth": email_code_auth_enabled(), "invite_required": accounts.invite_required()}
+
+
+@router.post("/email-code/request")
+async def request_email_code(body: EmailOnlyIn, request: Request) -> dict:
+    _require_email_code_mode()
+    # Forwarded headers are deliberately ignored. Configure the ASGI server's
+    # trusted proxy list if a deployment needs the original peer address.
+    ip = request.client.host if request.client else "unknown"
+    try:
+        result = await _run(email_codes.request_code, _db(request), body.email, ip)
+    except email_codes.CodeError as exc:
+        log.info("auth_email_code_request outcome=failure reason=%s status=%s", exc.detail["code"], exc.status)
+        raise _code_error(exc) from None
+    log.info("auth_email_code_request outcome=success")
+    return result
+
+
+@router.post("/email-code/verify")
+async def verify_email_code(body: EmailCodeVerifyIn, request: Request, response: Response) -> dict:
+    _require_email_code_mode()
+    try:
+        result = await _run(
+            email_codes.verify_code, _db(request), body.challenge_id, body.code,
+            invite_code=body.invite_code, device_key=body.device_key, platform=body.platform,
+        )
+    except email_codes.CodeError as exc:
+        log.info("auth_email_code_verify outcome=failure reason=%s status=%s", exc.detail["code"], exc.status)
+        raise _code_error(exc) from None
+    log.info("auth_email_code_verify outcome=success created=%s user_id=%s", result["created"], result["user_id"])
+    response.headers["Cache-Control"] = "no-store"
+    if body.platform.lower() == "android":
+        result["csrf_token"] = ""
+    else:
+        result["csrf_token"] = _set_auth_cookies(response, request, result, result["user_id"])
+        result.pop("session_token", None)
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # 注册 / 登录 / 退出
 # --------------------------------------------------------------------------- #
 @router.post("/register/email")
 async def register_email(body: EmailRegisterIn, request: Request, response: Response) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         result = await _run(
@@ -149,6 +209,7 @@ async def register_email(body: EmailRegisterIn, request: Request, response: Resp
 
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         result = await _run(
@@ -171,9 +232,7 @@ async def logout(
 ) -> dict:
     """撤销当前会话；无 Cookie 时凭 ``X-Session-Token`` 头撤销对应会话。"""
     db = _db(request)
-    token = (request.headers.get("x-session-token") or "").strip()
-    if not token:
-        token = str(request.cookies.get(accounts.SESSION_COOKIE) or "")
+    token, _ = _session_from_request(request)
     if token:
         session = await _run(accounts.authenticate_session, db, token)
         if session and session["user_id"] == user_id:
@@ -199,6 +258,7 @@ async def logout_all(
 # --------------------------------------------------------------------------- #
 @router.post("/verify-email")
 async def verify_email(body: TokenIn, request: Request) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         user_id = await _run(accounts.verify_email, db, body.token)
@@ -211,6 +271,7 @@ async def verify_email(body: TokenIn, request: Request) -> dict:
 async def resend_verification(
     request: Request, user_id: str = Depends(bind_current_user)
 ) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         token = await _run(accounts.resend_verification, db, user_id)
@@ -225,6 +286,7 @@ async def resend_verification(
 @router.post("/password/forgot")
 async def forgot_password(body: EmailOnlyIn, request: Request) -> dict:
     """无论邮箱是否存在都返回 ok（防枚举）；dev 模式下发令牌便于联调。"""
+    require_legacy_auth()
     db = _db(request)
     token = await _run(accounts.request_password_reset, db, body.email)
     payload: dict = {"ok": True}
@@ -235,6 +297,7 @@ async def forgot_password(body: EmailOnlyIn, request: Request) -> dict:
 
 @router.post("/password/reset")
 async def reset_password(body: ResetIn, request: Request, response: Response) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         user_id = await _run(accounts.reset_password, db, body.token, body.password)
@@ -249,6 +312,7 @@ async def change_password(
     body: ChangePasswordIn, request: Request, response: Response,
     user_id: str = Depends(bind_current_user),
 ) -> dict:
+    require_legacy_auth()
     db = _db(request)
     try:
         await _run(accounts.change_password, db, user_id, body.old_password, body.new_password)
@@ -272,6 +336,7 @@ async def bind_legacy(
     绑定成功后设备 token 立即作废（``register_user`` 不再为该身份签发），
     后续一律走会话凭据。
     """
+    require_legacy_auth()
     db = _db(request)
     raw_id = (request.headers.get("x-user-id") or "").strip()
     raw_token = (request.headers.get("x-user-token") or "").strip()
@@ -308,6 +373,9 @@ async def bind_legacy(
 async def sessions(request: Request, user_id: str = Depends(bind_current_user)) -> dict:
     db = _db(request)
     items = await _run(accounts.list_sessions, db, user_id)
+    current = getattr(request.state, "session_id", "")
+    for item in items:
+        item["current"] = item["session_id"] == current
     return {"items": items}
 
 
@@ -331,17 +399,21 @@ async def capabilities(
 
 
 @router.get("/identity")
-async def identity(request: Request, user_id: str = Depends(bind_current_user)) -> dict:
+async def identity(request: Request, response: Response, user_id: str = Depends(bind_current_user)) -> dict:
     """当前请求身份的解析结果（排查 401/降级 local 时使用）。"""
     db = _db(request)
+    response.headers["Cache-Control"] = "private, no-store"
     account = await _run(accounts.account_for_user, db, user_id)
-    token = (request.headers.get("x-session-token") or "").strip()
-    cookie_auth = not token and bool(request.cookies.get(accounts.SESSION_COOKIE))
+    token, cookie_auth = _session_from_request(request)
+    session = await _run(accounts.authenticate_session, db, token) if token else None
+    expires_at = str((session or {}).get("expires_at") or "")
     return {
         "user_id": user_id,
         "resolved_by": "session" if (token or cookie_auth) else "device_header",
         "has_account": account is not None,
         "email": str((account or {}).get("email") or ""),
         "email_verified": bool((account or {}).get("email_verified_at")),
+        "expires_at": expires_at,
+        "csrf_token": str(request.cookies.get(accounts.CSRF_COOKIE) or "") if cookie_auth else "",
         "current_user_context": current_user_id(),
     }

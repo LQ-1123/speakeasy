@@ -50,6 +50,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 from app.admin.api import deps
 from app.admin import user_scope
 from app.logging_utils import get_logger
+from app.v3.account_archive import is_archived
 
 log = get_logger(__name__)
 
@@ -177,7 +178,7 @@ async def list_users(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     sort: str = Query("last_seen", description="last_seen | created | posts"),
-    scope: str = Query("all", description="all | real（有使用痕迹）| empty（仅注册未使用）"),
+    scope: str = Query("", description="formal | history | all | real | empty"),
 ) -> dict:
     """用户列表：搜索 + 分页 + 排序 + 口径过滤，带动态/好友/设备计数。
 
@@ -197,7 +198,8 @@ async def list_users(
             status_code=400,
             detail=f"sort 不合法: {sort_value}（可选 {', '.join(_SORTS)}）",
         )
-    scope_value = str(scope or "all").strip()
+    from app.v3.auth_policy import email_code_auth_enabled
+    scope_value = str(scope or ("formal" if email_code_auth_enabled() else "all")).strip()
     if scope_value not in user_scope.SCOPES:
         raise HTTPException(
             status_code=400,
@@ -212,12 +214,25 @@ async def list_users(
     where = ""
     params: list[Any] = []
     clauses: list[str] = []
+    emails = user_scope.email_map(db)
+    formal = user_scope.formal_ids(db)
 
     query = str(search or "").strip()
     if query:
         like = f"%{query}%"
-        clauses.append("(u.id LIKE ? OR u.display_name LIKE ? OR u.device_key LIKE ?)")
+        matching = sorted(uid for uid, email in emails.items() if query.lower() in email.lower())
+        email_clause = f" OR u.id IN ({','.join('?' for _ in matching)})" if matching else ""
+        clauses.append(f"(u.id LIKE ? OR u.display_name LIKE ? OR u.device_key LIKE ?{email_clause})")
         params.extend([like, like, like])
+        params.extend(matching)
+
+    if scope_value in ("formal", "history"):
+        if formal:
+            op = "IN" if scope_value == "formal" else "NOT IN"
+            clauses.append(f"u.id {op} ({','.join('?' for _ in formal)})")
+            params.extend(sorted(formal))
+        elif scope_value == "formal":
+            clauses.append("0")
 
     if scope_value == "real" or scope_value == "empty":
         if real:
@@ -235,11 +250,11 @@ async def list_users(
 
     count_sql = "SELECT COUNT(*) AS n FROM v3_users u" + where
     list_sql = (
-        "SELECT u.id, u.display_name, u.device_key, u.created_at, u.last_seen_at,"
+        "SELECT u.id, u.display_name, u.device_key, u.created_at, u.last_seen_at, u.archived_at,"
         " COALESCE(up.post_count, 0) AS post_count,"
         " (SELECT COUNT(*) FROM friendships f"
         "   WHERE f.user_id=u.id AND f.status='accepted') AS friend_count,"
-        " (SELECT COUNT(*) FROM client_devices d WHERE d.user_id=u.id) AS device_count"
+        " (SELECT COUNT(*) FROM client_devices d WHERE d.user_id=u.id AND d.enabled=1) AS device_count"
         " FROM v3_users u"
         " LEFT JOIN (SELECT user_id, COUNT(*) AS post_count FROM user_posts GROUP BY user_id) up"
         " ON up.user_id = u.id"
@@ -265,6 +280,9 @@ async def list_users(
             "device_key_tail": _device_tail(row["device_key"]),
             "created_at": str(row["created_at"] or ""),
             "last_seen_at": str(row["last_seen_at"] or ""),
+            "archived_at": str(row["archived_at"] or ""),
+            "email": emails.get(str(row["id"]), ""),
+            "account_type": "email" if str(row["id"]) in formal else "history",
             "has_trace": str(row["id"]) in all_real,
             "counts": {
                 "posts": int(row["post_count"] or 0),
@@ -281,7 +299,7 @@ async def list_users(
         "limit": int(limit),
         "scope": scope_value,
         # 全局口径汇总（不受 scope 过滤影响），前端用来显示"共 N 条，其中 M 条有痕迹"
-        "summary": user_scope.counts(db),
+        "summary": {**user_scope.counts(db), **user_scope.account_counts(db)},
         "items": items,
     }
 
@@ -588,6 +606,8 @@ async def assign_friend(request: Request, uid: str, body: dict = Body(...)) -> d
         return _DB_NOT_READY
 
     user_id = str(uid or "").strip()
+    if is_archived(db, user_id):
+        raise HTTPException(status_code=403, detail="归档身份只读")
     data = body if isinstance(body, dict) else {}
     persona_id = str(data.get("persona_id") or "").strip()
     mode = str(data.get("mode") or "direct").strip().lower()
@@ -667,6 +687,8 @@ async def remove_friend(request: Request, uid: str, friendship_id: str) -> dict:
         return _DB_NOT_READY
 
     user_id = str(uid or "").strip()
+    if is_archived(db, user_id):
+        raise HTTPException(status_code=403, detail="归档身份只读")
     fid = str(friendship_id or "").strip()
     with db._lock:  # noqa: SLF001
         row = db.conn.execute(
@@ -727,6 +749,8 @@ async def push_test(request: Request, uid: str) -> dict:
         return _DB_NOT_READY
 
     user_id = str(uid or "").strip()
+    if is_archived(db, user_id):
+        raise HTTPException(status_code=403, detail="归档身份只读")
     if not _user_exists(db, user_id):
         return {"ok": False, "issues": ["用户不存在"]}
 
@@ -761,7 +785,7 @@ async def push_test(request: Request, uid: str) -> dict:
             "android": {
                 "alert": "管理台测试推送",
                 "title": "SpeakEasy",
-                "extras": {"route": "#/", "push_test": True},
+                "extras": {"route": "#/chats", "push_test": True, "user_id": user_id},
             }
         },
         "options": {"time_to_live": 60},

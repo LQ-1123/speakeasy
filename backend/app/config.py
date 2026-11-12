@@ -25,6 +25,32 @@ REF_AUDIO_DIR = os.path.join(ASSETS_DIR, "ref_audio")
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 STATIC_DIR = os.path.join(PROJECT_ROOT, "backend", "app", "static")
 
+# 把仓库根的 .env 载入进程环境变量。
+# 账号/邮件/媒体等新配置是用 ``os.getenv`` 直接读取的（与 ``get_settings()`` 分属两套），
+# 而 pydantic-settings 只会把 .env 读进 Settings、不会写进 ``os.environ``；不显式
+# load_dotenv 的话，``.env`` 里的 ``SE_EMAIL_CODE_* / SE_SMTP_* / SE_MEDIA_SECRET``
+# 对业务代码不可见，验证码登录会直接 503。``override=False`` 保证真实环境变量
+# （systemd Environment / EnvironmentFile / 命令行导出）优先级最高。
+# 测试必须隔离：``backend/tests/conftest.py`` 会设 ``SE_LOAD_DOTENV=0``，避免把开发者
+# 本机的 .env（例如 SE_REQUIRE_AUTH=1）带进 pytest。
+try:  # pragma: no cover - python-dotenv 在 requirements 中，缺失时保持旧行为
+    from dotenv import load_dotenv as _load_dotenv
+except Exception:  # noqa: BLE001
+    _load_dotenv = None
+
+
+def _load_project_env() -> None:
+    if _load_dotenv is None:
+        return
+    if str(os.getenv("SE_LOAD_DOTENV", "1")).strip().lower() in {"0", "false", "no"}:
+        return
+    for candidate in (os.path.join(PROJECT_ROOT, ".env"), os.path.join(PROJECT_ROOT, "backend", ".env")):
+        if os.path.isfile(candidate):
+            _load_dotenv(candidate, override=False)
+
+
+_load_project_env()
+
 
 def _abs(path: str, base: str = PROJECT_ROOT) -> str:
     if not path:

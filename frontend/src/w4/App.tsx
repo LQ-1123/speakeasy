@@ -32,6 +32,7 @@ import { backToParent, closeTopOverlay, navigateTo, syncFromHash, useNavigation 
 import { usePreferences } from "./v3/preferences";
 import { PushOptIn } from "./v3/PushOptIn";
 import { GlobalNotification } from "./v3/GlobalNotification";
+import { AuthGate } from "./v3/AuthGate";
 import { TeenGate } from "./v3/TeenGate";
 import { installAudioBus } from "./audioBus";
 import { installApiIdentity } from "./v3/api";
@@ -56,7 +57,7 @@ import { PersonaProfileView } from "./v3/PersonaProfileView";
 import { installPreviewAdapter, isPreviewMode, previewVariant } from "./previewAdapter";
 import { PreviewBridge } from "./previewBridge";
 
-/* 设备身份：给所有 /api 请求补 X-User-Id / X-User-Token（浏览器环境幂等） */
+/* API 会话注入（浏览器环境幂等）；业务请求在 AuthGate 恢复登录后启动。 */
 installApiIdentity();
 
 /* 设计验收 iframe：必须在任何请求发出前安装本地 fixture 适配器。 */
@@ -435,13 +436,15 @@ export function App() {
   const preview = isPreviewMode();
   return (
     <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <AppProvider>
-          <Shell />
-          <TeenGate />
-          {preview ? <PreviewBridge variant={previewVariant()} /> : null}
-        </AppProvider>
-      </QueryClientProvider>
+      <AuthGate preview={preview}>
+        <QueryClientProvider client={queryClient}>
+          <AppProvider>
+            <Shell />
+            <TeenGate />
+            {preview ? <PreviewBridge variant={previewVariant()} /> : null}
+          </AppProvider>
+        </QueryClientProvider>
+      </AuthGate>
     </ThemeProvider>
   );
 }

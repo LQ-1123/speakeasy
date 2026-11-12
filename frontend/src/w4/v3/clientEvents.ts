@@ -1,5 +1,6 @@
 import { clientApi, currentClientIdentity, websocketUrl, type ClientBootstrap } from "./clientApi";
 import { queryClient } from "../queryClient";
+import { AUTH_EXPIRED_EVENT, AUTH_LOGOUT_EVENT } from "./session";
 import { EventBatch } from "./eventBatch";
 
 export interface ClientEvent { id: string; sequence: number; type: string; is_read?: boolean; replay?: boolean; friend_id?: string; post_id?: string; payload?: Record<string, unknown> }
@@ -61,5 +62,8 @@ export function connectClientEvents(onEvent: (events: ClientEvent[]) => void, on
   const online = () => { socket?.close(); window.clearTimeout(timer); void connect(); };
   window.addEventListener("online", online);
   void connect();
-  return () => { stopped = true; batch.stop(); socket?.close(); window.clearTimeout(timer); window.removeEventListener("online", online); };
+  const stop = () => { stopped = true; batch.stop(); socket?.close(); window.clearTimeout(timer); window.removeEventListener("online", online); };
+  window.addEventListener(AUTH_EXPIRED_EVENT, stop);
+  window.addEventListener(AUTH_LOGOUT_EVENT, stop);
+  return () => { stop(); window.removeEventListener(AUTH_EXPIRED_EVENT, stop); window.removeEventListener(AUTH_LOGOUT_EVENT, stop); };
 }

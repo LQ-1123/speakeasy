@@ -24,8 +24,8 @@
     有聊天消息 / 发过 moment。满足任一即是。
     注意：这不是"真人"的严格定义，只是"这个身份被用过"的更好代理。
 ``empty``
-    ``total - real``：注册后没有任何痕迹的残留行。这类行可以安全清理
-    （见 ``scripts/cleanup_empty_users.py``），删掉不影响任何用户数据。
+    ``total - real``：没有上述业务信号的身份。它不能作为删除依据：
+    已验证邮箱账号、资料、收藏和媒体可能不在这些旧信号中。账号模式采用显式归档。
 
 ``registered``
     单独给出"注册过推送设备"的数量。它比 ``real`` 更严格，是"装过 App 并且
@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from typing import Any
 
 from app.logging_utils import get_logger
@@ -155,7 +156,49 @@ def counts(db: Any) -> dict[str, int]:
 
 
 #: 用户列表 ``scope`` 参数的合法取值。
-SCOPES: tuple[str, ...] = ("all", "real", "empty")
+SCOPES: tuple[str, ...] = ("formal", "history", "all", "real", "empty")
+
+
+def formal_ids(db: Any) -> set[str]:
+    return _ids(db, "SELECT u.id FROM v3_users u JOIN v3_accounts a ON a.user_id=u.id"
+                " WHERE u.archived_at='' AND a.email_verified_at<>''")
+
+
+def account_counts(db: Any) -> dict[str, int]:
+    """Stable account, session and enabled push-device counts, never people."""
+    existing = _ids(db, "SELECT id FROM v3_users")
+    formal = formal_ids(db)
+    result = {"formal": len(formal), "history": len(existing - formal), "sessions": 0, "devices": 0}
+    for key, sql in {
+        "sessions": "SELECT COUNT(*) FROM v3_sessions s JOIN v3_accounts a ON a.user_id=s.user_id"
+                    " JOIN v3_users u ON u.id=s.user_id WHERE s.revoked_at=''"
+                    " AND datetime(s.expires_at)>datetime('now') AND a.status='active'"
+                    " AND a.email_verified_at<>'' AND u.archived_at=''",
+        "devices": "SELECT COUNT(*) FROM client_devices d JOIN v3_accounts a ON a.user_id=d.user_id"
+                   " JOIN v3_users u ON u.id=d.user_id WHERE d.enabled=1 AND u.archived_at=''"
+                   " AND a.status='active' AND a.email_verified_at<>''",
+    }.items():
+        try:
+            with db._lock:
+                result[key] = int(db.conn.execute(sql).fetchone()[0])
+        except (sqlite3.Error, AttributeError, RuntimeError):
+            pass
+    return result
+
+
+def email_map(db: Any) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if db is None:
+        return result
+    for sql, archived in (("SELECT user_id,email FROM v3_accounts", False),
+                          ("SELECT user_id,account_json FROM v3_identity_archives", True)):
+        try:
+            with db._lock:
+                for row in db.conn.execute(sql):
+                    result[str(row[0])] = str(json.loads(row[1]).get("email", "") if archived else row[1])
+        except (sqlite3.Error, AttributeError, ValueError):
+            pass
+    return result
 
 
 __all__ = ["REGISTERED_SQL", "SCOPES", "SIGNAL_QUERIES", "counts", "real_ids", "registered_ids", "signal_ids"]

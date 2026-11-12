@@ -472,6 +472,8 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
     """
     with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层共用连接与锁
         db.conn.executescript(DDL)
+        from app.v3.account_archive import ensure_archive_schema
+        ensure_archive_schema(db)
         # 轻量迁移：给老的 persona_posts 补 language 列（决定朗读声线）
         cols = {
             row[1]

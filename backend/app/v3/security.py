@@ -34,6 +34,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from app.logging_utils import get_logger
+from app.v3.auth_policy import email_code_auth_enabled, require_legacy_auth
 from app.v3.identity import LOCAL_USER_ID, is_valid_user_id, set_current_user
 
 log = get_logger(__name__)
@@ -78,6 +79,7 @@ def register_user(db: Any, device_key: str | None, display_name: str = "") -> di
     幂等：同一个 ``device_key`` 永远返回同一条用户记录。但**一旦该身份绑定邮箱账号**，
     设备身份路径立即关闭：不再签发 token，返回 401 要求登录。
     """
+    require_legacy_auth()
     key = (device_key or "").strip()
     if key and not _DEVICE_KEY_RE.match(key):
         raise HTTPException(status_code=400, detail="device_key 格式不合法")
@@ -137,7 +139,11 @@ def register_user(db: Any, device_key: str | None, display_name: str = "") -> di
 
 def authenticate(db: Any, user_id: str, token: str) -> bool:
     """校验旧设备身份：用户 id 与设备 token 是否匹配。"""
-    if not user_id or not token:
+    if email_code_auth_enabled() or not user_id or not token:
+        return False
+    from app.v3.account_archive import user_is_available
+
+    if not user_is_available(db, user_id):
         return False
     if user_id == LOCAL_USER_ID:
         return False  # local 身份不接受带 token 的远程声明
@@ -189,11 +195,14 @@ async def bind_current_user(request: Request) -> str:
         if from_cookie and request.method not in _SAFE_METHODS and not _csrf_ok(request):
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
         user_id = str(session["user_id"])
+        request.state.session_id = str(session["session_id"])
         set_current_user(user_id)
         await asyncio.to_thread(accounts.touch_session, db, str(session["session_id"]))
         return user_id
 
     raw_id = (request.headers.get("x-user-id") or "").strip()
+    if email_code_auth_enabled():
+        raise HTTPException(status_code=401, detail="请使用邮箱验证码登录")
     if not raw_id:
         if require_auth():
             raise HTTPException(status_code=401, detail="未登录")

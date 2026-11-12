@@ -293,7 +293,7 @@ def test_overview_shape(client, db):
         "server_time_iso",
     }
 
-    assert set(data["users"]) == {"total", "real", "empty", "registered", "active_today"}
+    assert set(data["users"]) == {"total", "real", "empty", "registered", "active_today", "formal", "history", "sessions", "devices"}
     assert set(data["personas"]) == {"total", "active"}
     assert set(data["today"]) == {"events", "posts_pending", "posts_published"}
     assert set(data["jobs"]) == {"failed_recent", "running", "queued"}
@@ -365,7 +365,8 @@ def test_overview_tolerates_missing_tables(bare_client):
     response = bare_client.get("/api/admin/overview")
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["users"] == {"total": 0, "real": 0, "empty": 0, "registered": 0, "active_today": 0}
+    assert data["users"] == {"total": 0, "real": 0, "empty": 0, "registered": 0, "active_today": 0,
+                             "formal": 0, "history": 0, "sessions": 0, "devices": 0}
     assert data["personas"] == {"total": 0, "active": 0}
     assert data["today"] == {"events": 0, "posts_pending": 0, "posts_published": 0}
     assert data["push"] == {"pending": 0, "sent": 0, "failed": 0, "unconfigured": 0}
@@ -388,6 +389,7 @@ def test_overview_tolerates_missing_db(monkeypatch):
         "empty": 0,
         "registered": 0,
         "active_today": 0,
+        "formal": 0, "history": 0, "sessions": 0, "devices": 0,
     }
 
 

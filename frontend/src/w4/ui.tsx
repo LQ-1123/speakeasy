@@ -104,25 +104,37 @@ export function VoiceBar({
   durationMs,
   playing,
   onToggle,
+  pending = false,
+  failed = false,
 }: {
   id: string;
   durationMs: number;
   playing: boolean;
   onToggle: () => void;
+  /** 音频还在后台合成：显示「生成中」，点击给出等待提示而不是现场慢合成 */
+  pending?: boolean;
+  failed?: boolean;
 }) {
   return (
     <button
       type="button"
-      className={`w4-voice ${playing ? "is-playing" : ""}`}
+      className={`w4-voice ${playing ? "is-playing" : ""} ${pending ? "is-pending" : ""}`}
       style={{ width: voiceBubbleWidth(durationMs) }}
       onClick={onToggle}
       data-voice-id={id}
-      aria-label={playing ? "暂停" : "播放语音"}
+      aria-label={failed ? "语音生成失败，点击重试" : pending ? "语音生成中" : playing ? "暂停" : "播放语音"}
       aria-pressed={playing}
+      aria-busy={pending || undefined}
     >
-      <span className="w4-voice-dur">{durationLabel(durationMs)}</span>
+      <span className="w4-voice-dur">{failed ? "重试" : pending ? "生成中" : durationLabel(durationMs)}</span>
       <span className="w4-voice-spk" aria-hidden>
-        {playing ? (
+        {pending ? (
+          <span className="w4-voice-dots">
+            <i />
+            <i />
+            <i />
+          </span>
+        ) : playing ? (
           /* 播放中：暂停条 + 脉冲动画（CSS .is-playing） */
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <rect x="4.2" y="3" width="2.6" height="10" rx="0.9" />

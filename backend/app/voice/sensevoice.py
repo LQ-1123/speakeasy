@@ -20,6 +20,9 @@
 from __future__ import annotations
 
 import io
+import asyncio
+import os
+import weakref
 import time
 import wave
 from typing import Any
@@ -28,9 +31,15 @@ import httpx
 import numpy as np
 
 from app.logging_utils import get_logger
-from app.voice.audio_utils import SR_IN, float32_to_pcm16
+from app.voice.audio_utils import SR_IN, float32_to_pcm16, upload_limits
 
 log = get_logger(__name__)
+
+
+def get_pool():
+    from app.providers.runtime import get_pool as current_pool
+
+    return current_pool()
 
 #: 契约默认值（与 ``app/voice/stt_config.py`` 的 DEFAULT_* 保持一致）
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
@@ -53,6 +62,65 @@ class SenseVoiceError(RuntimeError):
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _integer_limit(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, min(10000, int(os.getenv(name, str(default)))))
+    except ValueError:
+        return default
+
+
+class _Pool:
+    def __init__(self, transport=None) -> None:
+        self.limit = _integer_limit("SE_STT_CONCURRENCY", 4)
+        self.queue_limit = _integer_limit("SE_STT_QUEUE_LIMIT", 20, 0)
+        self.slots = asyncio.Semaphore(self.limit)
+        self.pending = self.active = self.rejected = self.cancelled = 0
+        self.transport = transport
+        self.client: httpx.AsyncClient | None = None
+
+    def get_client(self) -> httpx.AsyncClient:
+        if self.client is None or self.client.is_closed:
+            self.client = httpx.AsyncClient(
+                transport=self.transport,
+                limits=httpx.Limits(max_connections=self.limit,
+                                    max_keepalive_connections=self.limit,
+                                    keepalive_expiry=20),
+            )
+        return self.client
+
+    async def aclose(self) -> None:
+        client, self.client = self.client, None
+        if client is not None:
+            await client.aclose()
+
+
+_pools: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _pool() -> _Pool:
+    loop = asyncio.get_running_loop()
+    if loop not in _pools:
+        _pools[loop] = _Pool()
+    return _pools[loop]
+
+
+async def aclose() -> None:
+    """Close the current loop's shared STT HTTP pool during application shutdown."""
+    pool = _pools.pop(asyncio.get_running_loop(), None)
+    if pool is not None:
+        await pool.aclose()
+
+
+def limiter_stats() -> dict[str, int]:
+    pool = _pools.get(asyncio.get_running_loop())
+    return {"limit": pool.limit if pool else _integer_limit("SE_STT_CONCURRENCY", 4),
+            "queue_limit": pool.queue_limit if pool else _integer_limit("SE_STT_QUEUE_LIMIT", 20, 0),
+            "active": pool.active if pool else 0,
+            "waiting": pool.pending - pool.active if pool else 0,
+            "rejected": pool.rejected if pool else 0,
+            "cancelled": pool.cancelled if pool else 0}
 
 
 # --------------------------------------------------------------------------- #
@@ -153,19 +221,34 @@ class SiliconFlowSTT:
         self.language = str(language or "en").strip() or "en"
         #: 仅测试注入；生产为 None（走真实网络）
         self._transport = transport
+        self._owned_pool: _Pool | None = None
 
     # ---- 状态 ----
     @property
     def configured(self) -> bool:
         """base_url / api_key / model 三者齐全才算可用。"""
-        return bool(self.base_url and self.api_key and self.model)
+        pool = get_pool()
+        return bool((pool is not None and pool.applies("siliconflow", self.model))
+                    or (self.base_url and self.api_key and self.model))
 
     @property
     def endpoint(self) -> str:
         return f"{self.base_url.rstrip('/')}{TRANSCRIPTIONS_PATH}"
 
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=self.timeout_s, transport=self._transport)
+        return self._request_pool().get_client()
+
+    def _request_pool(self) -> _Pool:
+        if self._transport is not None:
+            if self._owned_pool is None:
+                self._owned_pool = _Pool(self._transport)
+            return self._owned_pool
+        return _pool()
+
+    async def aclose(self) -> None:
+        """Release an injected transport; production pools use module-level aclose."""
+        if self._owned_pool is not None:
+            await self._owned_pool.aclose()
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return (
@@ -180,16 +263,38 @@ class SiliconFlowSTT:
         Raises:
             SenseVoiceError: 网络/超时/HTTP/JSON 解析失败。
         """
+        resource_pool = get_pool()
+        if resource_pool is not None and resource_pool.applies("siliconflow", self.model):
+            return await self._post_audio_pooled(resource_pool, wav_bytes)
         headers = {"Authorization": f"Bearer {self.api_key}"}
         files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
         data = {"model": self.model}
 
         start = time.perf_counter()
+        pool = self._request_pool()
+        if pool.pending >= pool.limit + pool.queue_limit:
+            pool.rejected += 1
+            raise SenseVoiceError("STT queue full（转写排队已满）", status_code=429)
+        pool.pending += 1
+
+        async def request() -> httpx.Response:
+            async with pool.slots:
+                pool.active += 1
+                try:
+                    return await self._client().post(
+                        self.endpoint, headers=headers, files=files, data=data,
+                        timeout=self.timeout_s,
+                    )
+                finally:
+                    pool.active -= 1
+
         try:
-            async with self._client() as client:
-                response = await client.post(
-                    self.endpoint, headers=headers, files=files, data=data
-                )
+            response = await asyncio.wait_for(request(), timeout=self.timeout_s)
+        except asyncio.CancelledError:
+            pool.cancelled += 1
+            raise
+        except asyncio.TimeoutError as exc:
+            raise SenseVoiceError(f"转写排队/连接超时（{self.timeout_s:g}s）") from exc
         except httpx.TimeoutException as exc:
             raise SenseVoiceError(
                 f"连接超时（{self.timeout_s:.0f}s）：{type(exc).__name__}: {exc}"
@@ -198,8 +303,13 @@ class SiliconFlowSTT:
             raise SenseVoiceError(
                 f"网络错误（{self.endpoint}）：{type(exc).__name__}: {exc}"
             ) from exc
+        finally:
+            pool.pending -= 1
         latency_ms = (time.perf_counter() - start) * 1000.0
 
+        return self._parse_audio_response(response), latency_ms
+
+    def _parse_audio_response(self, response: httpx.Response) -> str:
         if response.status_code >= 400:
             raise SenseVoiceError(
                 _http_error_message(response), status_code=response.status_code
@@ -224,7 +334,62 @@ class SiliconFlowSTT:
                 f"响应缺少 text 字段：{_body_snippet(response)}",
                 status_code=response.status_code,
             )
-        return text, latency_ms
+        return text
+
+    async def _post_audio_pooled(self, pool: Any, wav_bytes: bytes) -> tuple[str, float]:
+        started = time.perf_counter()
+        deadline = time.monotonic() + self.timeout_s
+        excluded: set[str] = set()
+
+        def factory(lease):
+            return httpx.AsyncClient(transport=self._transport, limits=httpx.Limits(
+                max_connections=32, max_keepalive_connections=2, keepalive_expiry=20.0,
+            ))
+
+        try:
+            for candidate in range(2):
+                async with pool.lease("siliconflow", self.model, deadline=deadline,
+                                      exclude_resource_ids=excluded) as lease:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        lease.failure(status=504, code="deadline")
+                        raise SenseVoiceError("STT total deadline exceeded", status_code=504)
+                    try:
+                        async with pool.client(lease, factory) as client:
+                            response = await asyncio.wait_for(client.post(
+                                lease.base_url.rstrip("/") + TRANSCRIPTIONS_PATH,
+                                headers={"Authorization": f"Bearer {lease.api_key}"},
+                                files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+                                data={"model": lease.model}, timeout=remaining,
+                            ), timeout=remaining)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        lease.failure(status=0, code=type(exc).__name__)
+                        raise SenseVoiceError(f"STT request failed: {type(exc).__name__}") from exc
+                    if response.status_code >= 400:
+                        lease.failure(status=response.status_code, retry_after=response.headers.get("Retry-After"))
+                        if response.status_code in (429, 503) and candidate == 0:
+                            excluded.add(lease.resource_id)
+                            continue
+                        message = _http_error_message(response).replace(lease.api_key, "[redacted]")
+                        raise SenseVoiceError(message, status_code=response.status_code)
+                    try:
+                        text = self._parse_audio_response(response)
+                    except SenseVoiceError as exc:
+                        lease.failure(status=0, code="invalid_response")
+                        raise SenseVoiceError(str(exc).replace(lease.api_key, "[redacted]"),
+                                              status_code=exc.status_code) from exc
+                    lease.mark_output_started()
+                    lease.success()
+                    return text, (time.perf_counter() - started) * 1000.0
+        except asyncio.CancelledError:
+            raise
+        except SenseVoiceError:
+            raise
+        except Exception as exc:
+            raise SenseVoiceError("STT pool unavailable", status_code=getattr(exc, "status_code", None)) from exc
+        raise SenseVoiceError("STT pool unavailable", status_code=503)
 
     # ---- 公开接口 ----
     async def transcribe(self, pcm16: bytes, sample_rate: int = SR_IN):
@@ -244,6 +409,11 @@ class SiliconFlowSTT:
         if sr <= 0:
             sr = SR_IN
         duration_s = (len(pcm16) / 2.0) / float(sr)
+        max_bytes, max_duration_s, _ = upload_limits()
+        if duration_s > max_duration_s:
+            raise SenseVoiceError(f"音频时长超过 {max_duration_s:g}s duration limit")
+        if len(pcm16) > max_bytes:
+            raise SenseVoiceError(f"音频大小超过 {max_bytes} bytes limit")
         wav_bytes = pcm16_to_wav_bytes(pcm16, sr)
 
         raw_text, latency_ms = await self._post_audio(wav_bytes)
@@ -318,4 +488,6 @@ __all__ = [
     "TRANSCRIPTIONS_PATH",
     "make_verify_tone_wav",
     "pcm16_to_wav_bytes",
+    "aclose",
+    "limiter_stats",
 ]

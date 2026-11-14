@@ -86,22 +86,21 @@ async def test_generate_comments_with_llm_and_idempotent(db, three_friends):
     moment = db.add_user_moment("今天终于把项目上线了，晚上吃火锅庆祝 🎉", "🔥 庆祝")
     llm = FakeLLM()
     comments = await user_moments.generate_comments(db, llm, moment, three_friends)
-    assert len(comments) == 3
+    assert len(comments) == 1  # Wrong-language comments are skipped.
     assert all(c["content"] for c in comments)
-    assert {c["friend_id"] for c in comments} == {f["id"] for f in three_friends}
+    assert {c["friend_id"] for c in comments} == {three_friends[1]["id"]}
 
     again = await user_moments.generate_comments(db, llm, moment, three_friends)
-    assert len(again) == 3
+    assert len(again) == 1
     assert llm.calls == 3  # 幂等：第二次不再调 LLM
-    assert len(db.list_moment_comments(moment["id"])) == 3
+    assert len(db.list_moment_comments(moment["id"])) == 1
 
 
 @pytest.mark.asyncio
-async def test_generate_comments_mock_fallback_has_all_languages(db, three_friends):
+async def test_generate_comments_without_model_skips_canned_reactions(db, three_friends):
     moment = db.add_user_moment("周末去爬山了，累但开心", "⛰️ 户外")
     comments = await user_moments.generate_comments(db, MockLLM(), moment, three_friends)
-    assert len(comments) == 3
-    assert all(c["content"].strip() for c in comments)
+    assert comments == []
 
 
 # --------------------------------------------------------------------------- #

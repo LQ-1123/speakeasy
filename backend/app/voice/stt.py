@@ -284,7 +284,13 @@ class STTEngine:
     # ------------------------------------------------------------------ #
     def _cloud_is_active(self) -> bool:
         """云端是否真正生效（启用 + 客户端已配置）。"""
-        return bool(self._cloud_enabled and self._cloud is not None and self._cloud.configured)
+        return bool(self._pool_cloud() or (self._cloud_enabled and self._cloud is not None and self._cloud.configured))
+
+    def _pool_cloud(self):
+        from app.providers.runtime import get_pool
+        pool = get_pool()
+        model = self._cloud_config.get('model') or SENSEVOICE_DEFAULT_MODEL
+        return pool if pool is not None and pool.applies('siliconflow', model) else None
 
     @property
     def backend_name(self) -> str:
@@ -397,9 +403,9 @@ class STTEngine:
             model = str(self._cloud_config.get("model") or SENSEVOICE_DEFAULT_MODEL)
         latency = self._cloud_last_latency_ms
         return {
-            "enabled": bool(self._cloud_enabled),
+            "enabled": bool(self._pool_cloud() or self._cloud_enabled),
             "provider": self._cloud_provider,
-            "configured": bool(self._cloud is not None and self._cloud.configured),
+            "configured": bool(self._pool_cloud() or (self._cloud is not None and self._cloud.configured)),
             "backend": self.backend_name,
             "model": model,
             "last_error": self._cloud_last_error,
@@ -753,7 +759,10 @@ class STTEngine:
         ``cloud_health()`` 的 ``last_error`` / ``requests``。
         """
         cloud = self._cloud
-        if not (self._cloud_enabled and cloud is not None and cloud.configured):
+        pool = self._pool_cloud()
+        if pool is not None and cloud is None:
+            cloud = self._cloud = SiliconFlowSTT(api_key='', **self._cloud_config)
+        if not (pool is not None or (self._cloud_enabled and cloud is not None and cloud.configured)):
             return None
 
         try:
@@ -762,6 +771,14 @@ class STTEngine:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - 云端失败必须回退本地，不能抛
+            if pool is not None:
+                from app.capacity import CapacityError
+                from app.providers.pool import PoolError
+                if isinstance(exc, CapacityError):
+                    raise
+                status = getattr(exc, 'status_code', 0)
+                raise PoolError('Speech recognition is temporarily unavailable',
+                                status_code=429 if status == 429 else 502) from None
             self._cloud_requests += 1
             self._cloud_last_error = f"{type(exc).__name__}: {exc}"
             log.warning(

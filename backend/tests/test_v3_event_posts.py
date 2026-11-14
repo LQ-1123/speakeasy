@@ -260,17 +260,23 @@ def add_event_post(
 class FakeLLM:
     """确定性假 LLM：按 system prompt 里的昵称返回不同文案。"""
 
-    def __init__(self, replies: dict[str, str] | None = None, default: str = "A good night."):
+    def __init__(self, replies: dict[str, str | list[str]] | None = None, default: str = "A good night."):
         self.uses_mock = False
         self.replies = replies or {}
         self.default = default
         self.calls: list[list[dict]] = []
+        self.generations = 0
 
     async def complete_json(self, messages, *, schema_hint="", temperature=None, max_tokens=None):
         self.calls.append(list(messages))
+        if messages[0]["content"].startswith("Fact editor"):
+            return json.dumps({"content": json.loads(messages[1]["content"])["draft"]})
+        self.generations += 1
         text = "\n".join(str(m.get("content") or "") for m in messages)
         for nickname, reply in self.replies.items():
-            if f"You are {nickname}" in text:
+            if f"Write as {nickname}" in text or f"You are {nickname}" in text:
+                if isinstance(reply, list):
+                    reply = reply[min(self.generations - 1, len(reply) - 1)]
                 key = "comment" if schema_hint.startswith('{"comment"') else "content"
                 return json.dumps({key: reply}, ensure_ascii=False)
         key = "comment" if schema_hint.startswith('{"comment"') else "content"
@@ -547,7 +553,7 @@ def test_generate_post_is_idempotent(tmp_path):
 
     assert first["id"] == second["id"]
     assert post_count(db) == 1, "同一 (event_id, persona_id) 第二次不得新增行"
-    assert len(llm.calls) == 1, "已有动态时应直接返回，不再调用 LLM"
+    assert len(llm.calls) == 2, "首次生成并校验，已有动态时不再调用 LLM"
 
 
 def test_generate_post_force_regenerates_in_place(tmp_path):
@@ -604,6 +610,56 @@ def test_generate_post_rejects_fact_violating_output(tmp_path):
     llm = FakeLLM({"Emily": "Jazz in Tokyo was the best night of 2019."})
     assert run(generate_post_for_participant(db, llm, event, persona)) is None
     assert post_count(db) == 0, "编造地点/年份的动态不得入库"
+
+
+def test_public_post_keeps_short_native_text_and_paragraphs(tmp_path):
+    db, event = two_participant_scene(tmp_path)
+    persona = {"id": "p_emily", "nickname": "Emily", "language": "zh"}
+    short = run(generate_post_for_participant(
+        db, FakeLLM({"Emily": "还想听"}), event, persona,
+    ))
+    assert short is not None and short["content"] == "还想听"
+    multiline = "还想听。\n\n下次再去。"
+    revised = run(generate_post_for_participant(
+        db, FakeLLM({"Emily": multiline}), event, persona, force=True,
+    ))
+    assert revised["content"] == multiline
+
+
+def test_public_post_rejects_overlong_output_instead_of_cutting_sentence(tmp_path):
+    db, event = two_participant_scene(tmp_path)
+    persona = {"id": "p_emily", "nickname": "Emily", "language": "en"}
+    result = run(generate_post_for_participant(
+        db, FakeLLM({"Emily": "x" * (MAX_POST_CHARS + 1)}), event, persona,
+    ))
+    assert result is None
+    assert post_count(db) == 0
+
+
+def test_new_event_does_not_repeat_identical_existing_post(tmp_path):
+    db, event = two_participant_scene(tmp_path)
+    persona = {"id": "p_emily", "nickname": "Emily", "language": "en"}
+    llm = FakeLLM({"Emily": _EMILY_POST})
+    assert run(generate_post_for_participant(db, llm, event, persona))
+    another_event = {**event, "id": "ev_other"}
+    assert run(generate_post_for_participant(db, llm, another_event, persona)) is None
+    assert post_count(db) == 1
+
+
+def test_commenter_only_receives_private_facts_if_they_participated():
+    event = {
+        "title": "Jazz", "description": "UNPUBLISHED_PRIVATE_DETAIL",
+        "participants": ["p_emily", "p_sophie"], "event_status": "completed",
+    }
+    kwargs = {
+        "post": {"content": "Jazz again."}, "event": event,
+        "participant_names": {}, "relationship": {"relation_type": "friend"},
+    }
+    outsider = ep._comment_messages(commenter={"id": "p_outsider"}, **kwargs)
+    assert "UNPUBLISHED_PRIVATE_DETAIL" not in outsider[1]["content"]
+    assert "NOT a participant" in outsider[1]["content"]
+    participant = ep._comment_messages(commenter={"id": "p_sophie"}, **kwargs)
+    assert "UNPUBLISHED_PRIVATE_DETAIL" in participant[1]["content"]
 
 
 # --------------------------------------------------------------------------- #
@@ -964,7 +1020,7 @@ def test_run_posts_cycle_marks_evaluated_and_moves_on(tmp_path):
     add_event(db, "ev_a", persona_id="p_emily", start_hours_ago=6, duration_hours=1)
     add_event(db, "ev_b", persona_id="p_emily", start_hours_ago=5, duration_hours=1)
     add_event(db, "ev_c", persona_id="p_emily", start_hours_ago=4, duration_hours=1)
-    llm = FakeLLM({"Emily": _EMILY_POST})
+    llm = FakeLLM({"Emily": [_EMILY_POST, "Still thinking about the music."]})
 
     stats = run(run_posts_cycle(db, llm, rng=SequenceRNG([0.0, 0.99, 0.0])))
     assert stats["events"] == 3, stats
@@ -998,7 +1054,7 @@ def test_run_posts_cycle_processes_oldest_first(tmp_path):
     add_persona(db, "p_emily", "Emily", dna=_EMILY_DNA)
     add_event(db, "ev_old", persona_id="p_emily", start_hours_ago=6, duration_hours=1)
     add_event(db, "ev_new", persona_id="p_emily", start_hours_ago=2, duration_hours=1)
-    llm = FakeLLM({"Emily": _EMILY_POST})
+    llm = FakeLLM({"Emily": [_EMILY_POST, "Still thinking about the music."]})
 
     first = run(run_posts_cycle(db, llm, max_events=1, rng=AlwaysShareRNG()))
     assert first["events"] == 1 and first["posts"] == 1, first
@@ -1167,7 +1223,7 @@ def test_value_ordering_prefers_achievement_over_meal(tmp_path):
     rows = ep._completed_event_rows(db, day=None, limit=10)
     assert [row["id"] for row in rows] == ["ev_ach", "ev_meal"]
 
-    llm = FakeLLM({"Emily": _EMILY_POST})
+    llm = FakeLLM({"Emily": ["Finished the half marathon.", "A sandwich for lunch."]})
     stats = run(run_posts_cycle(db, llm, max_events=1, daily_quota=0,
                                 rng=AlwaysShareRNG()))
     assert stats["posts"] == 1, stats
@@ -1237,7 +1293,7 @@ def test_daily_quota_zero_means_unlimited(tmp_path):
     add_persona(db, "p_emily", "Emily", dna=_EMILY_DNA)
     add_event(db, "ev_1", persona_id="p_emily", start_hours_ago=4)
     add_event(db, "ev_2", persona_id="p_emily", start_hours_ago=3)
-    llm = FakeLLM({"Emily": _EMILY_POST})
+    llm = FakeLLM({"Emily": [_EMILY_POST, "Still thinking about the music."]})
     stats = run(run_posts_cycle(db, llm, max_events=4, daily_quota=0,
                                 rng=AlwaysShareRNG()))
     assert stats["daily_quota"] is None

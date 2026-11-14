@@ -471,11 +471,6 @@ const BATCH_ACTIONS: BatchAction[] = [
     hint: "把素材池音色均匀重分配给全部角色（只换声音，ID/好友/聊天不变）",
   },
   {
-    kind: "regenerate-posts",
-    label: "重新生成动态",
-    hint: "删除现有全部角色动态，按语言素材库重新生成",
-  },
-  {
     kind: "init-life",
     label: "补齐生活层",
     hint: "补齐作息表 / Speech DNA / 示例对话 / 人物关系（0 次 LLM）",
@@ -542,6 +537,9 @@ function describeBatchResult(kind: BatchKind, result: ApiRecord): string {
       )}）${text ? ` · ${text}` : ""}`;
     }
     case "regenerate-posts":
+      if (asText(result.reason) === "source_grounded_generation_required") {
+        return asText(result.message) || "已保留现有动态；新动态由人物生活事件生成。";
+      }
       return `已为 ${asNumber(result.personas)} 个角色生成 ${asNumber(result.posts)} 条动态（${
         asNumber(result.posts_with_media)
       } 条带图）`;

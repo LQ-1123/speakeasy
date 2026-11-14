@@ -130,11 +130,6 @@ function Shell() {
     void usePreferences.getState().load();
   }, []);
 
-  /* 品牌开屏（静态 HTML 注入，见 app/layout.tsx）：React 挂载后淡出。 */
-  useEffect(() => {
-    (window as unknown as { __hideSonderSplash?: () => void }).__hideSonderSplash?.();
-  }, []);
-
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY);
     const update = () => setMobile(mq.matches);

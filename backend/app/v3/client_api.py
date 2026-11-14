@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
 import secrets
 import time
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from app.v3 import teen
+from app.v3 import teen, wakeups
 from app.v3.calls import minor_gate, require_user
 from app.v2.router import _message_public, _expression_public
 from app.v2.timeutil import local_state
@@ -28,6 +29,10 @@ DEFAULT_PREFERENCES = {
     "ads": False,
 }
 EVENT_TICKETS: dict[str, tuple[str, float, str]] = {}
+#: 事件长连接的兜底轮询间隔（秒）。平时由 :mod:`app.v3.wakeups` 按需唤醒；这个定时只负责
+#: 两件事：万一漏掉一次唤醒也能在这个时间内补上，以及周期性复核会话是否仍然有效
+#: （与通话连接的 10 秒复核一致）。
+EVENT_POLL_FALLBACK_S = max(1.0, float(os.getenv("SE_EVENT_POLL_FALLBACK_S", "10") or 10))
 DDL = """
 CREATE TABLE IF NOT EXISTS client_preferences(user_id TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS client_devices(registration_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,
@@ -38,6 +43,8 @@ CREATE TABLE IF NOT EXISTS client_events(sequence INTEGER PRIMARY KEY AUTOINCREM
  payload TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,is_read INTEGER NOT NULL DEFAULT 0,
  push_status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt REAL NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_client_events_user_seq ON client_events(user_id,sequence);
+CREATE INDEX IF NOT EXISTS idx_client_events_unread ON client_events(id) WHERE is_read=0;
+CREATE INDEX IF NOT EXISTS idx_client_events_pending ON client_events(sequence) WHERE push_status='pending';
 CREATE TABLE IF NOT EXISTS client_event_state(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
@@ -85,9 +92,11 @@ async def set_preferences(body: PreferencePatch, request: Request):
 def bootstrap_data(db, user):
     with db._lock:
         rows = db.conn.execute("SELECT * FROM friends WHERE owner_user_id=? AND status IN ('active','pending_request') ORDER BY last_interaction_at DESC,created_at DESC", (user,)).fetchall()
-        latest = db.conn.execute("""SELECT m.* FROM messages m JOIN friends f ON f.id=m.friend_id
-          WHERE f.owner_user_id=? AND m.rowid=(SELECT x.rowid FROM messages x WHERE x.friend_id=m.friend_id
-          ORDER BY x.created_at DESC,x.rowid DESC LIMIT 1)""", (user,)).fetchall()
+        # 每个好友一次索引定位取最后一条；旧写法是「对好友的每条消息各跑一次子查询」，
+        # 成本随聊天记录总量增长。
+        latest = db.conn.execute("""SELECT m.* FROM friends f JOIN messages m
+          ON m.rowid=(SELECT x.rowid FROM messages x WHERE x.friend_id=f.id
+          ORDER BY x.created_at DESC,x.rowid DESC LIMIT 1) WHERE f.owner_user_id=?""", (user,)).fetchall()
         counts = db.conn.execute("SELECT m.friend_id,COUNT(*) n FROM messages m JOIN friends f ON f.id=m.friend_id WHERE f.owner_user_id=? AND m.sender='friend' AND m.is_read=0 GROUP BY m.friend_id", (user,)).fetchall()
         unread_events = db.conn.execute("SELECT COUNT(*) FROM social_events WHERE user_id=? AND is_read=0 AND status<>'declined' AND scheduled_at<=?", (user, datetime.now(timezone.utc).isoformat())).fetchone()[0]
         # Profile is per-user in v3; retain the v2 serialization consumed by the UI.
@@ -182,6 +191,24 @@ def event_rows(db, user, after):
              'post_id':r['post_id'], 'payload':json.loads(r['payload']), 'created_at':r['created_at'], 'is_read':bool(r['is_read'])} for r in rows]
 
 
+def _poll_events(db, user, session_id, cursor):
+    """一次线程切换里做完两件事：复核会话仍然有效，再取这条连接还没看过的事件。"""
+    from app.v3.session_liveness import session_is_live
+    if not session_is_live(db, user, session_id):
+        return False, []
+    return True, event_rows(db, user, cursor)
+
+
+def _discard_task(task) -> None:
+    """收尾：取消还在等的任务，并把已结束任务的异常取走（否则退出时会刷未处理异常告警）。"""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    elif not task.cancelled():
+        task.exception()
+
+
 @router.websocket('/events')
 async def event_socket(ws: WebSocket):
     await ws.accept()
@@ -209,24 +236,45 @@ async def event_socket(ws: WebSocket):
         with contextlib.suppress(Exception):
             await ws.close(code=4003, reason=f"minor:{exc}"[:120])
         return
+    # 连接平时睡着：有新事件 / 会话被撤销时由 wakeups 唤醒，另有 EVENT_POLL_FALLBACK_S 兜底。
+    # （旧实现每秒醒一次、每次两趟线程切换，在线人数一多全是空转。）
+    waiter = wakeups.subscribe(user)
+    receiver = wake = None
     try:
         await ws.send_json({'type':'ready','sequence':cursor})
+        poll = True
         while True:
-            if not await asyncio.to_thread(session_is_live, db, user, session_id):
-                await ws.close(code=4401)
-                return
-            rows = await asyncio.to_thread(event_rows, db, user, cursor)
-            for event in rows:
-                await ws.send_json(event)
-                cursor = event['sequence']
-            try:
-                message = await asyncio.wait_for(ws.receive_json(), 1)
-                if message.get('type') == 'ping':
+            if poll:
+                live, rows = await asyncio.to_thread(_poll_events, db, user, session_id, cursor)
+                if not live:
+                    await ws.close(code=4401)
+                    return
+                for event in rows:
+                    await ws.send_json(event)
+                    cursor = event['sequence']
+                if len(rows) >= 100:
+                    continue  # 一页取满说明还有积压：先取完再睡
+            if receiver is None:
+                receiver = asyncio.create_task(ws.receive_json())
+            if wake is None:
+                wake = asyncio.create_task(waiter.event.wait())
+            done, _ = await asyncio.wait({receiver, wake}, timeout=EVENT_POLL_FALLBACK_S,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            poll = not done  # 谁都没动静 = 兜底定时到点
+            if wake in done:
+                # 先清标志再查库：清之后才到的通知会让下一轮立刻再醒一次，不会漏
+                waiter.event.clear()
+                wake, poll = None, True
+            if receiver in done:
+                message, receiver = receiver.result(), None
+                if isinstance(message, dict) and message.get('type') == 'ping':
                     await ws.send_json({'type':'pong','sequence':cursor})
-            except asyncio.TimeoutError:
-                continue
     except (WebSocketDisconnect, RuntimeError, ValueError):
         return
+    finally:
+        wakeups.unsubscribe(user, waiter)
+        _discard_task(receiver)
+        _discard_task(wake)
 
 
 @router.patch('/events/{event_id}/read')

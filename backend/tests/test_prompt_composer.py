@@ -349,7 +349,7 @@ def test_call_mode_shares_character_card_and_is_shorter(db):
     # 通话要求：DNA 听感行 + 通话轮次标记 + 长度提示
     assert "[Speech DNA on the phone]" in call_prompt.text
     assert "LIVE voice call" in call_prompt.text
-    assert "max ~" in call_prompt.text
+    assert "longer only if needed" in call_prompt.text
 
 
 # --------------------------------------------------------------------------- #
@@ -408,7 +408,7 @@ def test_first_message_is_deterministic_and_persona_specific(db):
     assert not re.search(r"[A-Za-z]", zh_line)
     # 其它语言回退 en（至少不是乱码/空串）
     ja_line = fm.first_message(_persona(db, "Haruto"), language="ja")
-    assert ja_line and not re.search(r"[\u3040-\u30ff]", ja_line)
+    assert ja_line and re.search(r"[\u3040-\u30ff]", ja_line)
 
 
 def test_first_message_low_level_is_shorter(db):

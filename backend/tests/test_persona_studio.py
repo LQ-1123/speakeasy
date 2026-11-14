@@ -233,7 +233,8 @@ def test_redistribute_voices_balanced(db, monkeypatch):
     assert max(counts.values()) <= max(1, res["updated"] // 2 + 1)
 
 
-def test_regenerate_posts_creates_multiple_per_persona(db):
+def test_regenerate_posts_preserves_authors_and_existing_posts(db):
+    before = [tuple(row) for row in db.conn.execute("SELECT * FROM persona_posts ORDER BY id")]
     res = ps.regenerate_posts(db, None, per_persona=4)
     assert res["ok"] is True
     assert res["personas"] >= 1
@@ -242,7 +243,9 @@ def test_regenerate_posts_creates_multiple_per_persona(db):
             "SELECT persona_id, COUNT(*) AS n FROM persona_posts GROUP BY persona_id"
         ).fetchall()
     assert rows
-    assert all(int(r["n"]) == 4 for r in rows)
+    assert res["posts"] == 0
+    assert res["reason"] == "source_grounded_generation_required"
+    assert [tuple(row) for row in db.conn.execute("SELECT * FROM persona_posts ORDER BY id")] == before
 
 
 def test_post_media_attached_from_local_library(db, tmp_path, monkeypatch):

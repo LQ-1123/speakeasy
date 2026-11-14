@@ -22,13 +22,19 @@ import time
 import wave
 import zlib
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar, copy_context
+from contextlib import asynccontextmanager
+from functools import partial
 
+from app.capacity import ChatAdmission, CapacityError, UsageBudget
 from app.llm.client import ChatMessage
 from app.logging_utils import get_logger
 from app.v2 import social
 from app.v2.suggestion import generate_suggestion
 
 log = get_logger(__name__)
+_turn_audio_tasks: ContextVar[list | None] = ContextVar('turn_audio_tasks', default=None)
 
 
 def _write_bytes(path: str, data: bytes) -> None:
@@ -38,7 +44,15 @@ def _write_bytes(path: str, data: bytes) -> None:
     with open(path, "wb") as fh:
         fh.write(data)
 
-_MAX_REPLY_CHARS = 420
+
+def _fish_duration_ms(data: bytes) -> int:
+    if data.startswith(b'RIFF'):
+        import io
+        with wave.open(io.BytesIO(data), 'rb') as audio:
+            return int(audio.getnframes() / audio.getframerate() * 1000)
+    from app.voice.fish_tts import estimate_mp3_duration_ms
+    return estimate_mp3_duration_ms(data)
+
 _MARKDOWN_RE = re.compile(r"[*_#`>]+")
 
 #: mock（无 LLM key）时按话题生成有人设味的回复，保证演示对话不重复。
@@ -57,62 +71,60 @@ _MOCK_TOPIC_REPLIES: dict[str, tuple[str, ...]] = {
     "coffee": (
         "{q}coffee is serious business around {city}. What's your go-to order?",
         "{q}I'm picky about coffee, honestly. Do you take yours black or with milk?",
-        "{q}coffee is a personality, not a habit. Three cups in and it's not even noon.",
-        "{q}I'd start a fight over a bad flat white. Almost did last week.",
+        "{q}a good coffee doesn't need to be complicated.",
+        "{q}a bad flat white is a disappointing way to spend money.",
     ),
     "games": (
         "{q}indie games are the best — no big studio nonsense. Which one are you playing right now?",
         "{q}I lose whole evenings to games like that. What's the last one that got you hooked?",
-        "{q}I lost an entire Sunday to one of those. No regrets, honestly.",
-        "{q}games are how I stop thinking about work. Cheap therapy.",
+        "{q}that's the danger of 'just one more round'.",
+        "{q}sometimes a game is a good excuse to switch off for a bit.",
     ),
     "interview": (
-        "{q}an interview on Friday? That's exciting. How are you prepping for it?",
-        "{q}you'll be fine — just be yourself. What's the role about?",
+        "{q}what's the role about?",
+        "{q}is there a particular part you're unsure about?",
         "{q}interviews are just a conversation with worse lighting.",
         "{q}prep helps, but half of it is whether you like them. Weird but true.",
     ),
     "english": (
-        "{q}your English is way better than you think. What part feels hardest right now?",
-        "{q}the trick is to stop translating in your head. What do you usually talk about in English?",
+        "{q}what part are you trying to say?",
+        "{q}want to try putting it another way?",
         "{q}honestly, nobody is grading you. That's the whole point.",
-        "{q}I've heard worse English from people who've lived here ten years.",
+        "{q}we don't have to turn this into a lesson.",
     ),
     "food": (
         "{q}now I'm hungry. What's the best thing you've eaten this week?",
         "{q}food is the most important part of the day, obviously. Do you cook much?",
-        "{q}I cooked something ambitious and it was fine. Just fine.",
+        "{q}good food doesn't always need a complicated recipe.",
         "{q}I could eat the same thing four days straight and be happy.",
     ),
     "travel": (
         "{q}travel changes your whole brain, I swear. Where do you want to go next?",
         "{q}I'd pack a bag tomorrow if I could. What's your dream trip?",
-        "{q}I've got a list of places I keep not going to. Very productive list.",
-        "{q}the best trips I've had were the badly planned ones.",
+        "{q}I'd rather leave some room to wander than plan every minute.",
+        "{q}getting there can be half the hassle.",
     ),
     "work": (
         "{q}that sounds like a lot. How are you balancing it with everything else?",
         "{q}sounds busy — is it the kind of busy you enjoy, or the exhausting kind?",
-        "{q}work has been one long meeting this week. I'm basically a calendar now.",
-        "{q}I'm tired, but the good kind of tired. Mostly.",
+        "{q}some tasks somehow grow another task while you're doing them.",
+        "{q}a quiet stretch without interruptions sounds good.",
     ),
     "music": (
         "{q}music is basically medicine. What have you had on repeat lately?",
         "{q}my taste is all over the place. What are you listening to these days?",
-        "{q}I've had the same album on repeat for a week. Not sorry.",
-        "{q}someone put a record on and the whole room went quiet. Good night.",
+        "{q}sometimes one good track is enough.",
+        "{q}I like when a song takes a turn you didn't expect.",
     ),
 }
 
 _MOCK_DEFAULT_REPLIES: tuple[str, ...] = (
-    "{q}that's interesting. Tell me a bit more about that?",
-    "{q}I get what you mean. How did that make you feel?",
-    "{q}haha, seriously? What happened next?",
-    "{q}fair enough. What are you up to later today?",
+    "{q}what do you mean by that?",
+    "{q}which part?",
     "{q}yeah. That tracks.",
     "{q}hmm. I get that.",
-    "{q}honestly? Same.",
-    "{q}mm. Long day.",
+    "{q}okay.",
+    "{q}mm.",
 )
 
 #: 多语言回复：display name（用于 prompt）与确定性 mock 回复池（无 LLM key 时也能说对语言）
@@ -133,59 +145,78 @@ _MOCK_LANG_REPLIES: dict[str, tuple[str, ...]] = {
         "{q}なるほどね。最近は何をしてることが多い？",
         "{q}それはいいね。週末は何をする予定？",
         "{q}へえ、面白いね。もう少し詳しく聞かせて？",
-        "{q}うん、わかる。今日はちょっと疲れた。",
+        "{q}うん、なるほど。",
         "{q}それ、いいな。",
     ),
     "ko": (
         "{q}그렇구나. 요즘 뭐 하고 지내?",
         "{q}오, 재밌다. 주말에 뭐 해?",
         "{q}그래? 좀 더 얘기해 줄래?",
-        "{q}응, 알겠어. 오늘은 좀 피곤하네.",
+        "{q}응, 알겠어.",
         "{q}그거 좋다.",
     ),
     "pt": (
         "{q}entendi. E o que você tem feito ultimamente?",
         "{q}que legal. O que você costuma fazer no fim de semana?",
         "{q}sério? Me conta mais sobre isso.",
-        "{q}pois é. Hoje estou meio cansado.",
+        "{q}pois é, entendi.",
         "{q}isso é bom.",
     ),
     "es": (
         "{q}ya veo. ¿Y qué has estado haciendo últimamente?",
         "{q}qué bien. ¿Qué te gusta hacer los fines de semana?",
         "{q}¿en serio? Cuéntame un poco más.",
-        "{q}ya. Hoy estoy un poco cansado.",
+        "{q}ya, entiendo.",
         "{q}eso está bien.",
     ),
     "de": (
         "{q}verstehe. Und was machst du so in letzter Zeit?",
         "{q}schön. Was machst du am Wochenende?",
         "{q}echt? Erzähl mir mehr davon.",
-        "{q}ja. Heute bin ich ein bisschen müde.",
+        "{q}ja, verstehe.",
         "{q}das ist gut.",
     ),
     "fr": (
         "{q}je vois. Et qu'est-ce que tu fais en ce moment ?",
         "{q}super. Qu'est-ce que tu fais le week-end ?",
         "{q}sérieux ? Raconte-moi un peu plus.",
-        "{q}ouais. Là je suis un peu fatigué.",
+        "{q}ouais, je vois.",
         "{q}c'est bien ça.",
     ),
     "it": (
         "{q}capisco. E cosa fai in questi giorni?",
         "{q}bello. Cosa fai nel fine settimana?",
         "{q}davvero? Raccontami qualcosa in più.",
-        "{q}sì. Oggi sono un po' stanco.",
+        "{q}sì, capisco.",
         "{q}va bene così.",
     ),
     "zh": (
         "{q}原来是这样。你最近在忙什么？",
         "{q}挺好的。周末一般做什么？",
         "{q}真的吗？多说一点吧。",
-        "{q}嗯，今天有点累。",
+        "{q}嗯，知道了。",
         "{q}挺好的。",
     ),
 }
+
+# Minimal offline reactions. These are not a replacement for a conversational model,
+# but they must respect the user's intent before any topic/voice variation.
+_MOCK_CONTEXT_REPLIES = {
+    "en": ("Yeah?", "Talk later.", "Oh no. I'm sorry.", "That's good news!", "Mm.", "I'm not sure how to answer that.", "I'm an AI character here in Sonder."),
+    "zh": ("在呢。", "回头聊。", "啊，听到这个很难过。", "那太好了！", "嗯。", "这个我还真不知道怎么答。", "我是 Sonder 里的 AI 人物。"),
+    "ja": ("うん。", "またね。", "それはつらいね。", "よかったね！", "うん。", "それはちょっとわからない。", "私は Sonder の AI キャラクターだよ。"),
+    "ko": ("응.", "다음에 얘기하자.", "마음이 아프네.", "잘됐다!", "응.", "그건 잘 모르겠어.", "나는 Sonder의 AI 캐릭터야."),
+    "pt": ("Oi.", "Até mais.", "Poxa, sinto muito.", "Que boa notícia!", "Hum.", "Não sei bem como responder a isso.", "Sou uma personagem de IA no Sonder."),
+    "es": ("Hola.", "Hablamos luego.", "Vaya, lo siento mucho.", "¡Qué buena noticia!", "Mmm.", "No sé bien cómo responder a eso.", "Soy un personaje de IA en Sonder."),
+    "de": ("Hey.", "Bis später.", "Oh nein. Das tut mir leid.", "Das ist schön!", "Hm.", "Darauf weiß ich gerade keine Antwort.", "Ich bin eine KI-Figur in Sonder."),
+    "fr": ("Salut.", "À plus.", "Oh non, je suis désolé.", "Bonne nouvelle !", "Hmm.", "Je ne sais pas trop quoi répondre à ça.", "Je suis un personnage d'IA dans Sonder."),
+    "it": ("Ciao.", "A dopo.", "Mi dispiace molto.", "Che bella notizia!", "Mmh.", "Non so bene come rispondere.", "Sono un personaggio di IA in Sonder."),
+}
+_MOCK_INTENT_INDEX = {"greeting": 0, "closing": 1, "bad_news": 2, "good_news": 3, "silence": 4, "question": 5}
+_IDENTITY_QUESTION_RE = re.compile(
+    r"\b(?:are|r) you (?:an? )?(?:ai|bot|human|real person)\b|"
+    r"\b(?:ai|bot) or (?:a )?human\b|你(?:是|到底是|是不是).{0,8}(?:AI|ai|机器人|真人|人工智能)"
+)
 
 
 def _language_of(friend: dict) -> str:
@@ -400,16 +431,13 @@ def split_emotion(text: str) -> tuple[str, str]:
 
 
 def _clean_reply(text: str) -> str:
+    """Clean display formatting; the model token budget already bounds reply length.
+
+    A second character cap used to silently remove answers after 420 characters,
+    sometimes leaving a negation or clarification on the discarded side.
+    """
     text = _MARKDOWN_RE.sub("", text or "")
     text = re.sub(r"\s+", " ", text).strip().strip('"')
-    if len(text) > _MAX_REPLY_CHARS:
-        cut = text[:_MAX_REPLY_CHARS]
-        # 尽量在句末截断
-        for ch in (".", "!", "?"):
-            idx = cut.rfind(ch)
-            if idx > _MAX_REPLY_CHARS * 0.5:
-                return cut[: idx + 1]
-        return cut + "…"
     return text
 
 
@@ -500,10 +528,14 @@ def _tag_emotion(text: str, emotion: str) -> str:
 def _tts_defer_audio_enabled() -> bool:
     """是否把好友语音合成放到后台，先落文字消息再补音频。
 
-    线上默认开启：Fish 合成 3-8 秒，阻塞回复会让消息迟迟不出现。
-    测试环境在 ``backend/tests/conftest.py`` 里显式关闭，保持同步语义。
+    **默认关闭**：产品要求「AI 发来的就是语音，点一下立刻能播」。
+    如果先落文字、再补音频，气泡会先显示文字、几秒后变成语音，而且音频
+    没准备好时点击只能现场再合成一次（更慢）。现在先合成再返回，等待期间
+    由客户端的「正在输入」提示承接；消息出现时音频已经可播。
+
+    仍保留开关，供低延迟/弱网实验显式开启；测试环境同样保持同步语义。
     """
-    return os.getenv("SE_TTS_DEFER_AUDIO", "1").strip().lower() not in (
+    return os.getenv("SE_TTS_DEFER_AUDIO", "0").strip().lower() not in (
         "0",
         "false",
         "no",
@@ -536,11 +568,49 @@ class ChatService:
         self._memory_tasks: dict[str, asyncio.Task] = {}
         #: friend_id -> 开始生成回复的 monotonic 时间（前端「对方正在说话」）
         self._replying: dict[str, float] = {}
+        self.admission = ChatAdmission()
+        self.usage_budget = UsageBudget(db.conn, db._lock) if db is not None else None
+        if getattr(self.engines, 'llm', None) is not None:
+            self.engines.llm.usage_budget = self.usage_budget
+        self._decode_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice-decode")
+        self._voice_tasks: dict[str, asyncio.Task] = {}
+        self._memory_last: dict[str, str] = {}
+        self._memory_slots = asyncio.Semaphore(1)
 
     # ------------------------------------------------------------------ #
     # 后台任务
     # ------------------------------------------------------------------ #
+    @asynccontextmanager
+    async def foreground_turn(self, user_id: str):
+        async with self.admission.turn(user_id):
+            owned = []
+            token = _turn_audio_tasks.set(owned)
+            try:
+                yield
+            finally:
+                pending = [(mid, friend, task) for mid, friend, task in owned if not task.done()]
+                for _, _, task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*(task for _, _, task in pending), return_exceptions=True)
+                    from app.jobs import run_db_thread
+                    from app.v2.audio_events import publish
+                    # A task cancelled before its first instruction has no finally
+                    # block. Its parent still owns the persisted queued state.
+                    for mid, friend, _ in pending:
+                        message = await run_db_thread(self.db.get_message, mid)
+                        if message and message.get('audio_status') in ('queued', 'generating'):
+                            await run_db_thread(self.db.update_message, mid, audio_status='failed',
+                                                audio_error='语音生成已取消，请重试')
+                            await run_db_thread(publish, self.db, friend, mid, 'failed')
+                _turn_audio_tasks.reset(token)
+
     def spawn_bg(self, coro) -> asyncio.Task:
+        if len(self._tasks) >= 256:
+            coro.close()
+            async def skipped():
+                return None
+            return asyncio.create_task(skipped())
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -554,6 +624,8 @@ class ChatService:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
         self._memory_tasks.clear()
+        if hasattr(self, '_decode_pool'):
+            await asyncio.to_thread(self._decode_pool.shutdown, wait=True, cancel_futures=True)
 
     # ------------------------------------------------------------------ #
     # 「对方正在说话」状态（跨前端组件/离开聊天窗后仍然有效）
@@ -589,20 +661,27 @@ class ChatService:
         duration_ms: int = 0,
         context: str | None = None,
     ) -> dict:
+        from app.v3.identity import current_user_id
+        async with self.foreground_turn(current_user_id()):
+            return await self._handle_voice_admitted(friend_id, audio_bytes, filename, duration_ms, context)
+
+    async def _handle_voice_admitted(self, friend_id, audio_bytes, filename, duration_ms, context):
         self.mark_replying(friend_id)
         try:
             friend = await asyncio.to_thread(self.db.get_friend, friend_id)
             if friend is None:
                 raise KeyError(friend_id)
 
-            decoded = await asyncio.to_thread(self.audio.decode_upload, audio_bytes, filename)
+            ctx = copy_context()
+            decoded = await asyncio.get_running_loop().run_in_executor(
+                self._decode_pool, ctx.run, partial(self.audio.decode_upload, audio_bytes, filename))
             reply_lang = _language_of(friend)
             stt_language = None if reply_lang == "en" else reply_lang
             transcript, stt_meta = await self._transcribe(decoded["pcm16"], language=stt_language)
             if not transcript:
-                transcript = "（语音没有识别清楚，可以再说一次吗？）"
+                raise ValueError("语音没有识别清楚，请重新录音")
             dur = int(decoded["duration_ms"] or duration_ms or 0)
-            return await self._handle_user_text(
+            result = await self._handle_user_text(
                 friend,
                 transcript,
                 msg_type="voice",
@@ -611,6 +690,7 @@ class ChatService:
                 context=context,
                 stt_meta=stt_meta,
             )
+            return await self._settle_audio(result)
         finally:
             self.clear_replying(friend_id)
 
@@ -621,6 +701,11 @@ class ChatService:
         context: str | None = None,
         client_message_id: str | None = None,
     ) -> dict:
+        from app.v3.identity import current_user_id
+        async with self.foreground_turn(current_user_id()):
+            return await self._handle_text_admitted(friend_id, text, context, client_message_id)
+
+    async def _handle_text_admitted(self, friend_id, text, context, client_message_id):
         self.mark_replying(friend_id)
         try:
             friend = await asyncio.to_thread(self.db.get_friend, friend_id)
@@ -633,26 +718,34 @@ class ChatService:
                 if existing is not None:
                     # 同一客户端消息重复提交（例如未回复时退出页面又重试）：
                     # 不再产生新消息/新回复，直接返回已有回合。
-                    return await asyncio.to_thread(self._duplicate_turn, friend, existing)
-            return await self._handle_user_text(
+                    duplicate = await asyncio.to_thread(self._duplicate_turn, friend, existing)
+                    if duplicate['friend_messages']:
+                        return duplicate
+            result = await self._handle_user_text(
                 friend, text, msg_type="text", context=context,
                 stt_meta={"backend": "text", "latency_ms": 0.0},
                 client_message_id=client_message_id,
             )
+            return await self._settle_audio(result)
         finally:
             self.clear_replying(friend_id)
 
     def _duplicate_turn(self, friend: dict, user_message: dict) -> dict:
         """幂等命中时构造与正常回合同形的响应（包含已生成的回复）。"""
         fid = str(friend["id"])
-        created = str(user_message.get("created_at") or "")
-        with self.db._lock:  # noqa: SLF001 - 与 DB 共用连接/锁，保持一次只读快照
-            rows = self.db.list_messages(fid, limit=60)
-        replies = [
-            row for row in rows
-            if row.get("sender") == "friend"
-            and str(row.get("created_at") or "") >= created
-        ]
+        with self.db._lock:
+            linked = self.db.conn.execute(
+                "SELECT * FROM messages WHERE friend_id=? AND reply_to_message_id<>'' "
+                "AND reply_to_message_id=? ORDER BY rowid", (fid, user_message['id'])).fetchall()
+            if not linked:
+                linked = self.db.conn.execute(
+                    "SELECT * FROM messages WHERE friend_id=? AND sender='friend' "
+                    "AND COALESCE(reply_to_message_id,'')='' "
+                    "AND rowid>(SELECT rowid FROM messages WHERE id=?) "
+                    "AND rowid<COALESCE((SELECT MIN(rowid) FROM messages WHERE friend_id=? "
+                    "AND sender='user' AND rowid>(SELECT rowid FROM messages WHERE id=?)),9223372036854775807) "
+                    "ORDER BY rowid", (fid, user_message['id'], fid, user_message['id'])).fetchall()
+            replies = [self.db._row_to_dict(row, 'messages') for row in linked]
         return {
             "user_message": user_message,
             "friend_messages": replies,
@@ -676,14 +769,16 @@ class ChatService:
         target_dir = out_dir or self.audio.audio_dir
         # Fish 优先：和聊天气泡同一条链路，延迟 ~1s；edge 兜底（国内约 6s）
         try:
-            fish_audio = await self._fish_voice(clean, "neutral", friend)
+            from app.voice import fish_tts
+            with fish_tts.priority('call'):
+                fish_audio = await self._fish_voice(clean, "neutral", friend)
             if fish_audio is not None:
                 cfg = self.tts_config.load()
                 ext = (cfg.fish_format or "mp3").lower()
                 fname = f"fish_{uuid.uuid4().hex[:12]}.{ext}"
                 path = os.path.join(target_dir, fname)
                 await asyncio.to_thread(_write_bytes, path, fish_audio)
-                duration_ms = max(500, int(len(fish_audio) * 8 / 128_000 * 1000))
+                duration_ms = max(500, _fish_duration_ms(fish_audio))
                 return {
                     "path": path,
                     "url": f"/api/v2/audio/{fname}",
@@ -935,11 +1030,14 @@ class ChatService:
         caption: str = "",
     ) -> dict:
         """用户发图 → 多模态 LLM 结合图片回复 → TTS，落一条 image 消息。"""
-        self.mark_replying(friend_id)
-        try:
-            return await self._handle_image(friend_id, image_bytes, filename, content_type, caption)
-        finally:
-            self.clear_replying(friend_id)
+        from app.v3.identity import current_user_id
+        async with self.foreground_turn(current_user_id()):
+            self.mark_replying(friend_id)
+            try:
+                result = await self._handle_image(friend_id, image_bytes, filename, content_type, caption)
+                return await self._settle_audio(result)
+            finally:
+                self.clear_replying(friend_id)
 
     async def _handle_image(
         self,
@@ -1110,41 +1208,20 @@ class ChatService:
         if not transcript:
             raise ValueError("空文本")
 
-        history = await asyncio.to_thread(self.db.recent_messages, fid, 10)
-        user_msg = await asyncio.to_thread(
-            self.db.add_message,
-            fid,
-            "user",
-            transcript,
-            msg_type=msg_type,
-            audio_path=audio_filename,
-            duration_ms=duration_ms,
-            is_read=True,
-            context=context,
-            client_message_id=client_message_id,
-        )
-
-        # 熟稔度 / 轮数
-        friend = await asyncio.to_thread(self.db.add_turns, fid, 1)
-        total_turns = await asyncio.to_thread(self.db.count_turns, fid)
-        level = social.closeness_level(total_turns)
-        friend = await asyncio.to_thread(
-            self.db.update_friend,
-            fid,
-            closeness_level=level,
-            total_turns=total_turns,
-            last_interaction_at=_now_iso(),
-        )
-
-        # 好友回复（LLM + 裂变推荐）
-        review_exprs = await asyncio.to_thread(self.db.pick_review_expressions, 2)
+        turn = await asyncio.to_thread(
+            self.db.start_chat_turn, fid, transcript, msg_type=msg_type,
+            audio_path=audio_filename, duration_ms=duration_ms, context=context,
+            client_message_id=client_message_id)
+        friend, history, user_msg = turn['friend'], turn['history'], turn['user_message']
+        total_turns, level = turn['total_turns'], turn['closeness_level']
+        review_exprs = turn['review_expressions']
         referral_friend = await self._maybe_refer(friend)
         reply_text = await self._llm_reply(friend, transcript, history, review_exprs)
         if referral_friend is not None:
             reply_text = f"{reply_text} {social.referral_line(friend, referral_friend['name'])}".strip()
             await self._notify_referral(friend, referral_friend)
 
-        friend_msg = await self.store_friend_voice(friend, *split_emotion(reply_text))
+        friend_msg = await self.store_friend_voice(friend, *split_emotion(reply_text), reply_to=user_msg['id'])
 
         # 商业合作（广告）：**正常回复之后**再以人物口吻追加一条独立商业段落。
         # 广告是独立消息（msg_type="ad"），不进入 friend_messages / prompt / 长期记忆
@@ -1157,16 +1234,16 @@ class ChatService:
             log.warning("聊天广告投放失败（忽略）: %s: %s", type(exc).__name__, exc)
 
         # 旁路：润色批注 + 记忆提炼 + 表达本实战检测
-        self.spawn_bg(
-            self._suggestion_worker(user_msg["id"], friend, transcript, _language_of(friend))
-        )
+        auto_suggestions = os.getenv('SE_CHAT_AUTO_SUGGESTIONS', '0').lower() in ('1', 'true', 'yes')
+        if auto_suggestions:
+            self.spawn_bg(self._suggestion_worker(user_msg["id"], friend, transcript, _language_of(friend)))
         self._schedule_memory(fid)
         self.spawn_bg(self._expression_mastery_worker(transcript))
 
         return {
             "user_message": user_msg,
             "friend_messages": [friend_msg],
-            "suggestion_pending": True,
+            "suggestion_pending": auto_suggestions,
             "closeness_level": level,
             "total_turns": total_turns,
             "memory_updated": False,
@@ -1346,6 +1423,8 @@ class ChatService:
                 elif local_model:
                     meta["model"] = f"faster-whisper:{local_model}"
             return text, meta
+        except CapacityError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("STT 失败（降级为空）: %s: %s", type(exc).__name__, exc)
             return "", {"backend": "error", "latency_ms": 0.0, "error": f"{type(exc).__name__}"}
@@ -1523,7 +1602,8 @@ class ChatService:
             name = str(friend.get("name") or "a friend")
             lang_name = LANGUAGE_NAMES.get(_language_of(friend), "English")
             return (
-                f"You are {name}, a fictional person on a LIVE voice call. Never say you are an AI. "
+                f"You are {name}, a fictional AI character on a LIVE voice call. "
+                "If asked whether you are AI, answer honestly in your own voice. "
                 f"Reply only in natural {lang_name}, one or two short spoken sentences. "
                 "No greeting, no markdown."
             )
@@ -1540,12 +1620,20 @@ class ChatService:
         quirk = str(quirks[0]).strip() if quirks else ""
         city = str(friend.get("city") or "here")
         lang = _language_of(friend)
+        from app.v3.behavior import detect_intent  # noqa: PLC0415
+
+        context_lines = _MOCK_CONTEXT_REPLIES.get(lang, _MOCK_CONTEXT_REPLIES["en"])
+        if _IDENTITY_QUESTION_RE.search(str(user_text or "").lower()):
+            return context_lines[6]
+        intent = detect_intent(user_text)
+        if intent in _MOCK_INTENT_INDEX:
+            return context_lines[_MOCK_INTENT_INDEX[intent]]
         seed = zlib.crc32(f"{friend.get('id','')}|{user_text}".encode("utf-8")) & 0xFFFFFFFF
 
         behavior = str(getattr(plan, "behavior", "") or "")
         traits = dict(getattr(plan, "dna_traits", None) or {})
         # 只有 ask_question 这一轮允许以问句结尾；行为未知（通话 mock 等老路径）保持原样
-        want_question = (behavior == "ask_question") if behavior else True
+        want_question = behavior == "ask_question"
         if behavior in ("acknowledge",) and traits.get("verbosity", 0.5) > 0.5:
             want_question = False
         # 口头禅是「调味」不是固定前缀：约 40% 的回复才带，且不会被堆叠
@@ -1584,7 +1672,7 @@ class ChatService:
 
         普通一轮仍然只有 1 次 LLM 调用；只有回复语言不对时才多一次纠偏调用。
         """
-        plan = self._turn_plan(friend, user_text)
+        plan = await asyncio.to_thread(self._turn_plan, friend, user_text)
         reply = ""
         try:
             if getattr(self.engines.llm, "uses_mock", False):
@@ -1595,7 +1683,7 @@ class ChatService:
             messages: list[dict[str, str]] = [
                 {
                     "role": "system",
-                    "content": self._system_prompt(
+                    "content": await asyncio.to_thread(self._system_prompt,
                         friend, review_exprs, user_text=user_text, plan=plan
                     ),
                 }
@@ -1619,6 +1707,8 @@ class ChatService:
                         chunks.append(delta)
             except asyncio.CancelledError:
                 raise
+            except CapacityError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("LLM 回复失败（使用规则兜底）: %s: %s", type(exc).__name__, exc)
 
@@ -1639,7 +1729,7 @@ class ChatService:
             reply = fixed or self._mock_reply(friend, user_text, plan=plan)
             return reply
         finally:
-            self._after_reply_hooks(friend, plan, user_text)
+            await asyncio.to_thread(self._after_reply_hooks, friend, plan, user_text)
 
     async def _rewrite_in_language(self, friend: dict, text: str, lang: str) -> str | None:
         """让模型把自己刚写错语言的回复改写成目标语言；失败返回 None。"""
@@ -1679,14 +1769,7 @@ class ChatService:
         旧实现是四句「that sounds interesting / how did that make you feel」的客服话术，
         正是人物模板化的来源之一。这里改成最短的中性反应——**不提问**。
         """
-        quirks = friend.get("speech_quirks") or []
-        if isinstance(quirks, str):
-            quirks = [quirks]
-        quirk = str(quirks[0]).strip() if quirks else ""
-        options = ("Yeah.", "Hmm.", "Right.", "Okay.", "Mm.")
-        idx = int(time.time() * 1000 + len(str(friend.get("name", "")))) % len(options)
-        line = options[idx]
-        return f"{quirk}. {line}" if quirk and quirk.lower() not in line.lower() else line
+        return _MOCK_CONTEXT_REPLIES.get(_language_of(friend), _MOCK_CONTEXT_REPLIES["en"])[4]
 
 #: 情绪 -> (rate 增量, pitch 增量)。值是相对该好友基础 prosody 的偏移。
 
@@ -1744,7 +1827,7 @@ class ChatService:
                 except Exception:  # noqa: BLE001
                     return None
             cfg = store.load()
-            if cfg.provider != "fish" or not cfg.fish_api_key.strip():
+            if not voice_registry.fish_configured(cfg):
                 return None
             from app.voice import fish_tts  # noqa: PLC0415
 
@@ -1771,69 +1854,99 @@ class ChatService:
             return None
 
     async def store_friend_voice(
-        self, friend: dict, text: str, tts_text: str | None = None
+        self, friend: dict, text: str, tts_text: str | None = None, *, reply_to: str | None = None
     ) -> dict:
-        """保存好友消息；线上默认先落文字，再把 Fish/Edge 音频补到同一条消息。
+        """Persist explicit audio state; foreground admission stays until audio settles.
 
-        这不是「异步返回音频」：客户端拿到消息后立即显示文字/气泡，
-        随后前端短轮询一次把 ``audio_url`` 取回来。这样 Fish 的 3-8 秒
-        不再阻塞消息出现。
+        The opt-in deferred mode can expose the queued row earlier through events.
+        Failure/retry always updates this message rather than generating another reply.
         """
         fid = friend["id"]
-        if _tts_defer_audio_enabled():
-            msg = await asyncio.to_thread(
-                self.db.add_message,
-                fid,
-                "friend",
-                text,
-                msg_type="text",
-                audio_path=None,
-                duration_ms=0,
-                is_read=False,
-            )
-            await asyncio.to_thread(self.db.touch_friend, fid)
-            self.spawn_bg(self._deferred_voice_worker(msg["id"], friend, text, tts_text))
+        def insert_pending():
+            msg = self.db.add_message(
+                fid, "friend", text, msg_type="voice", is_read=False,
+                audio_path=None, duration_ms=0, audio_status="queued",
+                context=json.dumps({'reply_to': reply_to}) if reply_to else None,
+                reply_to_message_id=reply_to or '')
+            self.db.touch_friend(fid)
             return msg
-
-        audio_filename, duration_ms = await self._synth_friend_audio(friend, text, tts_text)
-        msg = await asyncio.to_thread(
-            self.db.add_message,
-            fid,
-            "friend",
-            text,
-            msg_type="voice" if audio_filename else "text",
-            audio_path=audio_filename,
-            duration_ms=int(duration_ms or 0),
-            is_read=False,
-        )
-        await asyncio.to_thread(self.db.touch_friend, fid)
-        return msg
-
-    async def _deferred_voice_worker(
-        self,
-        message_id: str,
-        friend: dict,
-        text: str,
-        tts_text: str | None,
-    ) -> None:
+        inserting = asyncio.create_task(asyncio.to_thread(insert_pending))
         try:
-            audio_filename, duration_ms = await self._synth_friend_audio(
-                friend, text, tts_text
-            )
-            if not audio_filename:
-                return
-            await asyncio.to_thread(
-                self.db.update_message,
-                message_id,
-                msg_type="voice",
-                audio_path=audio_filename,
-                duration_ms=int(duration_ms or 0),
-            )
-            log.debug("后台语音补全 message=%s audio=%s", message_id, audio_filename)
+            msg = await asyncio.shield(inserting)
         except asyncio.CancelledError:
+            msg = await inserting
+            await asyncio.to_thread(self.db.update_message, msg['id'], audio_status='failed',
+                                    audio_error='语音生成已取消，请重试')
+            from app.v2.audio_events import publish
+            await asyncio.to_thread(publish, self.db, friend, msg['id'], 'failed')
             raise
-        except Exception as exc:  # noqa: BLE001 - 音频失败不能影响已显示的消息
-            log.warning("后台语音补全失败 message=%s: %s: %s", message_id, type(exc).__name__, exc)
+        task = asyncio.create_task(self._deferred_voice_worker(msg["id"], friend, text, tts_text))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        if not hasattr(self, "_voice_tasks"):
+            self._voice_tasks = {}
+        self._voice_tasks[msg["id"]] = task
+        task.add_done_callback(lambda done: self._voice_tasks.pop(msg["id"], None))
+        owned = _turn_audio_tasks.get()
+        if owned is not None:
+            owned.append((msg['id'], friend, task))
+        if _tts_defer_audio_enabled():
+            return msg
+        await task
+        return await asyncio.to_thread(self.db.get_message, msg["id"])
+
+    async def _settle_audio(self, result: dict) -> dict:
+        for message in result.get("friend_messages", []):
+            task = self._voice_tasks.get(message["id"])
+            if task is not None:
+                await task
+        result["friend_messages"] = [
+            (await asyncio.to_thread(self.db.get_message, m["id"])) or m
+            for m in result.get("friend_messages", [])]
+        return result
+
+    async def _deferred_voice_worker(self, message_id, friend, text, tts_text) -> None:
+        from app.jobs import run_db_thread
+        from app.v2.audio_events import publish
+        from app.v3.media_access import register_asset, KIND_AUDIO
+        status, error = "failed", "语音生成失败，请重试"
+        try:
+            await run_db_thread(self.db.update_message, message_id, audio_status="generating", audio_error="")
+            audio_filename, duration_ms = await self._synth_friend_audio(friend, text, tts_text)
+            if audio_filename:
+                owner = str(friend.get("owner_user_id") or "local")
+                await run_db_thread(register_asset, self.db, owner_user_id=owner,
+                                        kind=KIND_AUDIO, filename=audio_filename)
+                await run_db_thread(self.db.update_message, message_id,
+                                        audio_path=audio_filename, duration_ms=int(duration_ms or 0),
+                                        audio_status="ready", audio_error="")
+                status, error = "ready", ""
+        except asyncio.CancelledError:
+            error = "语音生成超时或已取消，请重试"
+            raise
+        except Exception as exc:
+            log.warning("Audio synthesis failed message=%s: %s", message_id, type(exc).__name__)
+        finally:
+            if status != "ready":
+                await run_db_thread(self.db.update_message, message_id,
+                                        audio_status="failed", audio_error=error)
+            await run_db_thread(publish, self.db, friend, message_id, status)
+
+    async def retry_audio(self, message_id: str) -> dict:
+        from app.v3.identity import current_user_id
+        async with self.admission.turn(current_user_id()):
+            message = await asyncio.to_thread(self.db.get_message, message_id)
+            if message is None or message.get("sender") != "friend":
+                raise KeyError(message_id)
+            friend = await asyncio.to_thread(self.db.get_friend, message["friend_id"], owner_user_id=current_user_id())
+            if friend is None:
+                raise KeyError(message_id)
+            if message.get("audio_path"):
+                return message
+            if message_id in self._voice_tasks:
+                raise CapacityError("语音正在生成，请稍后重试")
+            await self._deferred_voice_worker(message_id, friend, message.get("transcript") or "", None)
+            return await asyncio.to_thread(self.db.get_message, message_id)
 
     async def _synth_friend_audio(
         self, friend: dict, text: str, tts_text: str | None = None
@@ -1867,10 +1980,9 @@ class ChatService:
                     ext = (self.tts_config.load().fish_format or "mp3").lower()
                     fname = f"fish_{uuid.uuid4().hex[:12]}.{ext}"
                     fpath = os.path.join(self.audio.audio_dir, fname)
-                    with open(fpath, "wb") as fh:
-                        fh.write(fish_audio)
+                    await asyncio.to_thread(_write_bytes, fpath, fish_audio)
                     path = fpath
-                    duration_ms = max(500, int(len(fish_audio) * 8 / 128_000 * 1000))
+                    duration_ms = max(500, _fish_duration_ms(fish_audio))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Fish 音频落盘失败，回落 edge: %s", exc)
                     path = None
@@ -1970,17 +2082,32 @@ class ChatService:
             return
         task = self.spawn_bg(self._memory_worker(friend_id))
         self._memory_tasks[friend_id] = task
+        task.add_done_callback(lambda done: self._memory_tasks.pop(friend_id, None)
+                               if self._memory_tasks.get(friend_id) is done else None)
 
     async def _memory_worker(self, friend_id: str, delay_s: float | None = None) -> None:
         try:
             delay = self.memory_idle_s if delay_s is None else max(0.0, float(delay_s))
             if delay > 0:
                 await asyncio.sleep(delay)
-            friend = await asyncio.to_thread(self.db.get_friend, friend_id)
-            if friend is None:
-                return
-            result = await self.memory.after_turn(friend)
-            log.info("记忆提炼完成 friend=%s keys=%s", friend_id, list(result or {}))
+            from app.jobs import background_scope
+            async with self._memory_slots:
+                with background_scope(lambda: self.admission.busy):
+                    while self.admission.busy:
+                        await asyncio.sleep(.5)
+                    friend = await asyncio.to_thread(self.db.get_friend, friend_id)
+                    if friend is None:
+                        return
+                    recent = await asyncio.to_thread(self.db.recent_messages, friend_id, 20)
+                    fingerprint = str(recent[-1].get('id') or recent[-1].get('created_at')) if recent else ''
+                    if not fingerprint or self._memory_last.get(friend_id) == fingerprint:
+                        return
+                    result = await self.memory.after_turn(friend, recent_messages=recent)
+                    if not result.get('error'):
+                        if len(self._memory_last) >= 2000:
+                            self._memory_last.pop(next(iter(self._memory_last)))
+                        self._memory_last[friend_id] = fingerprint
+                    log.info("记忆提炼完成 friend=%s keys=%s", friend_id, list(result or {}))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

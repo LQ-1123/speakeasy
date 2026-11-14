@@ -30,6 +30,7 @@ from typing import Any
 from app.logging_utils import get_logger
 from app.v3.schema import backfill_avatar_seeds, sync_persona_friends
 from app.v3.seed_data import LANGUAGE_NAMES, detect_language
+from app.v3.social_writing import PUBLIC_POST_STYLE, duplicate_post, post_text
 
 log = get_logger(__name__)
 
@@ -386,9 +387,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Bristol", "country": "United Kingdom", "occupation": "bookshop assistant",
         "bio": "Slow mornings, second-hand books and a kettle that never stops.",
         "posts": [
-            "The kettle has been on three times and I have not made tea once. A productive morning.",
-            "Someone put a tiny handwritten note inside a second-hand book today. I am keeping it.",
-            "Rain all afternoon, so I rearranged the window display twice. It looks the same.",
+            "Made tea. Left it in the kitchen. Remembered it when it was cold.",
+            "There's a name written inside this second-hand book. Different handwriting on the next page. Keeping both bookmarks where they were.",
+            "Not finishing this book. I've given it enough chances.",
         ],
     },
     "de": {
@@ -396,9 +397,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Leipzig", "country": "Germany", "occupation": "Grafikdesignerin",
         "bio": "Zeichnet morgens, kocht abends, und trinkt viel zu viel Kaffee.",
         "posts": [
-            "Der Kaffee war heute so stark, dass ich die Wohnung zweimal aufgeräumt habe.",
-            "Im Buchladen an der Ecke lag ein alter Reiseführer. Ich habe ihn nur angeschaut. Ehrlich.",
-            "Regen den ganzen Nachmittag. Perfektes Wetter für einen langen Nachmittag mit Musik.",
+            "Kaffee kalt geworden. Wieder vergessen, dass er in der Küche steht.",
+            "In dem gebrauchten Buch steht vorne noch ein Name. Den lasse ich drin.",
+            "Ich breche das Buch ab. Die Figuren interessieren mich einfach nicht.",
         ],
     },
     "es": {
@@ -406,9 +407,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Valencia", "country": "Spain", "occupation": "fotógrafa",
         "bio": "Café por la mañana, cámara al hombro, siesta cuando se puede.",
         "posts": [
-            "Hoy el café sabía mejor que ayer. No sé si es el café o el día.",
-            "Encontré una librería pequeña con sillas viejas. Me quedé una hora sin comprar nada.",
-            "Ha llovido toda la tarde. He hecho tres fotos desde la ventana y ninguna me convence.",
+            "Se me ha enfriado el café. Seguía en la cocina.",
+            "Este libro de segunda mano tiene un nombre escrito en la primera página. Lo voy a dejar ahí.",
+            "Dejo este libro a medias. No me importan nada los personajes.",
         ],
     },
     "fr": {
@@ -416,9 +417,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Lyon", "country": "France", "occupation": "libraire",
         "bio": "Je lis le matin, je cuisine le soir, et je perds mes marque-pages.",
         "posts": [
-            "Le café était trop chaud, alors j'ai lu deux pages de plus. Bon compromis.",
-            "Quelqu'un a laissé un vieux billet dans un livre d'occasion. Je l'ai gardé.",
-            "Il pleut depuis midi. J'ai réorganisé la vitrine deux fois, sans résultat.",
+            "Mon café est resté dans la cuisine. Il est froid maintenant.",
+            "Il y a encore un nom écrit dans ce livre d'occasion. Je le laisse.",
+            "J'abandonne ce livre. Je n'arrive pas à m'intéresser aux personnages.",
         ],
     },
     "it": {
@@ -426,9 +427,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Bologna", "country": "Italy", "occupation": "illustratrice",
         "bio": "Caffè, matite e una scrivania sempre piena di fogli.",
         "posts": [
-            "Il caffè di oggi era così forte che ho riordinato la scrivania due volte.",
-            "In libreria ho trovato una guida vecchia. L'ho solo sfogliata, giuro.",
-            "Piove da stamattina. Perfetto per disegnare con la musica alta.",
+            "Il caffè è rimasto in cucina. Ormai è freddo.",
+            "In questo libro usato c'è ancora un nome sulla prima pagina. Lo lascio lì.",
+            "Questo libro non lo finisco. Dei personaggi non mi importa niente.",
         ],
     },
     "pt": {
@@ -436,9 +437,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "Porto", "country": "Portugal", "occupation": "professora",
         "bio": "Café de manhã, livros à tarde, e uma varanda com vista para telhados.",
         "posts": [
-            "O café hoje ficou tão forte que arrumei a casa duas vezes.",
-            "Encontrei um livro antigo com uma dedicatória. Guardei como se fosse meu.",
-            "Choveu toda a tarde. Fiquei na varanda a ver os telhados a brilhar.",
+            "Esqueci o café na cozinha. Já está frio.",
+            "Este livro em segunda mão ainda tem um nome na primeira página. Vou deixar ficar.",
+            "Não vou acabar este livro. Não consigo gostar das personagens.",
         ],
     },
     "ja": {
@@ -446,9 +447,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "金沢", "country": "Japan", "occupation": "編集者",
         "bio": "朝はコーヒー、夜は本。古い本屋を巡るのが趣味です。",
         "posts": [
-            "今朝のコーヒーが濃すぎて、部屋を二回片付けました。",
-            "古本屋で古い旅行ガイドを見つけました。買わずに一時間立ち読み。",
-            "午後はずっと雨。音楽をかけて、窓の外を眺めていました。",
+            "コーヒー、台所に置きっぱなしだった。もう冷たい。",
+            "古本の最初のページに名前が書いてある。消さずにそのまま読んでる。",
+            "この本は途中でやめる。登場人物がどうにも好きになれない。",
         ],
     },
     "ko": {
@@ -456,9 +457,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "전주", "country": "Korea", "occupation": "편집자",
         "bio": "아침엔 커피, 저녁엔 책. 오래된 책방을 찾아다니는 게 취미예요.",
         "posts": [
-            "오늘 커피가 너무 진해서 방을 두 번이나 정리했어요.",
-            "동네 책방에서 오래된 여행 책을 봤어요. 그냥 한 시간 서서 읽었어요.",
-            "오후 내내 비가 왔어요. 음악 틀고 창밖을 봤습니다.",
+            "커피를 부엌에 두고 까먹었다. 다 식었네.",
+            "헌책 첫 장에 이름이 적혀 있다. 지우지 않고 그냥 읽는 중.",
+            "이 책은 그만 읽어야겠다. 등장인물한테 도무지 정이 안 간다.",
         ],
     },
     "zh": {
@@ -466,9 +467,9 @@ _FALLBACK_LANG: dict[str, dict[str, Any]] = {
         "city": "杭州", "country": "China", "occupation": "编辑",
         "bio": "早上咖啡，晚上书，喜欢在老书店里慢慢逛。",
         "posts": [
-            "今天的咖啡太浓了，我把房间收拾了两遍。",
-            "在老书店翻到一本旧旅行指南，站着看了半小时，没买。",
-            "下午一直在下雨，放了音乐，看着窗外出神。",
+            "咖啡又忘厨房了。想起来已经凉了。",
+            "这本旧书扉页上还写着一个名字。没擦，就这么看吧。",
+            "这本不看了，对主角实在没兴趣。",
         ],
     },
 }
@@ -537,7 +538,7 @@ def _name_entries(pools: dict, language: str = "") -> list[dict]:
 
 
 def _city_for(pools: dict, country: str, index: int, day: str) -> str:
-    """按名字标注的国家挑城市；该国没有城市池时退回 any / 第一个非空分组。"""
+    """按国家挑城市；旧版 any 池可以使用，但不跨到别国的分组。"""
     cities = pools.get("cities") or {}
     if not isinstance(cities, dict):
         return ""
@@ -546,7 +547,7 @@ def _city_for(pools: dict, country: str, index: int, day: str) -> str:
         group = cities[country]
     elif isinstance(cities.get("any"), list) and cities["any"]:
         group = cities["any"]
-    else:
+    elif not country:
         for items in cities.values():
             if isinstance(items, list) and items:
                 group = items
@@ -668,16 +669,29 @@ def _fallback_persona(
     ]
     gender = entry.get("gender") or target_gender
     country = entry.get("country") or spec["country"]
+    city = _city_for(pools, country, index, day)
+    if city and not (pools.get("cities") or {}).get(country) and city != spec["city"]:
+        # A legacy unlabelled city pool cannot establish the country.
+        country = ""
+    if not city and country != spec["country"]:
+        # A missing country pool is not evidence that the template city is in that country.
+        country = spec["country"]
+    personality = (
+        "Reserved in groups, direct with familiar people; prefers concrete details to big claims.",
+        "Talks readily about current interests, but keeps personal worries fairly private.",
+        "Practical and occasionally impatient; does not turn every inconvenience into a joke.",
+        "Observant, sometimes indecisive; asks questions only when actually curious.",
+    )[index % 4]
     return {
         "nickname": name,
         "gender": gender,
         "age": 24 + (index * 3) % 12,
         "country": country,
-        "city": _city_for(pools, country, index, day) or spec["city"],
+        "city": city or spec["city"],
         "language": lang,
         "occupation": _pick_sequence(occupations, index, f"job:{day}") or spec["occupation"],
         "bio": spec["bio"],
-        "personality": "curious, calm, a little funny",
+        "personality": personality,
         "interests": _pick_many(interests, index, 4, f"interest:{day}")
         or ["coffee", "books", "walking"],
         "posts": posts,
@@ -685,29 +699,26 @@ def _fallback_persona(
 
 
 
-    base = _TEMPLATE_PERSONAS[index % len(_TEMPLATE_PERSONAS)]
-    suffix = hashlib.sha256(f"{day}:{index}".encode("utf-8")).hexdigest()[:4]
-    persona = dict(base)
-    persona["nickname"] = f"{base['nickname']}"
-    # 每天给同一模板加一点差异（避免完全重复）
-    persona["bio"] = f"{base['bio']} · {suffix}"
-    return persona
-
-
-_PROMPT = """You are writing the daily cast of a language-learning social app.
-Create ONE AI persona and 6 short posts in their voice.
+_PROMPT = """Create ONE coherent fictional character for a shared social world,
+with the requested number of recent personal-account posts in their own voice.
 
 Rules:
 - All text (bio, personality, posts) must be in the persona's native language (`language`).
-- The persona is a normal person abroad: job, city, small daily details, light humour.
-- Posts: first person, <= 200 characters, no hashtags, no emoji, distinct topics.
+- Keep age, job, city/country, bio, interests, habits and posts mutually consistent.
+- Personality means concrete social habits, preferences, boundaries and weaknesses,
+  not a list of friendly adjectives. Do not make everyone witty, warm or poetic.
+- Posts: <= 400 characters each; varied length, ordinary register and motivation.
+  Some can be brief or unremarkable. A longer post needs actual substance.
+  Avoid repeating coffee, books and rain for every person, or matching punchline formulas.
+- Posts are newest first. They establish a small coherent personal history. Do not
+  invent real-world news, assume weather, or attach an unsupported date/time of day.
 - interests: 3-4 lowercase english tags.
 - Do not mention being an AI.
 
 Output JSON only:
 {"nickname","gender":"male|female","age","country","city","language":"en|ja|ko|de|es|it|pt|zh",
  "occupation","bio","personality","interests":[],"posts":[{"content","tags":[]}]}
-"""
+""" + "\n" + PUBLIC_POST_STYLE
 
 
 LEVEL_GUIDE = {
@@ -757,11 +768,12 @@ def _user_lang_prefs(db: Any) -> tuple[list[str], dict[str, str]]:
 async def _llm_persona(
     llm: Any, index: int, day: str, *, language: str = "", level: str = ""
 ) -> dict | None:
-    """生成一个人物：语言必须是在练语言，文案难度跟随该语言的水平。"""
+    """生成人物与初始化动态；公共世界使用人物母语，不使用私聊教学口吻。"""
     if llm is None or getattr(llm, "uses_mock", False):
         return None
     guide = LEVEL_GUIDE.get(level, LEVEL_GUIDE["能聊几句"]) if level else ""
-    parts = [_PROMPT, f"\n\nCreate persona #{index + 1} for {day}."]
+    parts = [_PROMPT, f"\n\nCreate persona #{index + 1} for {day}; "
+             f"include {POSTS_PER_PERSONA} posts (no more)."]
     hint = _pool_hint(_world_pools(), language)
     if hint:
         parts.append(hint)
@@ -831,11 +843,9 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
         from app.voice.tts_config import TTSConfigStore  # noqa: PLC0415
 
         cfg = TTSConfigStore(str(get_settings().data_path)).load()
-        if str(getattr(cfg, "provider", "")) != "fish":
+        if not voice_registry.fish_configured(cfg):
             return ""
         key = str(getattr(cfg, "fish_api_key", "") or "").strip()
-        if not key:
-            return ""
         if not voice_registry.fish_usable(cfg):
             return ""  # 熔断窗口内：不再尝试联网
         with db._lock:  # noqa: SLF001
@@ -860,7 +870,7 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
         # 否则每个新人物都要等一次网络超时，每日世界会卡住几分钟。
         try:
             await fish_tts.list_models(
-                api_key=key, base_url=base_url, page_size=1, timeout=5.0
+                api_key=key, base_url=base_url, page_size=1, timeout=5.0, model=cfg.fish_model
             )
         except Exception as exc:  # noqa: BLE001
             voice_registry.mark_fish_failure(exc)
@@ -883,6 +893,7 @@ async def _pick_fish_voice(db: Any, language: str, gender: str) -> str:
                 base_url=base_url,
                 timeout=5.0,  # 网络不可达时快速失败，别拖住每日世界
                 pages=1,
+                model=cfg.fish_model,
             )
             if candidate and candidate not in used:
                 return candidate
@@ -998,17 +1009,19 @@ async def _insert_persona(
                 ),
             )
         written = 0
+        seen: list[str] = []
         for idx, raw_post in enumerate(posts):
             if isinstance(raw_post, dict):
-                content = str(raw_post.get("content") or "").strip()[:400]
+                content = post_text(raw_post.get("content"))
                 tags = raw_post.get("tags") or []
             elif isinstance(raw_post, (list, tuple)) and raw_post:
-                content = str(raw_post[0] or "").strip()[:400]
+                content = post_text(raw_post[0])
                 tags = raw_post[1] if len(raw_post) > 1 else []
             else:
                 continue
-            if not content:
+            if not content or duplicate_post(content, seen):
                 continue
+            seen.append(content)
             post_created = created - timedelta(minutes=30 + idx * 47 + (idx * idx) % 20)
             cur = db.conn.execute(
                 "INSERT OR IGNORE INTO persona_posts (id, persona_id, content, media, tags, language,"

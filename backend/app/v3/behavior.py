@@ -16,8 +16,7 @@
 
 三条产品原则（也是本模块存在的理由）：
 
-1. **允许不提问**：只有 ``ask_question`` 才要求以问题结尾；其余行为都明确写
-   "Do not end with a question this turn unless they asked you one."。
+1. **允许不提问**：提问始终可选；正常澄清不受随机行为标签禁止。
 2. **允许一句话**：``acknowledge`` 可以只有一两个词，长度倾向由 DNA verbosity 决定。
 3. **允许不同意 / 允许结束**：``disagree`` 与 ``end_conversation`` 都是合法选择，
    不会被「热情、配合」的硬规则吃掉。
@@ -223,7 +222,7 @@ _FILLER_RE = re.compile(
 _BAD_NEWS_RE = re.compile(
     r"\b(?:died|death|passed away|passed on|funeral|broke up|break[- ]?up|broke me|"
     r"dumped|divorc\w*|got fired|was fired|laid off|lost my job|lost his job|lost her job|"
-    r"failed|flunked|rejected|rejection|turned down|got sick|fell ill|hospital|surgery|"
+    r"failed|flunked|rejected|rejection|turned down|got sick|fell ill|is ill|is sick|hospital|surgery|"
     r"accident|crashed|car broke|stolen|robbed|scammed|evicted|"
     r"missed my flight|missed the bus|panic attack|depressed|diagnos\w*|"
     r"cancer|miscarriage|lost my|lost her|lost his|bad news|terrible day|awful day|"
@@ -721,6 +720,16 @@ def choose_behavior(
     ask_cap = 0.35 + 1.15 * traits["initiative"]
     weights["ask_question"] = min(weights["ask_question"], ask_cap)
 
+    # Variation must not override the conversational obligation. A weighted lottery
+    # must not celebrate bereavement, start a story after goodbye, or dodge a question.
+    allowed = {
+        "closing": {"end_conversation", "acknowledge", "respond"},
+        "question": {"respond", "share", "tell_story", "ask_question"},
+        "bad_news": {"empathize", "comfort", "respond", "acknowledge", "ask_question"},
+    }.get(intent)
+    if allowed is not None:
+        weights = {name: weight if name in allowed else 0.0 for name, weight in weights.items()}
+
     # ---- 8. 归一化 + 抽样 ---------------------------------------------- #
     cleaned = {name: max(0.0, float(weights.get(name, 0.0))) for name in BEHAVIORS}
     total = sum(cleaned.values())
@@ -799,35 +808,35 @@ def _reason(
 # --------------------------------------------------------------------------- #
 #: 行为 → 一句具体动作要求（英文，直接进 system prompt）
 _BEHAVIOR_ACTIONS: dict[str, str] = {
-    "respond": "react to what they just said and add your own angle on it.",
-    "share": "tell them one concrete thing that happened to you today.",
-    "joke": "make a short joke or a dry, witty observation about the situation.",
+    "respond": "answer or react to the specific thing they said; that alone can be enough.",
+    "share": "if relevant, share one established detail or your present opinion; do not invent an event.",
+    "joke": "a brief joke is an option if their mood and the topic invite it; no forced punchline.",
     "tease": "gently tease them about what they just said; keep it affectionate, never mean.",
-    "empathize": "show that you actually get how they feel; name the feeling plainly.",
-    "comfort": "offer one small, concrete bit of comfort instead of a lecture.",
-    "disagree": "push back honestly on one point; it's fine to disagree.",
-    "complain": "vent a little about your own day; keep it casual, not a rant.",
-    "celebrate": "be happy for them and say specifically why it's great.",
-    "tell_story": "tell a short, specific story from your own life that fits the moment.",
-    "change_topic": "switch to a different topic you actually care about right now.",
+    "empathize": "react to what happened in your own voice; no feeling labels or stock validation needed.",
+    "comfort": "stay with their situation; brief company can be enough, advice only if wanted.",
+    "disagree": "give your actual view; disagree only if there is a real point of disagreement.",
+    "complain": "a small complaint about an established situation is an option if relevant; don't hijack their news.",
+    "celebrate": "react to their good news at a scale that fits; a few delighted words can be enough.",
+    "tell_story": "use a relevant recorded experience if one exists; otherwise just respond, without inventing a story.",
+    "change_topic": "only move on if the current topic has run its course and nothing needs an answer.",
     "acknowledge": "give a short reaction; one or two words can be perfect.",
     "end_conversation": "wrap this topic up naturally; a short sign-off is fine; do not ask a question.",
-    "ask_question": "ask them one genuine question you actually want an answer to.",
+    "ask_question": "one relevant question is an option if something genuinely needs following up; answer them first.",
 }
 
 #: verbosity → 长度提示
 _LENGTH_HINTS: tuple[tuple[float, str], ...] = (
-    (0.20, "one short line, no more than 8 words"),
-    (0.40, "one short sentence"),
-    (0.60, "one or two short sentences"),
-    (0.80, "two or three sentences"),
-    (1.01, "3-4 sentences is fine"),
+    (0.20, "usually a few words; expand if the actual answer needs it"),
+    (0.40, "usually one short sentence; no minimum length"),
+    (0.60, "usually one or two short sentences; a fragment is fine"),
+    (0.80, "a few sentences when needed, otherwise shorter"),
+    (1.01, "room for detail when engaged; never pad a simple reply"),
 )
 
-#: 只有 ask_question 允许以问题结尾；其余行为一律写这句
-_NO_QUESTION_RULE = "Do not end with a question this turn unless they asked you one."
+#: 提问是倾向，不能成为固定收尾，也不能禁止必要的澄清。
+_NO_QUESTION_RULE = "Questions are optional; ask only for a real conversational reason, never to keep them replying."
 _ASK_QUESTION_RULE = (
-    "This is the one turn where you may end with a question — ask it once, naturally."
+    "Questions are optional even here; skip one if they are winding down or have already answered it."
 )
 
 
@@ -838,7 +847,7 @@ def _length_hint(behavior: str, verbosity: float) -> str:
     if behavior == "end_conversation":
         return "keep it brief; a short sign-off is enough"
     if behavior == "ask_question":
-        return "keep it short (one or two sentences) and land the question at the end"
+        return "keep it short; a follow-up does not need a lead-in paragraph"
     for threshold, hint in _LENGTH_HINTS:
         if verbosity < threshold:
             return hint
@@ -885,15 +894,14 @@ def behavior_directive(
     硬性要求（§4.3）：
 
     - 写明本轮行为标签 + 一句具体动作要求；
-    - **只有 ``ask_question`` 允许以问题结尾**；其他行为都写
-      "Do not end with a question this turn unless they asked you one."；
+    - 行为仅作为倾向，当前消息的需要优先，提问可选；
     - 长度提示来自 ``verbosity``；
     - ``acknowledge`` 明确写「一两个词也可以」；
     - ``end_conversation`` 明确写「自然收尾、不要提问」。
 
     >>> d = behavior_directive(
     ...     BehaviorChoice("share", "r", 1.0, {}), dna_traits={}, language="en")
-    >>> "Do not end with a question" in d
+    >>> "Questions are optional" in d
     True
     """
     traits = normalize_traits(dna_traits)
@@ -905,7 +913,8 @@ def behavior_directive(
     length = _length_hint(behavior, traits["verbosity"])
     styles = _style_hints(traits)
 
-    lines = [f"[This turn] Chosen behavior: {behavior}.", f"Action: {action}"]
+    lines = [f"[This turn] Possible behavior: {behavior}.", f"Action: {action}"]
+    lines.append("Their actual message takes priority over this tendency; skip it if it doesn't fit.")
     lines.append(f"Length: {length}.")
     if styles:
         lines.append("Style: " + "; ".join(styles) + ".")

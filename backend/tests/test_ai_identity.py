@@ -42,9 +42,17 @@ def _persona_id(db: DB) -> str:
 
 
 def _assert_honest(text: str) -> None:
-    assert "AI companion" in text, text[:400]
-    assert "not a real human" in text
-    assert "if the user asks" in text.lower() or "if asked" in text.lower()
+    """被直接问到时必须诚实说明自己是 AI；不再锁死某一版措辞。
+
+    本轮把文字链路改成「Play this fictional AI character... If asked, be honest about
+    being AI; otherwise no identity disclaimers」，同时通话链路保留
+    「fictional character and an AI companion, not a real human ... say so honestly」。
+    合规要求是「虚构身份 + 被问时诚实」，措辞随提示词润色变化，这里按语义断言。
+    """
+    lowered = text.lower()
+    assert "honest" in lowered, text[:400]
+    assert "fictional" in lowered or "ai companion" in lowered, text[:400]
+    assert "if asked" in lowered or "if the user asks" in lowered, text[:400]
 
 
 def test_text_character_card_states_ai_identity(db):
@@ -53,16 +61,18 @@ def test_text_character_card_states_ai_identity(db):
     # 不再出现「绝不能承认是 AI」这类指令
     lowered = composed.text.lower()
     assert "never say you are an ai" not in lowered
-    # 「不要自称真人」仍然保留（与诚实披露兼容）
-    assert "never claim to be a real human" in lowered or "not a real human" in lowered
+    # 虚构身份仍被明确说明（不等于自称真人）
+    assert "fictional ai character" in lowered
 
 
 def test_call_character_card_states_ai_identity(db):
     composed = pc.compose_for_persona(db, _persona_id(db), mode="call")
     card = composed.module("character_card")
     assert card is not None
-    assert "AI companion" in card.text
-    assert "if the user asks" in card.text.lower()
+    # 身份披露在通话全局规则模块，不再塞进角色卡本身
+    _assert_honest(composed.text)
+    assert "ai companion, not a real human" in composed.text.lower()
+    assert "never say you are an ai" not in composed.text.lower()
 
 
 def test_memory_rules_state_ai_identity(db):

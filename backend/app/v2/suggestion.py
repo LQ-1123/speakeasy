@@ -15,7 +15,7 @@ import re
 from typing import Any
 
 from app.logging_utils import get_logger
-from app.v2.llm_json import complete_json_safe, to_dict
+from app.v2.llm_json import complete_json_safe, extract_json, to_dict
 
 log = get_logger(__name__)
 
@@ -124,6 +124,7 @@ async def generate_suggestion(
     friend_name: str = "",
     friend_context: str = "",
     language: str = "en",
+    strict: bool = False,
 ) -> dict[str, Any] | None:
     """为用户的一句话生成润色批注（按好友回复语言，英语/日语/韩语…）。
 
@@ -158,15 +159,20 @@ async def generate_suggestion(
         {"role": "user", "content": text},
     ]
     try:
-        parsed = await complete_json_safe(
-            llm,
-            messages,
-            schema_hint='{"better_version": string, "explanation": string, "tag": string}',
-            fallback=_fallback,
-        )
+        if strict and not getattr(llm, 'uses_mock', False):
+            parsed = extract_json(await llm.complete_json(messages))
+            if not isinstance(parsed, dict):
+                raise ValueError('invalid suggestion response')
+        else:
+            parsed = await complete_json_safe(
+                llm, messages,
+                schema_hint='{"better_version": string, "explanation": string, "tag": string}',
+                fallback=_fallback)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - 后台任务不能炸
+        if strict:
+            raise
         log.warning("润色生成失败: %s: %s", type(exc).__name__, exc)
         return rule_suggestion(text)
 

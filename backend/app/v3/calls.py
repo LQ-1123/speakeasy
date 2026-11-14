@@ -367,7 +367,8 @@ async def call_stream(ws: WebSocket, call_id: str) -> None:
 
     try:
         key = deepgram_key()
-        if key:
+        from app.voice.deepgram_stream import deepgram_configured
+        if key or deepgram_configured():
             candidate = DeepgramStreamer(key, call.language)
             try:
                 await asyncio.wait_for(candidate.connect(), 5)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import wave
 
 from app.logging_utils import get_logger
 from app.voice.audio_utils import (
@@ -19,6 +20,7 @@ from app.voice.audio_utils import (
     float32_to_pcm16,
     read_audio_file,
     write_wav,
+    upload_limits,
 )
 
 log = get_logger(__name__)
@@ -62,6 +64,9 @@ class AudioStore:
         """
         if not data:
             raise ValueError("上传音频为空")
+        max_bytes, max_duration_s, timeout_s = upload_limits()
+        if len(data) > max_bytes:
+            raise ValueError(f"上传音频大小超过 {max_bytes} bytes limit")
         suffix = os.path.splitext(filename or "")[1].lower()
         if suffix not in _UPLOAD_SUFFIXES:
             suffix = ".webm"
@@ -70,7 +75,8 @@ class AudioStore:
             with open(tmp, "wb") as fh:
                 fh.write(data)
             try:
-                audio = read_audio_file(tmp, target_sr=SR_IN)
+                audio = read_audio_file(tmp, target_sr=SR_IN,
+                                        max_duration_s=max_duration_s, timeout_s=timeout_s)
             except Exception as exc:  # noqa: BLE001 - 统一成 422 可识别的 ValueError
                 raise ValueError(f"无法解码音频: {exc}") from exc
         finally:
@@ -83,9 +89,14 @@ class AudioStore:
 
         duration_s = array_duration_s(audio, SR_IN)
         audio_filename = f"u_{uuid.uuid4().hex}.wav"
-        write_wav(self.path_for(audio_filename), audio, SR_IN)
+        pcm16 = float32_to_pcm16(audio)
+        with wave.open(self.path_for(audio_filename), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(SR_IN)
+            output.writeframes(pcm16)
         return {
-            "pcm16": float32_to_pcm16(audio),
+            "pcm16": pcm16,
             "duration_ms": int(duration_s * 1000),
             "audio_filename": audio_filename,
             "sample_rate": SR_IN,

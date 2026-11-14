@@ -44,7 +44,9 @@ class V2Services:
     def onboarding_pending(self) -> bool:
         return self.onboarding_task is not None and not self.onboarding_task.done()
 
-    async def aclose(self) -> None:
+    async def stop_workers(self) -> None:
+        if getattr(self, '_workers_stopped', False):
+            return
         await self.chat.aclose()
         if self.onboarding_task is not None and not self.onboarding_task.done():
             self.onboarding_task.cancel()
@@ -53,6 +55,15 @@ class V2Services:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._workers_stopped = True
+
+    async def aclose(self) -> None:
+        await self.stop_workers()
+        pool = getattr(self, 'provider_pool', None)
+        if pool is not None:
+            await pool.aclose()
+            from app.providers.runtime import unbind_pool
+            unbind_pool(pool)
         try:
             await asyncio.to_thread(self.db.close)
         except Exception as exc:  # noqa: BLE001
@@ -72,6 +83,12 @@ def build_services(engines: Any, data_dir: str) -> V2Services:
     chat = ChatService(
         engines, db, memory, voice, spawner, audio, media, memory_idle_s=idle_s
     )
+    # In-process synthesis cannot survive a restart. Do not leave old pending
+    # bubbles waiting forever; explicit retry reuses the original message.
+    with db._lock, db.conn:
+        db.conn.execute("UPDATE messages SET audio_status='failed', audio_error=? "
+                        "WHERE audio_status IN ('queued','generating') AND COALESCE(audio_path,'')=''",
+                        ('服务已重启，请重试语音',))
     services = V2Services(
         db=db,
         engines=engines,

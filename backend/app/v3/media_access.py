@@ -46,6 +46,7 @@ import uuid
 import weakref
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.logging_utils import get_logger
 
@@ -134,6 +135,12 @@ def ensure_media_schema(db: Any) -> None:
         db.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_media_assets_owner"
             " ON media_assets(owner_user_id)"
+        )
+        # /api/v2/media/{filename} 与 /uploads/* 只知道文件名、不知道 kind：UNIQUE(kind, filename)
+        # 帮不上忙，没有这个索引就是每次读图都全表扫（每句语音都会登记一行，表涨得很快）。
+        db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_assets_filename"
+            " ON media_assets(filename)"
         )
     try:
         _schema_ready.add(db)
@@ -412,23 +419,37 @@ def signed_url(
     ``/api/v2/media/*`` 已按归属校验；序列化响应时由服务端直接签名，前端无需改造。
 
     - 未登记 / 非本人 / 不是站内媒体 URL：原样返回；
-    - ``/uploads/...`` → ``kind='post_image'``；``/api/v2/media/...`` → ``kind='chat_image'``。
+    - ``/uploads/...`` → ``kind='post_image'``；``/api/v2/media/...`` → ``kind='chat_image'``；
+      ``/api/v2/audio/...`` → ``kind='audio'``；
+    - 已经带 ``t=`` 的 URL 会先解析路径再签名（替换旧令牌），保证二次序列化幂等。
     """
     raw = str(url or "").strip()
     if not raw or not str(user_id or "").strip():
         return raw
-    for prefix, kind in (("/uploads/", KIND_POST_IMAGE), ("/api/v2/media/", KIND_CHAT_IMAGE)):
-        if not raw.startswith(prefix):
+    # 已签名的 URL（例如同一消息在 bootstrap 与 messages 两个响应里各序列化一次）
+    # 不能把 "name.wav?t=..." 当成文件名，否则 owner 查不到、令牌不会续签，
+    # 一小时后点语音就会回落成现场合成。这里按 path 校验，重建 query 后再签名。
+    parts = urlsplit(raw)
+    if parts.scheme and parts.scheme not in ("http", "https"):
+        return raw
+    path = parts.path
+    for prefix, kind in (
+        ("/uploads/", KIND_POST_IMAGE),
+        ("/api/v2/media/", KIND_CHAT_IMAGE),
+        ("/api/v2/audio/", KIND_AUDIO),
+    ):
+        if not path.startswith(prefix):
             continue
-        name = normalize_filename(raw[len(prefix):])
+        name = normalize_filename(path[len(prefix):])
         if not name:
             return raw
         owner = owner_of(db, kind, name)
         if owner is None or owner != str(user_id):
             return raw
         token = issue_media_token(db, str(user_id), kind, name, ttl_s)
-        sep = "&" if "?" in raw else "?"
-        return f"{raw}{sep}t={token}"
+        query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "t"]
+        query.append(("t", token))
+        return urlunsplit((parts.scheme, parts.netloc, path, urlencode(query), parts.fragment))
     return raw
 
 

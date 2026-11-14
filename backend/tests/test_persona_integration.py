@@ -251,15 +251,15 @@ def test_prompt_no_longer_forces_hook_and_one_liners(db):
     assert "[Speech DNA]" in prompt         # 表达配置在场
 
 
-def test_behavior_directive_blocks_questions_for_non_question_behaviors(db):
+def test_behavior_directive_allows_context_to_override_the_tendency(db):
     friend = _make_friend(db, "Morten")  # blunt / low initiative
     plans = [
         persona_context.build_turn_plan(db, friend, text, rng=random.Random(seed))
         for seed, text in enumerate(["yeah", "mm", "ok", "cool", "right"])
     ]
     for plan in plans:
-        if plan.behavior != "ask_question":
-            assert "Do not end with a question" in plan.directive
+        assert "Questions are optional" in plan.directive
+        assert "actual message takes priority" in plan.directive
 
 
 # --------------------------------------------------------------------------- #

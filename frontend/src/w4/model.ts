@@ -96,6 +96,10 @@ export interface Message {
   durationMs?: number;
   /** 真实语音 mp3 地址（接后端时才有） */
   audio?: string;
+  /** 好友语音仍在后台合成：气泡显示语音形态，等音频补全后可直接播放 */
+  audioPending?: boolean;
+  audioStatus?: "queued" | "generating" | "ready" | "failed";
+  audioError?: string;
   image?: string;
   time: string;
   suggestion?: Suggestion;

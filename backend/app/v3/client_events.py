@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.v3 import teen
+from app.v3 import teen, wakeups
 from app.v3.client_api import preferences
 from app.v3.account_archive import user_is_available
 
@@ -22,6 +22,22 @@ MINOR_PUSH_RETRY_S = 3600
 # A missing deployment credential is a permanent state until the process restarts
 # with keys; warn once instead of logging on every worker tick.
 _unconfigured_warned = False
+
+#: Retention (delete read rows after 7 days, expire unsent pushes after 1 day) has day-level
+#: granularity; running it on every 2-second tick only burns CPU under the database lock.
+HOUSEKEEP_EVERY_S = 60.0
+
+
+def _housekeeping_due(db) -> bool:
+    now = time.monotonic()
+    last = getattr(db, "_client_events_housekeep_at", None)
+    if last is not None and now - last < HOUSEKEEP_EVERY_S:
+        return False
+    try:
+        setattr(db, "_client_events_housekeep_at", now)
+    except Exception:  # noqa: BLE001 - a DB stand-in without attributes simply keeps the old cadence
+        pass
+    return True
 
 
 def mark_push_unconfigured(db) -> int:
@@ -41,6 +57,7 @@ def collect_events(db) -> int:
     the watermark. Bootstrap skips historical messages but keeps future social events.
     """
     now = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    touched: set[str] = set()
     with db._lock, db.conn:
         state = db.conn.execute("SELECT value FROM client_event_state WHERE key='message_row' LIMIT 1").fetchone()
         if state is None:
@@ -63,6 +80,8 @@ def collect_events(db) -> int:
                                  'avatar':row['avatar_url'] or '',
                                  'route':'#/chat/'+row['friend_id']},ensure_ascii=False),row['created_at'],time.time()+2))
                 count += cursor.rowcount
+                if cursor.rowcount:
+                    touched.add(str(row['owner_user_id']))
         if rows:
             db.conn.execute("UPDATE client_event_state SET value=? WHERE key='message_row'", (str(rows[-1]['source_row']),))
         social = db.conn.execute("""SELECT s.*,p.nickname FROM social_events s LEFT JOIN personas p ON p.id=s.persona_id
@@ -80,13 +99,22 @@ def collect_events(db) -> int:
               (id,user_id,type,post_id,payload,created_at,next_attempt) VALUES (?,?,?,?,?,?,?)""",
               ('social:'+row['id'],row['user_id'],kind,row['post_id'],json.dumps(detail,ensure_ascii=False),row['created_at'],time.time()+2))
             count+=cursor.rowcount
+            if cursor.rowcount:
+                touched.add(str(row['user_id']))
         # Reads from either the old or new API converge to the same outbox state.
+        # The source row is looked up by primary key (substr strips the 'message:' / 'social:'
+        # prefix). Comparing 'message:'||m.id instead cannot use any index: every unread event
+        # then scans the whole messages table, on every tick, while holding the database lock.
         db.conn.execute("""UPDATE client_events SET is_read=1,push_status='suppressed'
-           WHERE is_read=0 AND ((id LIKE 'message:%' AND EXISTS(SELECT 1 FROM messages m WHERE 'message:'||m.id=client_events.id AND m.is_read=1))
-           OR (id LIKE 'social:%' AND EXISTS(SELECT 1 FROM social_events s WHERE 'social:'||s.id=client_events.id AND (s.is_read=1 OR s.status='declined'))))""")
-        db.conn.execute("DELETE FROM client_events WHERE is_read=1 AND datetime(created_at)<datetime('now','-7 days')")
-        db.conn.execute("UPDATE client_events SET push_status='expired' WHERE push_status='pending' AND datetime(created_at)<datetime('now','-1 day')")
-        return count
+           WHERE is_read=0 AND ((id LIKE 'message:%' AND EXISTS(SELECT 1 FROM messages m WHERE m.id=substr(client_events.id,9) AND m.is_read=1))
+           OR (id LIKE 'social:%' AND EXISTS(SELECT 1 FROM social_events s WHERE s.id=substr(client_events.id,8) AND (s.is_read=1 OR s.status='declined'))))""")
+        if _housekeeping_due(db):
+            db.conn.execute("DELETE FROM client_events WHERE is_read=1 AND datetime(created_at)<datetime('now','-7 days')")
+            db.conn.execute("UPDATE client_events SET push_status='expired' WHERE push_status='pending' AND datetime(created_at)<datetime('now','-1 day')")
+    # Committed: wake only the event sockets of users who actually got something new.
+    if touched:
+        wakeups.notify(touched)
+    return count
 
 
 async def dispatch_push(db) -> int:
@@ -113,6 +141,9 @@ async def dispatch_push(db) -> int:
         return 0
     with db._lock:
         rows = [dict(r) for r in db.conn.execute("SELECT * FROM client_events WHERE push_status='pending' AND is_read=0 AND next_attempt<=? ORDER BY sequence LIMIT 20",(time.time(),)).fetchall()]
+    if not rows:
+        # Nothing due: do not build an HTTP client (TLS context) on every 2-second tick.
+        return 0
     sent = 0
     async with httpx.AsyncClient(timeout=8, auth=(key,secret)) as client:
         for event in rows:

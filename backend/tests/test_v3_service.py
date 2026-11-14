@@ -348,6 +348,9 @@ def test_add_friend_promotes_pending_request_to_accepted(tmp_path):
         type_weights={"like": 0.0, "comment": 0.0, "friend_request": 1.0}
     )
     db, service = make_service(tmp_path, config=cfg)
+    async def request_message(*_args):
+        return "Saw your climbing post. Want to connect?"
+    service._llm_request_message = request_message
     try:
         with as_user("u_pending"):
             post = service.create_user_post(
@@ -585,6 +588,9 @@ def test_friend_request_event_materializes_and_can_be_accepted(tmp_path):
         type_weights={"like": 0.0, "comment": 0.0, "friend_request": 1.0}
     )
     db, service = make_service(tmp_path, config=cfg)
+    async def request_message(*_args):
+        return "Saw your climbing post. Want to connect?"
+    service._llm_request_message = request_message
     try:
         with as_user("u_fr"):
             post = service.create_user_post(
@@ -616,5 +622,47 @@ def test_friend_request_event_materializes_and_can_be_accepted(tmp_path):
             listed = service.list_events("u_fr")["items"]
             assert listed[0]["status"] == "accepted"
             assert listed[0]["is_read"] is True
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("event_type", ["comment", "friend_request"])
+def test_unavailable_social_generation_does_not_publish_template(tmp_path, event_type):
+    cfg = social_config(type_weights={event_type: 1.0})
+    db, service = make_service(tmp_path, config=cfg)
+    try:
+        post = service.create_user_post("u_skip", "climbing day", tags=["climbing"])
+        result = run(service.trigger_social_events("u_skip", post))
+        assert result["events"] == []
+        assert _event_count(db, "u_skip") == 0
+        assert any(a["reason"] == "content_unavailable" for a in service.stats("u_skip")["attempts"])
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("key,method", [("comment", "_llm_comment"), ("message", "_llm_request_message")])
+def test_social_generation_validates_language_and_keeps_persona(tmp_path, key, method):
+    import json
+
+    class Model:
+        uses_mock = False
+        reply = "这本书我也想看。"
+        messages = []
+
+        async def complete_json(self, messages, **_kwargs):
+            self.messages = messages
+            return json.dumps({key: self.reply}, ensure_ascii=False)
+
+    db, service = make_service(tmp_path)
+    try:
+        model = Model()
+        service.engines.llm = model
+        person = {"nickname": "林", "language": "zh", "occupation": "editor", "interests": ["books"]}
+        assert run(getattr(service, method)(person, "今天看完这本书了")) == model.reply
+        assert "editor" in model.messages[0]["content"]
+        model.reply = "Love this!"
+        assert run(getattr(service, method)(person, "今天看完这本书了")) == ""
+        model.reply = ""
+        assert run(getattr(service, method)(person, "今天看完这本书了")) == ""
     finally:
         db.close()

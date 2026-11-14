@@ -238,6 +238,7 @@ def _include_api_routers() -> None:
         personas,
         posts,
         prompts,
+        provider_resources,
         release,
         reports,
         session,
@@ -254,6 +255,7 @@ def _include_api_routers() -> None:
         prompts,
         lexicons,
         config,
+        provider_resources,
         release,
         # 新增接口（内容举报）：列表 / 处理 / 汇总
         reports,

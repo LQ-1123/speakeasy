@@ -9,7 +9,48 @@ import sqlite3
 import threading
 import time
 import uuid
+import contextlib
+from contextvars import ContextVar
 from typing import Any, Callable
+
+
+_background_busy: ContextVar[Callable[[], bool] | None] = ContextVar("background_busy", default=None)
+
+
+@contextlib.contextmanager
+def background_scope(busy: Callable[[], bool]):
+    """Propagate foreground backpressure to each provider call in this task."""
+    token = _background_busy.set(busy)
+    try:
+        yield
+    finally:
+        _background_busy.reset(token)
+
+
+async def wait_for_background_capacity() -> None:
+    """Pause before claiming provider slots, without cancelling paid requests."""
+    busy = _background_busy.get()
+    while busy is not None and busy():
+        await asyncio.sleep(0.1)
+
+
+def background_is_busy() -> bool:
+    busy = _background_busy.get()
+    return bool(busy is not None and busy())
+
+
+async def run_db_thread(function, *args, **kwargs):
+    """Drain a started SQLite stage on cancellation before its owner closes DB."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
+
+
+PERIODIC_JOB_KINDS = ("life_events", "event_posts", "voice_readiness", "audio_warm",
+                      "cleanup", "persona_dna", "followups")
 
 
 class DurableJobQueue:
@@ -33,6 +74,8 @@ class DurableJobQueue:
             "CREATE INDEX IF NOT EXISTS idx_background_jobs_ready "
             "ON background_jobs(status, run_after, priority, created_at)"
         )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_background_jobs_done "
+                          "ON background_jobs(updated_at) WHERE status='done'")
         self.conn.commit()
 
     def enqueue(
@@ -44,7 +87,7 @@ class DurableJobQueue:
 
     def _enqueue(
         self, kind: str, payload: dict[str, Any], *, dedupe_key: str,
-        priority: int = 100, run_after: float = 0,
+        priority: int = 100, run_after: float = 0, _commit: bool = True,
     ) -> str:
         now = time.time()
         job_id = uuid.uuid4().hex
@@ -55,11 +98,32 @@ class DurableJobQueue:
             (job_id, str(kind), json.dumps(payload, separators=(",", ":")),
              str(dedupe_key), int(priority), float(run_after), now, now),
         )
-        self.conn.commit()
+        if _commit:
+            self.conn.commit()
         row = self.conn.execute(
             "SELECT id FROM background_jobs WHERE dedupe_key=?", (str(dedupe_key),)
         ).fetchone()
         return str(row[0])
+
+    def enqueue_many(self, specifications: list[dict[str, Any]]) -> list[str]:
+        """Commit all changed periodic slots in one short transaction."""
+        with self.lock, self.conn:
+            return [self._enqueue(**specification, _commit=False) for specification in specifications]
+
+    def prune_periodic(self, *, now: float | None = None, retain_days: int = 7) -> int:
+        """Delete only completed date/numeric periodic slots; retain durable dedupe."""
+        cutoff = (time.time() if now is None else float(now)) - max(1, retain_days) * 86400
+        placeholders = ",".join("?" for _ in PERIODIC_JOB_KINDS)
+        with self.lock, self.conn:
+            cursor = self.conn.execute(
+                f"DELETE FROM background_jobs WHERE status='done' AND updated_at<? AND ("
+                f"(kind IN ({placeholders}) AND dedupe_key LIKE kind||':%' "
+                "AND length(dedupe_key)>length(kind)+1 "
+                "AND substr(dedupe_key,length(kind)+2) NOT GLOB '*[^0-9]*') OR "
+                "(kind='daily_world' AND dedupe_key GLOB 'daily_world:????-??-??'))",
+                (cutoff, *PERIODIC_JOB_KINDS),
+            )
+            return cursor.rowcount
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self.lock:
@@ -118,7 +182,16 @@ class DurableJobQueue:
         now: float | None = None, active_calls: int = 0, lease_seconds: float = 120,
     ) -> bool:
         """Await one handler without holding the connection lock across network work."""
-        claimed = self._claim(now=now, active_calls=active_calls, lease_seconds=lease_seconds)
+        await wait_for_background_capacity()
+        claim_task = asyncio.create_task(asyncio.to_thread(
+            self._claim, now=now, active_calls=active_calls, lease_seconds=lease_seconds))
+        try:
+            claimed = await asyncio.shield(claim_task)
+        except asyncio.CancelledError:
+            claimed = await claim_task
+            if claimed is not None:
+                await self._finish_async(*claimed, RuntimeError("maintenance_interrupted"))
+            raise
         if claimed is None:
             return False
         job, current = claimed
@@ -130,13 +203,22 @@ class DurableJobQueue:
             if inspect.isawaitable(result):
                 await result
         except asyncio.CancelledError:
-            self._finish(job, current, RuntimeError("maintenance_interrupted"))
+            await self._finish_async(job, current, RuntimeError("maintenance_interrupted"))
             raise
         except Exception as exc:
-            self._finish(job, current, exc)
+            await self._finish_async(job, current, exc)
         else:
-            self._finish(job, current)
+            await self._finish_async(job, current)
         return True
+
+    async def _finish_async(self, job: dict[str, Any], current: float,
+                            error: Exception | None = None) -> None:
+        task = asyncio.create_task(asyncio.to_thread(self._finish, job, current, error))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await task
+            raise
 
     def run_one(
         self, handlers: dict[str, Callable[[dict[str, Any]], Any]], *,

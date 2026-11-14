@@ -63,11 +63,10 @@ def _cfg() -> Any:
 
 def _fish_key_and_base() -> tuple[str, str, str]:
     cfg = _cfg()
-    if str(getattr(cfg, "provider", "") or "").strip().lower() != "fish":
-        raise RuntimeError("当前 TTS provider 不是 fish（管理台「模型与密钥」里切换并保存）")
+    from app.voice import voice_registry
+    if not voice_registry.fish_configured(cfg):
+        raise RuntimeError("未配置可用的 Fish 凭据或资源池")
     key = str(getattr(cfg, "fish_api_key", "") or "").strip()
-    if not key:
-        raise RuntimeError("未配置 Fish API Key")
     base = str(getattr(cfg, "fish_base_url", "https://api.fish.audio") or "").strip()
     model = str(getattr(cfg, "fish_model", "s2.1-pro") or "s2.1-pro").strip()
     return key, base, model
@@ -289,6 +288,7 @@ async def list_all_models(*, refresh: bool = False, max_pages: int = 10) -> list
             page_size=100,
             use_cache=not refresh,
             timeout=25.0,
+            model=_model,
         )
         for row in rows:
             rid = str(row.get("id") or "").strip()

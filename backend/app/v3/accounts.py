@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.logging_utils import get_logger
+from app.v3 import wakeups
 from app.v3.auth_policy import email_code_auth_enabled
 from app.v3.identity import LOCAL_USER_ID, current_user_id
 
@@ -485,6 +486,33 @@ def authenticate_session(db: Any, token: str) -> dict | None:
     return {"user_id": str(row["user_id"]), "session_id": str(row["id"]), "expires_at": expires}
 
 
+#: 会话活跃时间的进程内节流：两条 UPDATE 自带「一分钟内不重复写」的条件，这里只是让
+#: 一分钟内的后续请求连库都不用碰（每个请求少两条语句、少占一次写锁）。
+_TOUCH_INTERVAL_S = 55.0
+_touched_at: dict[str, float] = {}
+_touch_lock = threading.Lock()
+
+
+def _touch_due(session_id: str) -> bool:
+    now = time.monotonic()
+    with _touch_lock:
+        last = _touched_at.get(session_id)
+        if last is not None and now - last < _TOUCH_INTERVAL_S:
+            return False
+        if len(_touched_at) > 20000:  # 会话数异常多时整体清空，宁可多写几次库也不无限占内存
+            _touched_at.clear()
+        _touched_at[session_id] = now
+        return True
+
+
+def authenticate_and_touch(db: Any, token: str) -> dict | None:
+    """校验会话并顺手更新活跃时间：一次线程切换完成（原先是两次）。"""
+    session = authenticate_session(db, token)
+    if session is not None and _touch_due(str(session["session_id"])):
+        touch_session(db, str(session["session_id"]))
+    return session
+
+
 def touch_session(db: Any, session_id: str) -> None:
     try:
         with db._lock, db.conn:  # noqa: SLF001
@@ -532,6 +560,8 @@ def revoke_session(db: Any, user_id: str, session_id: str) -> bool:
         changed = cur.rowcount
         from app.v3.device_sessions import release_revoked_devices
         release_revoked_devices(db, user_id)
+    # 挂着的事件长连接立刻醒来复核会话（它们平时不再每秒自查）
+    wakeups.notify([user_id])
     return bool(changed)
 
 
@@ -550,7 +580,8 @@ def revoke_user_sessions(db: Any, user_id: str, *, except_session_id: str = "") 
         changed = int(cur.rowcount or 0)
         from app.v3.device_sessions import release_revoked_devices
         release_revoked_devices(db, user_id)
-        return changed
+    wakeups.notify([user_id])
+    return changed
 
 
 def count_active_sessions(db: Any, user_id: str) -> int:
@@ -995,6 +1026,7 @@ __all__ = [
     "account_for_user",
     "age_gate_enforced",
     "age_verification_for",
+    "authenticate_and_touch",
     "authenticate_session",
     "bind_legacy_user",
     "capabilities",

@@ -189,6 +189,28 @@ def test_detect_intent_edge_inputs():
         assert B.detect_intent(text) in B.INTENTS
 
 
+@pytest.mark.parametrize(
+    "message, forbidden",
+    [
+        ("My dog died yesterday.", {"joke", "tease", "celebrate", "tell_story", "change_topic"}),
+        ("Good night, talk tomorrow.", {"ask_question", "tell_story", "share", "change_topic"}),
+        ("Where do you live?", {"change_topic", "end_conversation", "complain", "joke"}),
+    ],
+)
+def test_intent_obligations_survive_extreme_personality_and_randomness(message, forbidden):
+    for seed in range(100):
+        choice = B.choose_behavior(
+            B.BehaviorInput(
+                dna_traits={key: 1.0 for key in B.TRAIT_KEYS},
+                user_text=message, recent_behaviors=("respond", "respond"),
+                mood={"energy": 0.1, "stress": 0.95, "social_battery": 0.1},
+            ),
+            rng=random.Random(seed),
+        )
+        assert choice.behavior not in forbidden
+        assert all(choice.weights[key] == 0 for key in forbidden)
+
+
 # --------------------------------------------------------------------------- #
 # 权重归一化 / 抽样基础
 # --------------------------------------------------------------------------- #
@@ -608,17 +630,14 @@ def _choice(behavior: str) -> B.BehaviorChoice:
 
 
 def test_directive_question_rule():
-    """只有 ask_question 允许以问题结尾；其它行为必须写死禁止提问。"""
+    """提问是可选动作，不能由随机行为强制或禁止正常澄清。"""
     for behavior in B.BEHAVIORS:
         directive = B.behavior_directive(
             _choice(behavior), dna_traits=_traits(), language="en"
         )
         assert behavior in directive
-        if behavior == "ask_question":
-            assert "question" in directive
-            assert "Do not end with a question" not in directive
-        else:
-            assert "Do not end with a question this turn unless they asked you one." in directive
+        assert "Questions are optional" in directive
+        assert "actual message takes priority" in directive
         assert len(directive) < 1200
 
 
@@ -629,8 +648,8 @@ def test_directive_length_follows_verbosity():
     wordy = B.behavior_directive(
         _choice("share"), dna_traits=_traits(verbosity=0.95), language="en"
     )
-    assert "no more than 8 words" in terse
-    assert "3-4 sentences is fine" in wordy
+    assert "usually a few words" in terse
+    assert "room for detail" in wordy
     assert terse != wordy
 
 
@@ -639,14 +658,14 @@ def test_directive_acknowledge_and_end_conversation():
         _choice("acknowledge"), dna_traits=_traits(verbosity=0.95), language="en"
     )
     assert "one or two words can be perfect" in ack
-    assert "Do not end with a question" in ack
+    assert "Questions are optional" in ack
 
     end = B.behavior_directive(
         _choice("end_conversation"), dna_traits=_traits(verbosity=0.5), language="en"
     )
     assert "sign-off" in end
     assert "do not ask a question" in end.lower()
-    assert "Do not end with a question" in end
+    assert "Do not ask anything at the end" in end
 
 
 def test_directive_language_and_unknown_behavior():
@@ -664,4 +683,4 @@ def test_directive_language_and_unknown_behavior():
         _choice("bogus"), dna_traits=_traits(), language="en"
     )
     assert "respond" in fallback
-    assert "Do not end with a question" in fallback
+    assert "Questions are optional" in fallback

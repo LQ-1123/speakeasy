@@ -8,6 +8,7 @@ import struct
 import sys
 import time
 import wave
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -292,7 +293,9 @@ async def test_text_turn_and_suggestion_polling(client):
     assert r.status_code == 200
     data = r.json()
     assert data["user_message"]["sender"] == "user"
-    assert data["suggestion_pending"] is True
+    assert data["suggestion_pending"] is False
+    requested = http.post(f"/api/v2/messages/{data['user_message']['id']}/suggestion")
+    assert requested.status_code == 200, requested.text
     reply = data["friend_messages"][0]
     assert reply["sender"] == "friend"
     assert reply["audio_url"]
@@ -350,19 +353,29 @@ async def test_voice_turn_and_read(client):
 async def test_moments_generate_and_comment(client):
     http, services = client
     friend = await _make_friend(services)
+
+    # 离线/无模型时不编造动态：朋友圈是可选产出，不再是「每位好友必须一条」
     gen = http.post("/api/v2/moments/generate")
     assert gen.status_code == 200
-    moments = gen.json()["moments"]
+    assert gen.json()["moments"] == []
+    assert http.get("/api/v2/moments").json()["moments"] == []
+
+    # 已有动态时 generate 幂等：不重复生成、直接返回已有内容
+    feed_date = datetime.now().astimezone().strftime("%Y-%m-%d")
+    services.db.add_moment(
+        friend["id"],
+        "Fixed the squeaky chair with tape. Still slightly squeaky.",
+        local_time_str="Mon 09:40",
+        feed_date=feed_date,
+    )
+    gen2 = http.post("/api/v2/moments/generate").json()
+    assert gen2["generated"] is False
+    moments = http.get("/api/v2/moments").json()["moments"]
     assert len(moments) == 1
     moment = moments[0]
     assert moment["friend"]["id"] == friend["id"]
     assert moment["local_time_str"] and moment["content"]
     assert moment["friend"]["name"] == friend["name"]
-
-    # 幂等
-    gen2 = http.post("/api/v2/moments/generate").json()
-    assert gen2["generated"] is False
-    assert len(http.get("/api/v2/moments").json()["moments"]) == 1
 
     comment = http.post(
         f"/api/v2/moments/{moment['id']}/comment",

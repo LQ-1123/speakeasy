@@ -23,8 +23,8 @@ android {
         applicationId "com.speakeasy.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 430
-        versionName "4.3.0"
+        versionCode 440
+        versionName "4.4.0"
         def apiBase = (project.findProperty("apiBase") ?: System.getenv("SPEAKEASY_API_BASE") ?: "https://47-104-24-236.sslip.io").replaceAll('/+$', '')
         def apiUri = new URI(apiBase)
         if (apiUri.scheme != 'https' || !apiUri.host || apiUri.userInfo || apiUri.rawQuery || apiUri.fragment || apiUri.path) {

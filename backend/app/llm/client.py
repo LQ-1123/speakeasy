@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Sequence
 
@@ -161,7 +162,15 @@ class LLMClient:
     @property
     def configured(self) -> bool:
         """是否配置了可用的 API key。"""
-        return not _is_placeholder_key(self.cfg.api_key)
+        pool = self._active_pool(self.cfg.model)
+        return pool is not None or not _is_placeholder_key(self.cfg.api_key)
+
+    def _active_pool(self, model):
+        if getattr(self, '_pool_managed', False):
+            return None
+        from app.providers.runtime import get_pool
+        pool = get_pool() or getattr(self, 'provider_pool', None)
+        return pool if pool is not None and pool.applies('llm', model) else None
 
     def health(self) -> dict[str, Any]:
         """健康状态（绝不抛异常，``/api/health`` 与 WS ``ready`` 会用）。"""
@@ -180,14 +189,45 @@ class LLMClient:
     # ---------------- 客户端复用 ----------------
     def _ensure_client(self) -> openai.AsyncOpenAI:
         if self._client is None:
+            options = {}
+            if getattr(self, '_pool_managed', False):
+                import httpx
+                options['http_client'] = httpx.AsyncClient(
+                    limits=httpx.Limits(max_connections=32, max_keepalive_connections=2))
             self._client = openai.AsyncOpenAI(
                 base_url=self.cfg.base_url,
                 api_key=self.cfg.api_key,
                 timeout=self.cfg.timeout_s,
                 max_retries=0,  # 重试策略我们自己控制，见 _with_retries
                 default_headers=dict(self.cfg.extra_headers) or None,
+                **options,
             )
         return self._client
+
+    async def _reserve_request(self) -> None:
+        budget = getattr(self, 'usage_budget', None)
+        if budget is not None:
+            await asyncio.to_thread(budget.reserve, 'llm')
+
+    def _error_detail(self, exc) -> str:
+        # Some upstream error bodies echo their authentication value.
+        return type(exc).__name__ if getattr(self, '_pool_managed', False) else str(exc)
+
+    @asynccontextmanager
+    async def _request_slot(self):
+        if getattr(self, '_pool_managed', False):
+            yield
+        else:
+            from app.capacity import llm_slot
+            async with llm_slot():
+                yield
+
+    async def _create_json_response(self, client, **kwargs):
+        if getattr(self, '_pool_managed', False) and not getattr(self, '_pool_response_format_supported', True):
+            kwargs.pop('response_format', None)
+        async with self._request_slot():
+            await self._reserve_request()
+            return await client.chat.completions.create(**kwargs)
 
     # ---------------- 流式对话 ----------------
     async def stream_chat(
@@ -199,6 +239,16 @@ class LLMClient:
         extra: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         """流式产出增量文本。首个 token 到达即 yield。"""
+        pool = self._active_pool(self.cfg.model)
+        if pool is not None:
+            from app.providers.llm_adapter import stream_chat
+            iterator = stream_chat(self, pool, messages, temperature=temperature, max_tokens=max_tokens, extra=extra)
+            try:
+                async for delta in iterator:
+                    yield delta
+            finally:
+                await iterator.aclose()
+            return
         payload = _normalize_messages(messages)
 
         if self.uses_mock:
@@ -232,20 +282,22 @@ class LLMClient:
         for attempt in range(1, attempts + 1):
             emitted = False
             try:
-                stream = await client.chat.completions.create(**kwargs)
-                try:
-                    async for chunk in stream:
-                        for delta_text in _iter_delta_text(chunk):
-                            emitted = True
-                            yield delta_text
-                finally:
-                    # 生成器被提前关闭（barge-in）时尽量释放底层连接
-                    closer = getattr(stream, "close", None)
-                    if closer is not None:
-                        try:
-                            await closer()
-                        except Exception as exc:  # pragma: no cover - 清理失败不致命
-                            log.debug("closing llm stream failed: %s", exc)
+                async with self._request_slot():
+                    await self._reserve_request()
+                    stream = await client.chat.completions.create(**kwargs)
+                    try:
+                        async for chunk in stream:
+                            for delta_text in _iter_delta_text(chunk):
+                                emitted = True
+                                yield delta_text
+                    finally:
+                        # 生成器被提前关闭（barge-in）时尽量释放底层连接
+                        closer = getattr(stream, "close", None)
+                        if closer is not None:
+                            try:
+                                await closer()
+                            except Exception as exc:  # pragma: no cover - 清理失败不致命
+                                log.debug("closing llm stream failed: %s", exc)
                 return
             except asyncio.CancelledError:
                 raise  # 取消必须透传
@@ -266,7 +318,7 @@ class LLMClient:
                 last_exc = exc
                 log.warning(
                     "LLM 连接失败（第 %d/%d 次）: base_url=%s err=%s",
-                    attempt, attempts, self.cfg.base_url, exc,
+                    attempt, attempts, self.cfg.base_url, self._error_detail(exc),
                 )
                 if attempt >= attempts:
                     raise LLMConfigError(
@@ -289,7 +341,7 @@ class LLMClient:
                 if emitted:
                     raise LLMError(f"LLM 流中断（HTTP {status}）: {exc}") from exc
                 last_exc = exc
-                log.warning("LLM HTTP %s（第 %d/%d 次）: %s", status, attempt, attempts, exc)
+                log.warning("LLM HTTP %s（第 %d/%d 次）: %s", status, attempt, attempts, self._error_detail(exc))
                 if attempt >= attempts:
                     raise LLMError(f"LLM 调用失败（HTTP {status}）: {exc}") from exc
                 if status is not None and status < 500:
@@ -313,12 +365,17 @@ class LLMClient:
         timeout_s: float | None = None,
     ) -> str:
         """非流式 JSON 补全；返回**原始字符串**（由调用方 ``extract_json`` 解析）。"""
+        pool = self._active_pool(model or self.cfg.suggestion_model or self.cfg.model)
+        if pool is not None:
+            from app.providers.llm_adapter import complete_json
+            return await complete_json(self, pool, messages, schema_hint=schema_hint, model=model,
+                temperature=temperature, max_tokens=max_tokens, timeout_s=timeout_s)
         payload = _normalize_messages(messages)
 
-        if self.uses_mock:
+        if _is_placeholder_key(self.cfg.api_key) and self.cfg.mock_when_missing_key:
             return await mock_llm.mock_complete_json(payload, schema_hint=schema_hint)
 
-        if not self.configured:
+        if _is_placeholder_key(self.cfg.api_key):
             raise LLMConfigError("未配置 LLM_API_KEY，无法调用 complete_json")
 
         client = self._ensure_client()
@@ -333,18 +390,23 @@ class LLMClient:
             base_kwargs["timeout"] = timeout_s
         if getattr(self.cfg, "extra_body", None):
             base_kwargs["extra_body"] = dict(self.cfg.extra_body)
+        if getattr(self, '_pool_managed', False) and self.cfg.extra_headers:
+            base_kwargs['extra_headers'] = dict(self.cfg.extra_headers)
 
         # 先尝试 JSON mode；网关不支持时退回普通调用
         try:
-            resp = await client.chat.completions.create(
+            resp = await self._create_json_response(client,
                 **base_kwargs, response_format={"type": "json_object"}
             )
         except asyncio.CancelledError:
             raise
         except openai.BadRequestError as exc:
+            if getattr(self, '_pool_managed', False):
+                self._pool_response_format_supported = False
+                raise
             log.debug("response_format=json_object 不被支持，退回普通调用: %s", exc)
             try:
-                resp = await client.chat.completions.create(**base_kwargs)
+                resp = await self._create_json_response(client, **base_kwargs)
             except asyncio.CancelledError:
                 raise
             except openai.AuthenticationError as exc2:
@@ -365,6 +427,8 @@ class LLMClient:
             content = choices[0].message.content if choices else None
         except (AttributeError, IndexError):  # pragma: no cover - 防御不同网关
             content = None
+        usage = getattr(resp, 'usage', None)
+        self._last_pool_usage = usage.model_dump() if hasattr(usage, 'model_dump') else None
         return content or ""
 
     # ---------------- 关闭 ----------------

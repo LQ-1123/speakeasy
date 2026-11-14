@@ -17,8 +17,7 @@
    生成结果还要过一遍 :func:`post_content_violations` 校验，违规就不写库——宁可没有，
    也不要一条编造事实的动态。
 2. **不编造**：LLM 不可用/失败 → 返回 ``None``，**不写库**。本模块**没有**模板兜底：
-   模板做不到「多视角」，而且会凭空造出事件里没有的细节（对比 ``life_posts.py`` 的
-   图库兜底：那里的文案不承载事实，所以模板安全；这里不行）。
+   模板做不到「多视角」，而且会凭空造出事件里没有的细节。
 3. **幂等**：全部以数据库查询判定，不用内存标记。
    - 动态：``(source_event_id, persona_id)`` 已存在 → 直接返回已有行；
    - 评论：``(post_id, author_persona_id)`` 已存在 → 直接返回已有行；
@@ -60,11 +59,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from app.logging_utils import get_logger
+from app.v3.social_writing import (
+    PUBLIC_POST_STYLE, duplicate_post, history_block, persona_profile, post_text, recent_posts,
+)
 
 log = get_logger(__name__)
 
 #: prompt 结构版本（便于以后对比/回滚文案策略）
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2-natural-public-voice"
 
 #: 事件驱动的动态在 ``persona_posts.post_type`` 上的标记
 POST_TYPE_EVENT = "life_event"
@@ -301,7 +303,8 @@ def _parse_iso(value: Any) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
 
@@ -464,15 +467,7 @@ def _merge_traits(dna_traits: Any, persona: Any) -> dict[str, float]:
 
 
 def _style_block(persona: dict, dna: dict, *, language: str = "en") -> str:
-    """声线描述：优先用 speech_dna.dna_prompt_block，失败时用本地紧凑版本。"""
-    try:  # pragma: no cover - speech_dna 由另一位同学并行开发，可能尚不存在
-        from app.v3.speech_dna import dna_prompt_block  # noqa: PLC0415
-
-        block = str(dna_prompt_block(dna, language=language) or "").strip()
-        if block:
-            return block[:900]
-    except Exception:  # noqa: BLE001 - 模块缺失/未稳定都不能拖垮生成
-        pass
+    """Use public writing habits, without importing chat instructions or clipped prose."""
     parts = [
         f"{label}: {dna[key]}"
         for key, label in _STYLE_FIELDS
@@ -657,7 +652,7 @@ def post_content_violations(
 ) -> list[str]:
     """检查动态正文是否守住了事件事实。返回违规代码列表（空 = 通过）。
 
-    代码：``empty`` / ``too_short`` / ``ai_mention`` / ``invented_place:<词>`` /
+    代码：``empty`` / ``ai_mention`` / ``invented_place:<词>`` /
     ``invented_date:<年>``。这是**兜底网**：prompt 已经禁止，这里再挡一次，
     宁可这条动态不出现，也不要信息流里冒出编造的地点/日期。
     """
@@ -665,8 +660,6 @@ def post_content_violations(
     if not text:
         return ["empty"]
     problems: list[str] = []
-    if len(text) < 6:
-        problems.append("too_short")
     if _AI_RE.search(text):
         problems.append("ai_mention")
 
@@ -701,18 +694,7 @@ def _language_name(code: str) -> str:
 
 
 def _persona_block(persona: dict) -> str:
-    lines = [f"- name: {persona.get('nickname') or 'someone'}"]
-    place = ", ".join(
-        part for part in (str(persona.get("city") or ""), str(persona.get("country") or ""))
-        if part
-    )
-    if place:
-        lines.append(f"- lives in: {place}")
-    if persona.get("occupation"):
-        lines.append(f"- occupation: {persona['occupation']}")
-    if persona.get("personality"):
-        lines.append(f"- personality: {str(persona['personality'])[:400]}")
-    return "\n".join(lines)
+    return persona_profile(persona)
 
 
 def _event_facts_block(event: dict, participant_names: dict[str, str] | None = None) -> str:
@@ -745,6 +727,7 @@ def _post_messages(
     persona: dict,
     event: dict,
     participant_names: dict[str, str],
+    recent: list[str] | None = None,
 ) -> list[dict]:
     """写动态的 prompt。事实只来自 event；声线来自 DNA。"""
     ev = _as_dict(event)
@@ -759,13 +742,13 @@ def _post_messages(
     ]
 
     system = [
-        f"You are {persona.get('nickname') or 'someone'}, a real person using a language-learning",
-        "social app. You are writing ONE public post about something that happened in YOUR OWN life.",
-        "Stay in character; never describe yourself as an AI.",
+        f"Write as {persona.get('nickname') or 'someone'}, the fictional character below,",
+        "posting about their own recorded life. Stay in their everyday voice.",
         _persona_block(persona),
     ]
     if style:
         system.append(style)
+    system.append(PUBLIC_POST_STYLE)
     system.append(
         "This is a public POST, not a chat reply: do not write it as an answer to a message."
     )
@@ -780,15 +763,21 @@ def _post_messages(
         "RULES (all mandatory):\n"
         "1. Use ONLY the event facts below. Do NOT invent places, people, dates, times, "
         "or numbers. If a detail is not listed, leave it out.\n"
-        "2. First person. Your own angle: one concrete detail that is already in the facts, "
-        "plus how you felt about it. Do not narrate the whole event like a diary.\n"
+        "2. Choose what YOU would actually share from this event. A detail, reaction, "
+        "or plain observation is enough. Feelings and first-person pronouns are optional. "
+        "Do not mechanically retell the event card or disclose private conflict details.\n"
         "3. Do not write someone else's perspective.\n"
-        f"4. Write in {lang_name} ({code}). 1-2 short sentences, at most 220 characters.\n"
-        "5. Never mention AI, being a bot, a model, or 'as an AI'.\n"
-        "6. No hashtags. At most one emoji.\n"
-        '7. Output JSON only: {"content": "..."}'
+        f"4. Write in {lang_name} ({code}), at most {MAX_POST_CHARS} characters. "
+        "A few words can be a complete post; do not pad it.\n"
+        "5. The event is completed, but its date may not be today. Use the supplied dates; "
+        "do not invent 'just now', weather, food, dialogue, outcomes or photo ownership.\n"
+        '6. Output JSON only: {"content": "..."}. Return {"content": ""} if there is '
+        "nothing this person would share."
     )
-    user_text = _event_facts_block(ev, participant_names) + "\n\n" + rules
+    user_text = (
+        _event_facts_block(ev, participant_names) + "\n\n"
+        + history_block(recent or []) + "\n\n" + rules
+    )
     return [
         {"role": "system", "content": system_text},
         {"role": "user", "content": user_text},
@@ -810,13 +799,18 @@ def _comment_messages(
     dna = dna_from_persona(commenter)
     style = _style_block(commenter, dna, language=code)
     relation = str(relationship.get("relation_type") or "friend")
+    tension = _as_float(relationship.get("tension"), 0)
 
     system = [
-        f"You are {commenter.get('nickname') or 'someone'}, a real person using a",
-        "language-learning social app. Someone you know posted about a moment you know about",
+        f"Write as {commenter.get('nickname') or 'someone'}, the fictional character below.",
+        "Someone you know posted an update",
         f"({relation}, closeness {int(_as_float(relationship.get('closeness'), 2))}/5).",
+        f"Current relationship tension: {tension:g}/5. High tension may mean a restrained "
+        "comment or no comment; do not suddenly act affectionate after a conflict.",
         "Write ONE short natural comment, like a real comment under a friend's post.",
-        "Stay in character; never mention AI.",
+        "React in your own voice, without explaining the role or task. A fragment is fine.",
+        "Do not automatically praise, give advice, repeat the post, or add a follow-up question.",
+        "Match the relationship's distance; do not invent an inside joke or shared memory.",
         _persona_block(commenter),
     ]
     if style:
@@ -827,13 +821,21 @@ def _comment_messages(
         "RULES (all mandatory):\n"
         "1. React to what you can see. Do NOT invent new places, people, dates or numbers; "
         "if it is not in the post or the facts below, leave it out.\n"
-        f"2. Write in {lang_name} ({code}), at most 20 words, one sentence or two.\n"
-        "3. No hashtags, no emoji spam, never mention AI.\n"
-        '4. Output JSON only: {"comment": "..."}'
+        f"2. Write in {lang_name} ({code}), at most {MAX_COMMENT_CHARS} characters. "
+        "Use only as much as this reaction needs.\n"
+        "3. Emoji and punctuation follow your habits. Do not manufacture enthusiasm.\n"
+        '4. Output JSON only: {"comment": "..."}; use an empty comment if you have nothing to add.'
+    )
+    # Knowing the author does not grant access to their private event ledger.
+    shared_facts = (
+        _event_facts_block(ev, participant_names)
+        if str(commenter.get("id") or "") in _participants(ev)
+        else "You were NOT a participant. You know only what the public post says; "
+        "do not imply you were there or know unpublished event details."
     )
     user_text = (
         'Their post: "' + str(post.get("content") or "")[:400] + '"\n\n'
-        + _event_facts_block(ev, participant_names) + "\n\n" + rules
+        + shared_facts + "\n\n" + rules
     )
     return [
         {"role": "system", "content": system_text},
@@ -871,7 +873,8 @@ async def _llm_text(
         return ""
     if not isinstance(data, dict):
         return ""
-    return _clean_text(data.get(key))
+    value = data.get(key)
+    return value.strip() if isinstance(value, str) else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -940,6 +943,7 @@ def _row_to_post(row: Any) -> dict:
         "published_at": str(data.get("published_at") or ""),
         "created_at": str(data.get("created_at") or ""),
         "metadata": meta if isinstance(meta, dict) else {},
+        "source_ref": _loads(data.get("source_ref"), {}),
     }
 
 
@@ -1187,19 +1191,29 @@ async def generate_post_for_participant(
         return None
 
     participant_names = _display_names(db, _participants(ev))
+    history = recent_posts(db, persona_id)
     messages = _post_messages(persona=person, event=ev,
-                              participant_names=participant_names)
+                              participant_names=participant_names, recent=history)
     content = await _llm_text(
         llm, messages, key="content",
-        schema_hint='{"content": "1-2 sentence first-person post"}',
-        max_tokens=260,
+        schema_hint='{"content": "a personal post, or empty to skip"}',
+        max_tokens=600,
     )
-    content = _clean_text(content, MAX_POST_CHARS)
-    if not content:
+    content = post_text(content, limit=MAX_POST_CHARS)
+    if not content or (not force and duplicate_post(content, history)):
         return None
     problems = post_content_violations(content, ev, person)
     if problems:
         log.info("事件动态被事实校验拦下（%s）：%s", ",".join(problems), content[:80])
+        return None
+
+    from app.v3.social_writing import grounded_post
+
+    content = await grounded_post(
+        llm, content, source={"event": _event_facts_block(ev, participant_names)},
+        language=_language_of(person), limit=MAX_POST_CHARS,
+    )
+    if not content or post_content_violations(content, ev, person) or (not force and duplicate_post(content, history)):
         return None
 
     if existing and force:
@@ -1313,7 +1327,7 @@ async def maybe_persona_comment(
         schema_hint='{"comment": "one short comment"}',
         max_tokens=180,
     )
-    text = _clean_text(text, MAX_COMMENT_CHARS)
+    text = post_text(text, limit=MAX_COMMENT_CHARS)
     if not text:
         return None
     problems = post_content_violations(text, ev, person)
@@ -1750,11 +1764,22 @@ async def run_posts_cycle(
 # --------------------------------------------------------------------------- #
 # 聊天用事实块（纯读取）
 # --------------------------------------------------------------------------- #
-def _format_when(value: Any, *, with_time: bool = False) -> str:
+def _format_when(value: Any, *, with_time: bool = False, timezone_name: str = "UTC") -> str:
     moment = _parse_iso(value)
     if moment is None:
         return ""
+    try:
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+        moment = moment.astimezone(ZoneInfo(timezone_name))
+    except (KeyError, ValueError):
+        pass
     return moment.strftime("%Y-%m-%d %H:%M") if with_time else moment.strftime("%Y-%m-%d")
+
+
+def _event_happened_at(event: dict) -> Any:
+    # completed_at is a processing timestamp: delayed workers may backfill old events today.
+    return event.get("end_time") or event.get("start_time") or event.get("completed_at")
 
 
 def _event_line(event: dict, names: dict[str, str], *, viewer_id: str = "") -> str:
@@ -1766,11 +1791,12 @@ def _event_line(event: dict, names: dict[str, str], *, viewer_id: str = "") -> s
     title = str(event.get("title") or "").strip() or "(untitled)"
     status = str(event.get("event_status") or "").strip().lower()
     tail = _event_meta_tail(event, names, viewer_id=viewer_id)
+    tz_name = str(_as_dict(event.get("metadata")).get("timezone") or "UTC")
     if status == STATUS_PLANNED:
-        when = _format_when(event.get("start_time"), with_time=True)
+        when = _format_when(event.get("start_time"), with_time=True, timezone_name=tz_name)
         head = f"PLAN (not happened yet) {when}:" if when else "PLAN (not happened yet):"
         return f"- {head} {title}{tail}"
-    when = _format_when(event.get("completed_at") or event.get("start_time"))
+    when = _format_when(_event_happened_at(event), timezone_name=tz_name)
     head = f"DONE {when}:" if when else "DONE:"
     return f"- {head} {title}{tail}"
 
@@ -1804,44 +1830,57 @@ def _event_overlap(event: dict, query_text: str) -> int:
 
 
 def _event_ts(event: dict) -> float:
-    moment = _parse_iso(event.get("completed_at") or event.get("start_time"))
+    moment = _parse_iso(_event_happened_at(event))
     return moment.timestamp() if moment else 0.0
 
 
-def _events_for_persona(db: Any, persona_id: str, *, days: int = 7) -> list[dict]:
+def _events_for_persona(db: Any, persona_id: str, *, days: int = 7, now: datetime | None = None) -> list[dict]:
     """该人物参与过的 completed 事件（主角或参与者）。cancelled/ongoing 不返回。"""
+    current = now or _utcnow()
+    params: tuple = (persona_id, STATUS_COMPLETED, current.isoformat())
+    if days > 0:
+        params += ((current - timedelta(days=days)).isoformat(),)
     with db._lock:  # noqa: SLF001
         rows = db.conn.execute(
-            "SELECT * FROM persona_events WHERE persona_id=? OR participants LIKE ?"
-            " ORDER BY COALESCE(NULLIF(completed_at, ''), start_time) DESC LIMIT 60",
-            (persona_id, f"%{persona_id}%"),
+            "SELECT e.* FROM persona_event_participants m"
+            " JOIN persona_events e ON e.id=m.event_id"
+            " WHERE m.persona_id=? AND m.event_status=?"
+            " AND m.happened_at <= julianday(?)"
+            + (" AND m.happened_at >= julianday(?)" if days > 0 else "")
+            + " ORDER BY m.happened_at DESC LIMIT 60",
+            params,
         ).fetchall()
     events: list[dict] = []
     for row in rows:
         event = _row_to_event(row)
-        # LIKE 可能子串误命中（p_em / p_emily），用解析后的 participants 精确复核
+        # Keep the public decoder's validation of legacy malformed rows.
         if persona_id not in event["participants"] and event["persona_id"] != persona_id:
             continue
         if event["event_status"] != STATUS_COMPLETED:
             continue
-        if days > 0:
-            ts = _event_ts(event)
-            if ts and ts < (_utcnow() - timedelta(days=days)).timestamp():
-                continue
+        ts = _event_ts(event)
+        if not ts or ts > current.timestamp():
+            continue
+        if days > 0 and ts < (current - timedelta(days=days)).timestamp():
+            continue
         events.append(event)
     return events
 
 
-def _planned_events_for_persona(db: Any, persona_id: str, *, limit: int = 1) -> list[dict]:
+def _planned_events_for_persona(
+    db: Any, persona_id: str, *, limit: int = 1, now: datetime | None = None,
+) -> list[dict]:
     """未来最近的 planned 事件（只能作为「计划」注入，绝不能当已发生）。"""
     if limit <= 0:
         return []
-    now = _utcnow()
+    now = now or _utcnow()
     with db._lock:  # noqa: SLF001
         rows = db.conn.execute(
-            "SELECT * FROM persona_events WHERE (persona_id=? OR participants LIKE ?)"
-            " AND event_status=? ORDER BY start_time ASC LIMIT 20",
-            (persona_id, f"%{persona_id}%", STATUS_PLANNED),
+            "SELECT e.* FROM persona_event_participants m"
+            " JOIN persona_events e ON e.id=m.event_id"
+            " WHERE m.persona_id=? AND m.event_status=? AND m.starts_at >= julianday(?)"
+            " ORDER BY m.starts_at ASC LIMIT ?",
+            (persona_id, STATUS_PLANNED, now.isoformat(), limit),
         ).fetchall()
     events: list[dict] = []
     for row in rows:
@@ -1864,6 +1903,7 @@ def persona_recent_facts(
     *,
     limit: int = 3,
     max_chars: int = 900,
+    now: datetime | None = None,
 ) -> str:
     """给聊天用的**已发生**事实块（纯读取，绝不写库）。
 
@@ -1881,14 +1921,16 @@ def persona_recent_facts(
         return ""
     query = str(query_text or "").strip()
     want = max(0, int(_as_float(limit, 3)))
+    moment = _parse_iso(now) or _utcnow()
+    now_iso = _iso(moment)
 
-    events = _events_for_persona(db, pid, days=7)
+    events = _events_for_persona(db, pid, days=7, now=moment)
     if query and events:
         events.sort(key=lambda ev: (-_event_overlap(ev, query), -_event_ts(ev)))
     else:
         events.sort(key=_event_ts, reverse=True)
     events = events[:want]
-    planned = [] if want <= 0 else _planned_events_for_persona(db, pid, limit=1)
+    planned = [] if want <= 0 else _planned_events_for_persona(db, pid, limit=1, now=moment)
 
     part_ids: list[str] = []
     for event in events + planned:
@@ -1898,15 +1940,17 @@ def persona_recent_facts(
     with db._lock:  # noqa: SLF001
         post_rows = db.conn.execute(
             "SELECT * FROM persona_posts WHERE persona_id=?"
+            " AND COALESCE(NULLIF(published_at, ''), created_at)<=?"
             " ORDER BY COALESCE(NULLIF(published_at, ''), created_at) DESC, id DESC LIMIT 2",
-            (pid,),
+            (pid, now_iso),
         ).fetchall()
         comment_rows = db.conn.execute(
             "SELECT c.* FROM persona_post_comments c"
             " JOIN persona_posts p ON p.id = c.post_id"
             " WHERE p.persona_id=? AND c.content<>'' AND c.author_persona_id<>?"
+            " AND c.created_at<=? AND COALESCE(NULLIF(p.published_at, ''), p.created_at)<=?"
             " ORDER BY c.created_at DESC, c.id DESC LIMIT 2",
-            (pid, pid),
+            (pid, pid, now_iso, now_iso),
         ).fetchall()
     posts = [_row_to_post(row) for row in post_rows]
     comments = [_row_to_comment(row) for row in comment_rows]
@@ -1929,9 +1973,12 @@ def persona_recent_facts(
                 continue
             title = str((post.get("metadata") or {}).get("event_title") or "")
             tail = f" (about: {title})" if title else ""
-            lines.append(f'- "{text}"{tail}')
+            stamp = str(post.get("published_at") or post.get("created_at") or "")[:16]
+            source = post.get("source_ref") or {}
+            kind = "shared source, not personal experience" if isinstance(source, dict) and source.get("kind") == "stock_photo" else "past post"
+            lines.append(f'- {stamp} ({kind}): "{text}"{tail}')
         if lines:
-            sections.append("[What you recently posted]\n" + "\n".join(lines))
+            sections.append("[What you recently posted — historical, not current activity]\n" + "\n".join(lines))
     if comments:
         lines = []
         for comment in comments:

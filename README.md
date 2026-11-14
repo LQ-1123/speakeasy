@@ -1,12 +1,16 @@
 # Sonder · Every life is a world
 
-> **Sonder 4.1.2 已发布**：在 4.1.1 真机 9 项问题修复的基础上，完成品牌升级——应用更名 **Sonder**、桌面图标随系统明暗切换（Light/Dark）、通知栏使用 Dynamic 渐变图标 + AI 头像、Android 12+ 品牌开屏。当前签名 APK：`deliverables/SpeakEasy-v4.1.2-release.apk`（versionCode 412 / versionName 4.1.2，签名证书不变，SHA-256 `1a33e1167370804b9b21e34e8072f0f989f57ee16f5ecbccd5c3ca2ddd92bde4`）。
-> 详见 [品牌与客户端说明](docs/BRANDING.md)、[真机问题修复与验收](docs/MOBILE_RELIABILITY_FIXES.md)、[Android 构建与推送配置](docs/MOBILE_REBUILD.md)。
+> **在线体验：[打开 Sonder](https://47-104-24-236.sslip.io)** · 邮箱验证码登录，新账号需要内测邀请码。
+> **获取内测码：请联系 [yulinsun547@gmail.com](mailto:yulinsun547@gmail.com)**。这是本项目的内测联系邮箱，不代表任何第三方平台或服务商。
+>
+> **Sonder v4.4.0（versionCode 440）**：[下载 Android APK](https://github.com/LQ-1123/speakeasy/releases/download/v4.4.0/Sonder-v4.4.0-release.apk) · [发布说明与 SHA-256 校验信息](https://github.com/LQ-1123/speakeasy/releases/tag/v4.4.0)。GitHub Release 仅附 APK；源码可从仓库获取。
+> 本版包含邮箱会话、多账号上游资源池和有界聊天/语音调度。容量证据及限制见[上游资源池](docs/PROVIDER_POOLS.md)与[容量测试说明](docs/PERFORMANCE_CAPACITY.md)；编译与离线测试不代表完成真机或真实 2C2G 服务器验收。
+
+以下品牌截图为历史版本示意，当前界面与登录流程以 v4.4.0 为准。
 
 <p align="center">
   <img src="docs/screenshots/sonder-splash.png" width="230" alt="Sonder 品牌开屏" />
   <img src="docs/screenshots/sonder-mobile.png" width="230" alt="Sonder 手机端消息页" />
-  <img src="docs/screenshots/sonder-notification.png" width="230" alt="Sonder 通知：Dynamic 图标与 AI 头像" />
 </p>
 
 > 一个「AI 人物真的在生活」的社交式口语练习 App：
@@ -15,22 +19,24 @@
 
 - 形态：**Web / PWA / Android APK**
 - 线上体验：<https://47-104-24-236.sslip.io>
-- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出 · Android **4.1.2**
+- 当前版本：V3（AI Persona 社交世界）· 后端 FastAPI · 前端 Next.js 静态导出 · Android **4.4.0 / 440**
 - 文档：[品牌与客户端说明](docs/BRANDING.md) · [V3 接口与数据模型](docs/V3_API.md) · [V3 验收清单](docs/V3_ACCEPTANCE.md) · [移动端](docs/V3_MOBILE.md) · [本地模式](docs/local-mode.md)
 
 ---
 
 ## 界面预览
 
+以下截图保留项目演进过程中的界面示例，不作为当前版本逐项验收证据。
+
 桌面端「发现」信息流：像刷朋友圈一样读 AI 人物的生活，支持翻译、朗读、点赞与评论。
 
 ![发现信息流（桌面端）](docs/screenshots/sonder-discover.jpg)
 
-响应式与设计系统：同一套 Material 3 Expressive 主题，在 1440 / 1024 / 768 / 390px 下保持零溢出。
+响应式与设计系统的历史预览：同一套 Material 3 Expressive 主题适配桌面与手机布局。
 
 ![Sonder Design Preview](docs/screenshots/sonder-design-preview.jpg)
 
-手机端（390px）：消息 / 通讯录 / 发现 / 我 四个 Tab，底部导航与手势返回。
+历史手机端截图（390px）；当前入口与导航以随 APK 打包的客户端为准。
 
 <p align="center"><img src="docs/screenshots/sonder-mobile.png" width="300" alt="手机端消息页" /></p>
 
@@ -123,7 +129,7 @@ Sonder 不是「AI 聊天框 + 语音朗读」。
 
 ### 5.1 每日世界（Daily World）
 
-- 每天自动生成 **5 位新人物 × 每人 3 条动态**（可通过 `SE_DAILY_PERSONAS` / `SE_DAILY_POSTS_PER_PERSONA` 配置）；
+- 每日人物供给根据近期活跃关系与内容缺口调整，也可用 `SE_DAILY_PERSONAS` 显式指定；每人动态数可通过 `SE_DAILY_POSTS_PER_PERSONA` 配置（默认 3 条）；
 - 动态默认 **24 小时可见**；被互动过（赞 / 评论 / 加好友 / 浏览主页 / 朗读）的保留 **7 天**；
 - 首次启动内置一套**种子世界**（12 位人物 / 36 条动态），保证空库也能直接体验；
 - 生成内容会做**语言校验**：语言不符先重试，仍不符则用该语言的兜底模板，保证角标和正文一致。
@@ -166,9 +172,10 @@ Sonder 不是「AI 聊天框 + 语音朗读」。
 
 - 桌面 Web：左栏导航 + 分栏列表 / 内容；
 - 手机 Web / PWA / Android APK：底部 Tab + 二级页面 + 手势刷新；
-- 内容成本控制：信息流主体是**预生成语料，零模型调用**，只有「用户发公开动态」才可能触发 LLM；
-- 降级链：LLM / Fish / STT 都有 fallback（规则引擎、系统朗读、mock 识别），没 Key 也能跑通链路；
-- 部署：FastAPI 同源托管前端静态文件，systemd + 可选 nginx，单机 2C2G 可跑。
+- 内容成本控制：读取已生成的信息流通常不触发新一轮生成；每日世界、聊天、翻译、记忆整理、建议与社交事件等仍可能调用 LLM，朗读和语音识别也会消耗对应上游额度；
+- 稳定声线：生产默认严格人物音色；Fish 不可用时显示失败与重试，不用提示音或其他人的声音冒充成功。离线规则/mock 测试与正式语音服务分开配置；
+- 部署：FastAPI 同源托管前端静态文件，单个 Uvicorn worker + SQLite WAL + nginx HTTPS；2C2G 是待实测的部署目标，不能由开发机模拟测试推定容量；
+- 多账号上游资源池：Fish / Deepgram / OpenAI 兼容 LLM / SiliconFlow STT 支持加密凭据、同模型路由、共享配额、冷却、排空和显式回滚，详见[配置指南](docs/PROVIDER_POOLS.md)。
 
 ---
 
@@ -176,7 +183,7 @@ Sonder 不是「AI 聊天框 + 语音朗读」。
 
 ```mermaid
 flowchart LR
-  A[首次打开 / 设备身份] --> B[填写资料<br/>昵称·母语·目标语言·水平]
+  A[首次打开 / 邮箱验证码登录<br/>新账号填写邀请码] --> B[填写资料<br/>昵称·母语·目标语言·水平]
   B --> C[发现 · 动态]
   C --> D{对哪条动态感兴趣}
   D -->|读不懂| E[翻译]
@@ -198,13 +205,13 @@ flowchart LR
 
 | 角色 | 说明 |
 |---|---|
-| **用户 user** | 一个设备身份，对应 `v3_users` 一行；请求带 `X-User-Id` + `X-User-Token` |
+| **用户 user** | 邮箱账号关联 `v3_users`；Web 使用 HttpOnly 会话 Cookie + CSRF，Android 使用原生加密保存的会话与 `X-Session-Token` |
 | **AI 人物 persona** | 平台生成的人物，有资料、头像、音色、动态；不代表真人 |
 | **好友关系 friendship** | 用户 ↔ 人物，`pending` / `accepted`；接受后生成 `friends` 行复用聊天 |
 | **内容 content** | 人物动态、用户动态、评论、点赞 |
 | **社交事件 social_event** | AI 对用户公开动态的赞 / 评论 / 好友申请，有未读和处理状态 |
 
-> 兼容：老客户端不带身份头时，后端按本地 `local` 用户处理；单用户老库里的历史好友/聊天按只读兼容方式继续可见。
+> 正式邮箱模式拒绝旧设备注册和旧身份头，不会匿名回退到 `local`。同邮箱复用同一账号；历史设备身份与数据归属按[账号上线与归档指南](docs/EMAIL_CODE_AUTH_ROLLOUT.md)处理，不自动并入新账号。
 
 ### 7.2 实体关系
 
@@ -229,7 +236,7 @@ erDiagram
 |---|---|---|
 | `personas` / `persona_posts` | 全局 | 所有用户；受 TTL 与目标语言过滤 |
 | `user_posts` | `user_id` | `public` 所有人 / `friends` 好友 / `private` 仅自己 |
-| `friends` / `messages` / `moments` / `saved_expressions` | `owner_user_id` | 仅本人；历史 `local` 数据做只读兼容 |
+| `friends` / `messages` / `moments` / `saved_expressions` | `owner_user_id` | 仅已认证的所属账号；历史归档不向新账号自动开放 |
 | `friendships` / `social_events` | `user_id` | 仅本人 |
 | AI 社交事件 | 只针对 `public` 用户动态 | 事件列表 + 未读数 |
 
@@ -307,24 +314,24 @@ flowchart TB
 
 ```
 文本 → Fish TTS（按人物 reference_id）→ mp3/wav 落盘缓存
-     ↘ 失败降级：系统朗读 / 提示音
+     ↘ 严格模式失败：明确错误 / 可重试，不替换人物声线
 URL: /api/v3/persona-posts/{id}/speech?v=<content_hash>&a=<voice_version>
 缓存: data/v3_audio/v3/{post}-{hash}-{voice}.mp3 + immutable + 版本化 URL
 ```
 
 - 人物音色在启动时分配（`assign_fish_voices`），写库并同步到好友；
 - 信息流朗读、好友试听、聊天、电话共用同一套人物音色；
-- 识别链路：云端 STT（SiliconFlow / Deepgram）→ 本地 faster-whisper → mock 降级。
+- 识别链路：按已配置的云端 STT（SiliconFlow / Deepgram）或显式本地配置工作；云精简部署不包含本地 Whisper，mock 仅用于离线开发/测试。
 
 ### 8.3 部署拓扑
 
 ```
-用户手机/浏览器 ──HTTP(S)──> 云服务器
-                             ├─ systemd: uvicorn 0.0.0.0:8000（同源托管前端）
-                             ├─ nginx（可选，80/443 反代）
+用户手机/浏览器 ──HTTPS──> 云服务器
+                             ├─ nginx（443 → 127.0.0.1:8000；公开哈希静态资源）
+                             ├─ systemd: 单个 uvicorn worker（仅信任回环代理头）
                              ├─ data/：SQLite + 音频 + 图片 + 配置
                              └─ 出站代理 → Fish / DeepSeek / 图库
-Android APK ──HTTP──> 同一个后端（构建时注入 NEXT_PUBLIC_API_BASE）
+Android APK（内置 Web 资源，https://localhost）──HTTPS──> 同一个后端
 ```
 
 ---
@@ -338,12 +345,13 @@ sequenceDiagram
   participant C as 客户端
   participant F as FastAPI
   participant DB as SQLite
-  C->>F: 首次打开，生成 device_key
-  C->>F: POST /api/v3/auth/register
-  F->>DB: 写入 v3_users(id, device_key, token_hash)
-  F-->>C: user_id + token（本地保存）
-  C->>F: 之后所有请求带 X-User-Id / X-User-Token
-  F->>F: bind_current_user → 当前用户
+  C->>F: POST /api/v3/auth/email-code/request（邮箱）
+  F-->>C: challenge_id（验证码通过邮件发送）
+  C->>F: POST /api/v3/auth/email-code/verify（验证码；首次含邀请码）
+  F->>DB: 同邮箱复用账号，创建可撤销会话
+  F-->>C: Web HttpOnly Cookie / Android 加密保存会话
+  C->>F: 后续请求携带会话；Web 写请求附 CSRF
+  F->>F: 会话校验与账号数据隔离
 ```
 
 ### 9.2 每日世界生成
@@ -412,6 +420,7 @@ data/
   tts_config.json        # Fish Key / 默认 reference
   stt_config.json        # 云端 STT Key
   deepgram_config.json   # 流式 STT Key
+  provider-master.key    # provider 凭据加密主密钥，独立受控备份
   audio/                 # V2 语音文件
   v3_audio/v3/           # V3 人物朗读缓存
   uploads/               # 用户上传图片
@@ -426,8 +435,8 @@ data/
 
 | 编号 | 需求 | 验收要点 |
 |---|---|---|
-| FR-1 | 设备身份与数据隔离 | 新用户看不到别人数据；老 `local` 数据可读兼容 |
-| FR-2 | 每日世界 | 每天 5 人 × 3 动态；24h TTL；互动保留 7 天；失败有种子兜底 |
+| FR-1 | 邮箱账号与数据隔离 | 新邮箱需邀请码；同邮箱恢复账号；会话可撤销；旧设备身份不匿名回退 |
+| FR-2 | 每日世界 | 按活跃关系/内容缺口或显式配置供给；24h TTL；互动保留 7 天；失败有种子兜底 |
 | FR-3 | 人物一致性 | 头像、资料、语言、音色在信息流 / 主页 / 好友 / 聊天中一致 |
 | FR-4 | 动态消费 | 翻译、朗读、赞、评论、多图、图注、语言角标正确 |
 | FR-5 | 好友关系 | 偶遇 / 主页加好友；资料页显示 TA 的动态；接受申请生成好友 |
@@ -435,15 +444,15 @@ data/
 | FR-7 | 用户动态 | 图文发布 + 三档可见性；公开动态触发 AI 社交事件 |
 | FR-8 | 多语言 | 母语 / 多目标语言 / 分语言水平；信息流按目标语言过滤 |
 | FR-9 | 多端适配 | 桌面分栏；手机底部 Tab + 二级页面；320–414px 无重叠换行 |
-| FR-10 | 成本与降级 | 信息流零模型调用；无 Key 可演示；TTS/STT 有 fallback |
+| FR-10 | 成本与失败处理 | 预生成与缓存减少重复调用；上游次数预算/共享配额；严格音色失败与重试可见 |
 
 ### 10.2 非功能需求
 
-- **成本**：日常浏览不产生 LLM 费用；只有生成每日世界和用户公开动态的社交事件才调用；
+- **成本**：读取已生成内容与缓存减少调用；聊天、翻译、每日世界、记忆等按配置消耗额度，次数预算不等于货币上限；
 - **延迟**：朗读音频提前预热 + 磁盘缓存；聊天逐句 TTS；
 - **一致性**：人物身份、头像、音色、语言角标四处一致；
-- **可靠性**：外部服务失败时降级而不是报错；每日世界生成失败回落种子；
-- **可维护性**：迁移幂等（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE`）；部署脚本带备份/回滚；
+- **可靠性**：外部服务失败、超时或满载时明确显示错误/重试；严格人物音色不替换；每日世界可按配置回落种子；
+- **可维护性**：迁移幂等（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE`）；发布前制作一致性备份并制定保留新数据的回滚方案；
 - **移动端**：触控区域、手势刷新、安全区、无文字图标重叠。
 
 ---
@@ -456,8 +465,8 @@ data/
 | 移动端 | Capacitor（Android，`com.speakeasy.app`） |
 | 后端 | FastAPI、uvicorn、Pydantic v2、SQLite（WAL） |
 | LLM | DeepSeek / 任意 OpenAI 兼容接口 |
-| 语音合成 | Fish Audio（人物音色）、系统朗读 / 提示音降级 |
-| 语音识别 | SiliconFlow SenseVoice、Deepgram 流式、本地 faster-whisper、mock |
+| 语音合成 | Fish Audio / 角色已绑定的有效声线；生产严格音色与显式失败 |
+| 语音识别 | SiliconFlow、Deepgram 流式；本地 faster-whisper / mock 仅用于显式选择的开发或本地配置 |
 | 图片 | Wikimedia Commons / Openverse（CC 署名）、用户上传 |
 | 部署 | systemd + uvicorn（同源静态）、可选 nginx；Windows 一键 APK 脚本 |
 
@@ -485,8 +494,8 @@ docs/                # 接口、验收、架构、移动端文档
 | 项 | 要求 |
 |---|---|
 | Python | 3.11 / 3.12（不要 3.14） |
-| Node.js | 18+（推荐 20） |
-| 网络 | DeepSeek / SiliconFlow 可直连；Fish Audio / Deepgram 国内需要代理 |
+| Node.js | 22+（Capacitor 8 CLI 要求）；按各工程锁文件安装 |
+| 网络 | 由部署环境验证已配置上游的可达性；如需代理仅配置服务器出站，不把凭据交给客户端 |
 
 ### 一个进程跑前后端（推荐）
 
@@ -498,25 +507,24 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r backend/requirements-cloud.txt
-pip install pillow            # 用户上传图片需要
 
 cd frontend
-npm install
+npm ci
 npm run build:backend         # 产物写入 backend/app/static/app
 cd ..
 
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-打开 <http://127.0.0.1:8000>。首次使用建议在「我 → 设置」里填：
+打开 <http://127.0.0.1:8000>。本地配置与正式内测应分开；正式邮箱模式需要 SMTP、会话密钥和邀请码，见[邮箱账号部署指南](docs/EMAIL_CODE_AUTH_ROLLOUT.md)。不要把生产 `.env`、数据库或密钥复制进测试目录或提交到仓库。
 
-| 位置 | 用途 |
+| 管理位置 | 用途 |
 |---|---|
-| 设置 → 对话模型 | DeepSeek API Key |
-| 设置 → 声音 | Fish Audio Key（人物音色；不填走系统朗读） |
-| 设置 → 语音识别 | SiliconFlow / Deepgram Key（不填走本地/mock） |
+| Admin → API 与密钥 | 配置并逐项验证 LLM / Fish / Deepgram / SiliconFlow 资源；支持多账号池 |
+| 受保护的服务器环境配置 | SMTP、会话与媒体密钥、管理员凭据、推送服务端密钥 |
+| 独立离线测试配置 | 合成凭据、规则或 mock 上游；不代表真实模型/语音可用 |
 
-> 不填 Key 也能完整打开：LLM 走规则兜底、TTS 走系统朗读、STT 走 mock。只是聊天和语音体验会下降。
+> 服务可以在没有模型 Key 时启动，但正式聊天、语音和验证码登录依赖相应服务配置。严格人物音色失败会明确报错，不承诺无 Key 也能完成全部体验。
 
 ### 开发模式
 
@@ -557,37 +565,29 @@ export NO_PROXY=api.deepseek.com,api.siliconflow.cn,127.0.0.1,localhost
 
 ### 云端部署
 
-```bash
-# 服务器上（仓库根目录）
-bash deploy/deploy_v3.sh
-```
+先在开发机生成静态产物，再按 [deploy/README.md](deploy/README.md) 的维护窗口流程发布：SQLite backup API 一致性备份、单独保护配置与 provider 主密钥、保留 `.env` / `data/` / systemd / TLS，再做健康和登录链路检查。
 
-脚本流程：备份 `data/` + 数据库（含 WAL）→ 幂等迁移 → 检查前端产物 → 重启 systemd →
-健康检查（首次启动生成头像/每日世界，最多等 120s）→ 失败自动回滚。
-详见 [deploy/README.md](deploy/README.md)。
+`deploy/deploy_v3.sh` 保留为历史脚本，其逐文件复制活动数据库及 WAL、直接覆盖恢复的步骤不提供一致性保证；不要把它当作可直接执行的在线升级/回滚方案。
 
 ### Android APK
 
 ```powershell
-# 正式包（默认指向云端）
-.\mobile\build-apk.ps1 -Mode release
-
-# 自定义 API 地址
-.\mobile\build-apk.ps1 -Mode release -ApiBase http://47.104.24.236:8000
-
-# 装到手机
-adb install -r .\deliverables\SpeakEasy-v4.1.2-release.apk
+# 在已配置原签名的开发机打包；脚本会重新构建并打入前端
+.\mobile\build-apk.ps1 -Mode release -ApiBase https://47-104-24-236.sslip.io `
+  -VersionCode 440 -VersionName 4.4.0 -BuildRoot D:/speakeasy-android-build
 ```
 
-APK 包含 Web 前端 + Capacitor 壳，网络请求指向构建时注入的 `NEXT_PUBLIC_API_BASE`，不含任何 provider Key。
+用户安装请使用 [v4.4.0 GitHub Release APK](https://github.com/LQ-1123/speakeasy/releases/download/v4.4.0/Sonder-v4.4.0-release.apk)，SHA-256 见[该版发布说明](https://github.com/LQ-1123/speakeasy/releases/tag/v4.4.0)。构建脚本的本地产物保存在被 Git 忽略的 `deliverables/`，不是仓库内的下载链接。
 
-### Android 客户端：品牌、图标与通知（4.1.2）
+APK 内置 Web 前端，从 `https://localhost` 加载，API 只连接构建时配置的 HTTPS 源。Web 页面变更要重新打 APK 才能更新已安装客户端。包内不含上游服务端秘密；JPush 客户端 AppKey 与仅服务器使用的 Master Secret 必须区分。签名、可选厂商通道、通知与原生通话见 [mobile/README.md](mobile/README.md)。GitHub 发版不自动修改服务端更新目录或宣传页。
+
+### Android 客户端：品牌、图标与通知
 
 - **应用名**：Sonder（桌面名、任务标题、通知、网页 title / PWA manifest 全部统一；包名与原生桥 `com.speakeasy.app` / `SpeakEasyNative` 保持不变以兼容已安装数据）。
 - **桌面图标**：Light / Dark 两版自适应图标，通过两个 `activity-alias`（`LauncherLight` / `LauncherDark`）按系统明暗模式自动切换；Android 13+ 提供 `<monochrome>` 主题图标层。
 - **通知图标**：通知栏左侧使用 Dynamic 渐变版应用图标；聊天消息右侧显示发消息的 AI 头像，无头像的互动通知回退为 Dynamic 渐变图；状态栏小图标为单色 S 剪影（`jpush_notification_icon`）。
-- **开屏**：Android 12+ 系统启动图标设为透明，仅保留品牌底色；随后展示渐变夜空 + SONDER 品牌开屏（静态 HTML 内联样式，React 挂载后淡出）。
-- 更完整的设计决策、素材来源与真机验证见 [docs/BRANDING.md](docs/BRANDING.md)。
+- **开屏**：旧版渐变夜空 Web 品牌开屏已移除；历史截图与品牌决策保留在文档中。
+- 历史设计决策、素材与当时的验收记录见 [docs/BRANDING.md](docs/BRANDING.md)，不代表 v4.4.0 已完成全部真机检查。
 
 ---
 
@@ -601,12 +601,12 @@ pytest backend/tests/test_v3_*.py -q
 pytest backend/tests -q
 ```
 
-- 全量后端测试：**950 passed**（`pytest backend/tests -q`，离线运行）；
-- 前端：`tsc --noEmit` + **17 files / 109 tests**（vitest）+ `npm run build` 静态导出；
+- 最新离线回归与浏览器验证结果见[资源池验证记录](docs/PROVIDER_POOLS.md#本次验证结果2026-11-14)，测试命令及来源指纹以对应报告为准；历史 950 项后端 / 109 项前端结果属于 4.1.x，不作为本版结果；
 - 验收清单：[docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md)（场景 A–AF，含截图）；
 - 接口文档：[docs/V3_API.md](docs/V3_API.md)；
 - 移动端真机问题与修复记录：[docs/MOBILE_RELIABILITY_FIXES.md](docs/MOBILE_RELIABILITY_FIXES.md)；
-- 已知历史遗留：少量 V1/V2 深链路用例依赖真实 Key/外网（如多语种 TTS），不在 V3 验收范围。
+- 容量验证：100 个合成用户按 3.33 轮/秒持续 30 分钟，6,000/6,000 轮模拟音频在期限内可解码；长测属于进程启动时源码快照，测试期间工作树有变动。最终冻结源码另做 60 秒 200/200 复测。均为 Windows 开发机与回环假上游，不能证明真实 2C2G Linux、真实账号配额、音色质量或费用上限，见[完整边界](docs/PROVIDER_POOLS.md)与[测量方法](docs/PERFORMANCE_CAPACITY.md)。
+- 真实邮件收取、原签名覆盖升级、锁屏/厂商推送、通话与系统音频行为需单独验收；本次 GitHub 发版不凭编译结果宣称真机通过。
 
 ### 手机端验收要点
 
@@ -626,7 +626,8 @@ pytest backend/tests -q
 - 动态翻译 / 朗读 / 缓存版本化、播放互斥；
 - 用户图文动态（含上传）、兴趣匹配、可见性；
 - Web / PWA / Android APK 三端；
-- 云端部署脚本（备份 / 回滚 / 健康检查）。
+- 邮箱验证码与邀请码内测、可撤销会话；
+- 多账号上游资源池、有界队列/期限、合成负载测量工具与安全部署指南。
 
 **接下来可以做**
 
@@ -645,6 +646,13 @@ pytest backend/tests -q
 | [docs/BRANDING.md](docs/BRANDING.md) | Sonder 品牌：命名、图标（Light/Dark/Dynamic）、开屏、通知图标与真机验证 |
 | [docs/MOBILE_RELIABILITY_FIXES.md](docs/MOBILE_RELIABILITY_FIXES.md) | 真机 9 项问题、推送注册/通知头像、tab 切换、品牌升级与验收记录 |
 | [docs/MOBILE_REBUILD.md](docs/MOBILE_REBUILD.md) | Android 4.x 构建、签名、JPush/厂商推送配置与发版记录 |
+| [mobile/README.md](mobile/README.md) | 当前 Android 内置前端、HTTPS、签名与设备验收边界 |
+| [docs/APP_UPDATE.md](docs/APP_UPDATE.md) | GitHub APK 发布与服务端更新渠道的区别、签名及校验 |
+| [docs/PROVIDER_POOLS.md](docs/PROVIDER_POOLS.md) | 多账号上游配置、共享配额、调度限制与模拟验证结果 |
+| [docs/PROVIDER_POOL_IMPLEMENTATION.md](docs/PROVIDER_POOL_IMPLEMENTATION.md) | 资源池实现与验收边界 |
+| [docs/PERFORMANCE_CAPACITY.md](docs/PERFORMANCE_CAPACITY.md) | 有界聊天、负载工具、资源测量与生产容量边界 |
+| [docs/CAPACITY_IMPLEMENTATION.md](docs/CAPACITY_IMPLEMENTATION.md) | 容量目标、实现决策与验收条件 |
+| [docs/EMAIL_CODE_AUTH_ROLLOUT.md](docs/EMAIL_CODE_AUTH_ROLLOUT.md) | 正式邮箱登录、SMTP 配置、历史身份归档与回滚 |
 | [docs/V3_API.md](docs/V3_API.md) | V3 接口、数据模型、事件引擎、缓存与文案原则 |
 | [docs/V3_ACCEPTANCE.md](docs/V3_ACCEPTANCE.md) | V3 验收场景与截图 |
 | [docs/V3_MOBILE.md](docs/V3_MOBILE.md) | 移动端与 APK 说明 |
@@ -664,5 +672,5 @@ pytest backend/tests -q
 
 - 代码仅用于学习与个人项目；第三方内容（Fish 音色、Wikimedia / Openverse 图片）遵循各自许可，图片在 UI 内保留 CC 署名；
 - AI 生成内容在界面上以 `AI` 角标标识，不代表真人；
-- Key、聊天记录、上传图片都只存在部署者自己的服务器/设备上，仓库不包含任何密钥或个人数据。
+- 仓库与 Release 不应包含密钥、私有签名文件、聊天记录或用户上传。实际使用配置的 LLM / STT / TTS / SMTP / 推送等服务时，必要请求数据会发送给相应服务商；部署者需要核对其隐私政策与数据处理条款。
 

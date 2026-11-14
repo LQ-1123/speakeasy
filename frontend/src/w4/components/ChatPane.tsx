@@ -38,6 +38,8 @@ import { clockTime, dayOf } from "../format";
 import "../styles/chat.css";
 import type { Friend, Message, Route } from "../model";
 import { API_ORIGIN } from "../api";
+import { selectVoicePrefetch } from "../voicePrefetch";
+import { canRequestSuggestion } from "../messageActions";
 import { adEvent } from "../v3/accountClient";
 import { safeLandingUrl } from "../v3/adEvents";
 import { ReportDialog } from "../v3/ReportDialog";
@@ -48,6 +50,9 @@ import {
   callTurnStream,
   callWarmup,
   playVoiceUrl,
+  prefetchVoiceUrl,
+  prefetchedVoiceUrl,
+  forgetPrefetchedVoice,
   synthesizeVoice,
   translate as apiTranslate,
   ttsSampleUrl,
@@ -141,6 +146,8 @@ export function ChatPane({
     markRead,
     sendText,
     retryMessage,
+    retryAudio,
+    requestSuggestion,
     sendVoiceBlob,
     sendImage,
     zhOpen,
@@ -152,7 +159,7 @@ export function ChatPane({
     translateAll,
     showToast,
     deleteFriend,
-  } = useApp(useShallow((state) => ({ friends: state.friends, friendById: state.friendById, loadThread: state.loadThread, messagesOf: state.messagesOf, typing: state.typing, markRead: state.markRead, sendText: state.sendText, retryMessage: state.retryMessage, sendVoiceBlob: state.sendVoiceBlob, sendImage: state.sendImage, zhOpen: state.zhOpen, toggleZh: state.toggleZh, translateMessage: state.translateMessage, toggleShownText: state.toggleShownText, saveSuggestion: state.saveSuggestion, dismissSuggestion: state.dismissSuggestion, translateAll: state.translateAll, showToast: state.showToast, deleteFriend: state.deleteFriend })));
+  } = useApp(useShallow((state) => ({ friends: state.friends, friendById: state.friendById, loadThread: state.loadThread, messagesOf: state.messagesOf, typing: state.typing, markRead: state.markRead, sendText: state.sendText, retryMessage: state.retryMessage, retryAudio: state.retryAudio, requestSuggestion: state.requestSuggestion, sendVoiceBlob: state.sendVoiceBlob, sendImage: state.sendImage, zhOpen: state.zhOpen, toggleZh: state.toggleZh, translateMessage: state.translateMessage, toggleShownText: state.toggleShownText, saveSuggestion: state.saveSuggestion, dismissSuggestion: state.dismissSuggestion, translateAll: state.translateAll, showToast: state.showToast, deleteFriend: state.deleteFriend })));
 
   const friend = friendById(friendId);
   const msgs = messagesOf(friendId);
@@ -293,7 +300,14 @@ export function ChatPane({
 
   /** 播放中的消息：只允许一条同时响 */
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const playbackRequest = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    playbackRequest.current += 1;
+    audioRef.current?.pause();
+    setPlayingId(null);
+    return () => { playbackRequest.current += 1; audioRef.current?.pause(); };
+  }, [friendId]);
   const ttsCache = useRef(new Map<string, string>());
   /* 离开聊天页暂停所有播放 / 浏览器预览朗读 */
   useEffect(
@@ -308,8 +322,11 @@ export function ChatPane({
     },
     [],
   );
+  /* 语音消息一出现就预取：点击时播放本地 blob，避免 <audio src> 等待网络/鉴权。
+     服务端还在合成（audioPending）的条目由轮询补上 audio 后再次触发。 */
   const togglePlay = useCallback(
     (m: Message) => {
+      const request = ++playbackRequest.current;
       if (playingId === m.id) {
         audioRef.current?.pause();
         audioRef.current = null;
@@ -319,23 +336,23 @@ export function ChatPane({
       /* 真后端给了音频就播真的；mock 数据没有 audio，退回原来的节奏动画 */
       if (m.audio) {
         audioRef.current?.pause();
-        const a = new Audio(m.audio);
-        audioRef.current = a;
-        a.onended = () => setPlayingId(null);
-        a.onerror = () => {
-          // 音频文件失效（blob 过期/服务器缺失）→ 现场合成兜底
-          void (async () => {
-            const synth = await synthesizeVoice(m.text, friendId);
-            if (synth && !a.src.endsWith(synth)) {
-              const played = await playVoiceUrl(synth);
-              if (!played) setPlayingId(null);
-              return;
-            }
-            setPlayingId(null);
-          })();
-        };
-        void a.play().catch(() => setPlayingId(null));
         setPlayingId(m.id);
+        void (async () => {
+          const local = prefetchedVoiceUrl(m.audio!) ?? await prefetchVoiceUrl(m.audio!);
+          if (request !== playbackRequest.current) return;
+          if (!local) { setPlayingId(null); showToast("语音暂时无法播放，请重试", "error"); return; }
+          const audio = new Audio(local);
+          audioRef.current = audio;
+          audio.onended = () => setPlayingId(null);
+          audio.onerror = () => { forgetPrefetchedVoice(m.audio!); setPlayingId(null); showToast("语音暂时无法播放，请重试", "error"); };
+          try { await audio.play(); } catch { setPlayingId(null); }
+        })();
+        return;
+      }
+      if (m.audioStatus === "failed") { retryAudio(m.id); return; }
+      if (m.audioPending) {
+        /* 音频还在合成：不要触发又一轮慢合成，等后台补全（轮询会更新这条消息） */
+        showToast("语音还在生成，稍等一下");
         return;
       }
       setPlayingId(m.id);
@@ -344,6 +361,7 @@ export function ChatPane({
         const key = `${friendId}:${m.text}`;
         const cached = ttsCache.current.get(key);
         const synth = cached ?? (m.text ? await synthesizeVoice(m.text, friendId) : null);
+        if (request !== playbackRequest.current) { if (synth && !cached) URL.revokeObjectURL(synth); return; }
         if (synth) {
           if (!cached) ttsCache.current.set(key, synth);
           audioRef.current?.pause();
@@ -360,7 +378,7 @@ export function ChatPane({
         );
       })();
     },
-    [playingId],
+    [friendId, playingId, showToast, retryAudio],
   );
 
   /**
@@ -506,6 +524,12 @@ export function ChatPane({
     return out;
   }, [msgs]);
   const messageVirtualizer = useVirtualizer({ count: msgs.length, getScrollElement: () => scrollRef.current, estimateSize: () => 120, overscan: 5, getItemKey: (index) => msgs[index].id, scrollMargin: messageListOffset });
+  const visibleVoiceUrls = selectVoicePrefetch(msgs, messageVirtualizer.getVirtualItems().map((item) => item.index)).map((message) => message.audio!).join("\n");
+  useEffect(() => {
+    if (document.visibilityState === "hidden") return;
+    for (const url of visibleVoiceUrls.split("\n")) if (url) void prefetchVoiceUrl(url);
+  }, [friendId, visibleVoiceUrls]);
+
   useLayoutEffect(() => {
     const list = messageListRef.current;
     const scroller = scrollRef.current;
@@ -732,6 +756,7 @@ export function ChatPane({
                       }}
                       onDismiss={() => dismissSuggestion(m.id)}
                       onRetry={() => retryMessage(m.id)}
+                      onRequestSuggestion={() => requestSuggestion(m.id)}
                       onZoom={setZoom}
                       onLongPress={(pos) =>
                         setMsgMenu({ message: m, x: pos.x, y: pos.y })
@@ -1193,6 +1218,7 @@ function MessageRow({
   onSave,
   onDismiss,
   onRetry,
+  onRequestSuggestion,
   onZoom,
   onLongPress,
   onAvatarClick,
@@ -1209,12 +1235,14 @@ function MessageRow({
   onSave: () => void;
   onDismiss: () => void;
   onRetry: () => void;
+  onRequestSuggestion: () => Promise<void>;
   onZoom: (src: string) => void;
   onLongPress?: (pos: { x: number; y: number }) => void;
   onAvatarClick?: () => void;
 }) {
   const { profile } = useApp(useShallow((state) => ({ profile: state.profile })));
   const mine = message.from === "me";
+  const [suggesting, setSuggesting] = useState(false);
 
   /* 长按/右键语音消息 → 在指针位置弹出「转文字」菜单 */
   const pressTimer = useRef<number | null>(null);
@@ -1341,10 +1369,15 @@ function MessageRow({
                 id={message.id}
                 durationMs={message.durationMs ?? 3000}
                 playing={playing}
+                pending={message.audioPending}
+                failed={message.audioStatus === "failed"}
                 onToggle={handlePlay}
               />
+              {message.audioStatus === "failed" ? <div className="w4-voice-text" role="status">语音生成失败，点击重试</div> : null}
               {message.shownText ? (
-                <div className="w4-voice-text">{message.text}</div>
+                <div className="w4-voice-text">
+                  {message.text || (message.audioPending ? "（音频生成中）" : "")}
+                </div>
               ) : null}
             </>
           ) : isImage ? (
@@ -1391,6 +1424,12 @@ function MessageRow({
 
         {/* 操作条 */}
         <div className="w4-bubble-tools">
+          {canRequestSuggestion(message) ? (
+            <button className="w4-mini-btn" disabled={suggesting} aria-busy={suggesting || undefined} onClick={() => {
+              setSuggesting(true);
+              void onRequestSuggestion().finally(() => setSuggesting(false));
+            }}>{suggesting ? "润色中…" : "润色"}</button>
+          ) : null}
           {readable ? (
             <span className={`w4-read-cue ${playing ? "on" : ""}`} aria-hidden>
               <Volume2 size={12} strokeWidth={2} />

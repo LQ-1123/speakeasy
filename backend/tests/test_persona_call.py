@@ -110,8 +110,8 @@ def test_call_prompt_contains_dna_and_turn_directive(db):
 
     assert "[Speech DNA on the phone]" in prompt
     assert "[This turn — you are SPEAKING on a live call" in prompt
-    assert "ONE short spoken line" in prompt                # verbosity=one_line → 12 词目标
-    assert "Do not end with a question" in prompt or "may end with a question" in prompt
+    assert "usually one short spoken line" in prompt
+    assert "Don't manufacture a question" in prompt
     # 通话 prompt 里不应再出现旧的「统一 18 词」硬规则
     assert "max ~18 words" not in prompt
 
@@ -128,9 +128,9 @@ def test_call_length_target_follows_verbosity(db):
         long_friend, chat._call_turn_plan(long_friend, "tell me about your day")
     )
 
-    assert "max ~12 words" in short_prompt
-    assert "max ~40 words" in long_prompt
-    assert "max ~12 words" not in long_prompt
+    assert "usually one short spoken line" in short_prompt
+    assert "a few spoken sentences when engaged" in long_prompt
+    assert "usually one short spoken line" not in long_prompt
 
 
 def test_call_plan_skips_examples_but_text_plan_has_them(db):

@@ -21,7 +21,9 @@ import io
 import os
 import shutil
 import subprocess
+import tempfile
 import wave
+import math
 from typing import Iterable
 
 import numpy as np
@@ -43,6 +45,24 @@ class AudioDecodeError(RuntimeError):
     """音频解码失败（文件缺失、格式不支持、缺少 ffmpeg 等）。"""
 
 
+class AudioLimitError(AudioDecodeError):
+    """Audio exceeds an explicit resource bound; never retry another decoder."""
+
+
+def upload_limits() -> tuple[int, float, float]:
+    """Configurable (encoded bytes, duration seconds, decode timeout seconds)."""
+    def number(name: str, default: float) -> float:
+        try:
+            value = float(os.getenv(name, str(default)))
+            return value if math.isfinite(value) and value > 0 else default
+        except ValueError:
+            return default
+
+    return (int(number("SE_AUDIO_MAX_BYTES", 8 * 1024 * 1024)),
+            number("SE_AUDIO_MAX_DURATION_S", 60),
+            number("SE_AUDIO_DECODE_TIMEOUT_S", 10))
+
+
 # --------------------------------------------------------------------------- #
 # PCM16 <-> float32
 # --------------------------------------------------------------------------- #
@@ -50,8 +70,11 @@ def pcm16_to_float32(pcm: bytes | bytearray | memoryview) -> np.ndarray:
     """PCM16 小端 mono → float32（除以 32768，shape=(-1,)）。"""
     if not pcm:
         return np.zeros(0, dtype=np.float32)
-    raw = np.frombuffer(bytes(pcm), dtype=_INT16)
-    return np.divide(raw.astype(np.float32), 32768.0, dtype=np.float32)
+    buffer = bytes(pcm) if isinstance(pcm, memoryview) and not pcm.contiguous else pcm
+    raw = np.frombuffer(buffer, dtype=_INT16)
+    arr = raw.astype(np.float32)
+    arr *= np.float32(1.0 / 32768.0)
+    return arr
 
 
 def float32_to_pcm16(x: np.ndarray) -> bytes:
@@ -62,11 +85,12 @@ def float32_to_pcm16(x: np.ndarray) -> bytes:
     arr = np.array(x, dtype=np.float32, copy=True).reshape(-1)
     if arr.size == 0:
         return b""
-    arr = np.nan_to_num(arr, nan=0.0, posinf=1.0, neginf=-1.0)
+    np.nan_to_num(arr, copy=False, nan=0.0, posinf=1.0, neginf=-1.0)
     np.clip(arr, -1.0, 1.0, out=arr)
-    scaled = np.rint(arr * np.float32(_MAX_PCM16))
-    np.clip(scaled, -32768.0, 32767.0, out=scaled)
-    return scaled.astype(_INT16).tobytes()
+    arr *= np.float32(_MAX_PCM16)
+    np.rint(arr, out=arr)
+    np.clip(arr, -32768.0, 32767.0, out=arr)
+    return arr.astype(_INT16).tobytes()
 
 
 def pcm16_samples(pcm: bytes) -> int:
@@ -260,7 +284,7 @@ def _decode_pcm_bytes(raw: bytes, sampwidth: int) -> np.ndarray:
     raise AudioDecodeError(f"不支持的 wav 采样位宽: {sampwidth * 8} bit")
 
 
-def _parse_wav(fh: io.BufferedIOBase) -> tuple[np.ndarray, int]:
+def _parse_wav(fh: io.BufferedIOBase, max_duration_s: float | None = None) -> tuple[np.ndarray, int]:
     """解析 wav 文件对象 → (float32 mono, sample_rate)。"""
     try:
         with wave.open(fh, "rb") as wf:
@@ -269,6 +293,15 @@ def _parse_wav(fh: io.BufferedIOBase) -> tuple[np.ndarray, int]:
             sr = wf.getframerate()
             comptype = wf.getcomptype()
             nframes = wf.getnframes()
+            if max_duration_s is not None:
+                if sr <= 0 or nframes > int(sr * max_duration_s):
+                    raise AudioLimitError(f"音频时长超过 {max_duration_s:g}s duration limit")
+                if nframes * nch * sw > upload_limits()[0]:
+                    raise AudioLimitError("WAV decoded input exceeds audio bytes limit")
+                if sr > 48000 or nch > 2:
+                    # Unusual headers can make the numpy resampling FIR huge;
+                    # use the subprocess time/output budget for those sources.
+                    raise AudioDecodeError("WAV sample rate/channels require bounded ffmpeg")
             raw = wf.readframes(nframes)
     except wave.Error as exc:  # 例如 WAVE_FORMAT_IEEE_FLOAT / EXTENSIBLE
         raise AudioDecodeError(f"标准库 wave 无法解析: {exc}") from exc
@@ -283,7 +316,7 @@ def _parse_wav(fh: io.BufferedIOBase) -> tuple[np.ndarray, int]:
     if nch > 1:
         usable = (x.size // nch) * nch
         x = x[:usable].reshape(-1, nch).mean(axis=1)
-    return x.astype(np.float32), int(sr)
+    return x.astype(np.float32, copy=False), int(sr)
 
 
 def _looks_like_wav(path: str) -> bool:
@@ -320,7 +353,8 @@ def _find_ffmpeg() -> str | None:
     return shutil.which("ffmpeg")
 
 
-def _read_via_ffmpeg(path: str, target_sr: int) -> tuple[np.ndarray, int]:
+def _read_via_ffmpeg(path: str, target_sr: int, *, max_duration_s: float | None = None,
+                     timeout_s: float = 10.0) -> tuple[np.ndarray, int]:
     """可选路径：用 ffmpeg 子进程把任意格式转成 wav 再解析（无 ffmpeg 则报错）。"""
     exe = _find_ffmpeg()
     if not exe:
@@ -328,19 +362,46 @@ def _read_via_ffmpeg(path: str, target_sr: int) -> tuple[np.ndarray, int]:
             "未找到 ffmpeg（PATH 与 FFMPEG_BINARY 均不可用），无法解码该格式；"
             "请安装 ffmpeg 或改用 wav"
         )
+    if max_duration_s is not None:
+        max_samples = int(target_sr * max_duration_s)
+        max_bytes = (max_samples + 1) * 4
+        # Read only bounded output after exit, rather than accumulating stdout in RAM.
+        # A single extra sample distinguishes an overlong recording from an exact limit.
+        cmd = [exe, "-nostdin", "-loglevel", "error", "-threads", "1", "-i", path,
+               "-vn", "-ac", "1", "-ar", str(target_sr), "-threads", "1",
+               "-t", str((max_samples + 1) / target_sr), "-fs", str(max_bytes),
+               "-f", "f32le", "-acodec", "pcm_f32le", "-"]
+        try:
+            with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+                proc = subprocess.run(cmd, check=False, timeout=timeout_s,
+                                      stdin=subprocess.DEVNULL, stdout=output, stderr=errors)
+                output.seek(0)
+                raw = output.read(max_bytes + 4)
+                if len(raw) > max_samples * 4:
+                    raise AudioLimitError(f"音频时长超过 {max_duration_s:g}s duration limit")
+                if proc.returncode != 0 or not raw:
+                    errors.seek(0)
+                    detail = errors.read(2000).decode("utf-8", "replace")
+                    raise AudioDecodeError(f"ffmpeg 解码失败（code={proc.returncode}）: {detail}")
+        except subprocess.TimeoutExpired as exc:
+            raise AudioDecodeError(f"ffmpeg 解码超时（{timeout_s:g}s）") from exc
+        except OSError as exc:
+            raise AudioDecodeError(f"无法启动 ffmpeg: {exc}") from exc
+        return np.frombuffer(raw, dtype="<f4"), target_sr
+
     cmd = [
         exe, "-nostdin", "-loglevel", "error",
-        "-i", path,
+        "-threads", "1", "-i", path, "-threads", "1",
         "-vn", "-ac", "1", "-ar", str(int(target_sr)),
         "-f", "wav", "-",
     ]
     try:
         proc = subprocess.run(
-            cmd, check=False, timeout=120,
+            cmd, check=False, timeout=timeout_s,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
     except subprocess.TimeoutExpired as exc:
-        raise AudioDecodeError(f"ffmpeg 解码超时（120s）: {path}") from exc
+        raise AudioDecodeError(f"ffmpeg 解码超时（{timeout_s:g}s）: {path}") from exc
     except OSError as exc:
         raise AudioDecodeError(f"无法启动 ffmpeg: {exc}") from exc
     if proc.returncode != 0 or not proc.stdout:
@@ -365,7 +426,8 @@ def _finalize(data: np.ndarray, sr: int, target_sr: int) -> np.ndarray:
     return arr.astype(np.float32, copy=False)
 
 
-def read_audio_file(path: str, target_sr: int = SR_IN) -> np.ndarray:
+def read_audio_file(path: str, target_sr: int = SR_IN, *, max_duration_s: float | None = None,
+                    timeout_s: float = 10.0) -> np.ndarray:
     """读音频文件 → float32 mono @ ``target_sr``。
 
     解码顺序：标准库 ``wave``（wav）→ ``soundfile``（若已安装）→ ``ffmpeg`` 子进程。
@@ -386,20 +448,27 @@ def read_audio_file(path: str, target_sr: int = SR_IN) -> np.ndarray:
     if ext in (".wav", ".wave", "") or _looks_like_wav(path):
         try:
             with open(path, "rb") as fh:
-                data, sr = _parse_wav(fh)
+                data, sr = _parse_wav(fh, max_duration_s=max_duration_s)
             return _finalize(data, sr, target_sr)
+        except AudioLimitError:
+            raise
         except AudioDecodeError as exc:
             problems.append(f"wave: {exc}")
         except OSError as exc:
             problems.append(f"wave: {exc}")
 
-    got = _read_via_soundfile(path)
+    # The optional soundfile convenience path decodes the whole source. Bounded
+    # untrusted uploads use ffmpeg's duration/output cap instead.
+    got = _read_via_soundfile(path) if max_duration_s is None else None
     if got is not None:
         return _finalize(got[0], got[1], target_sr)
 
     try:
-        data, sr = _read_via_ffmpeg(path, target_sr)
+        data, sr = _read_via_ffmpeg(path, target_sr, max_duration_s=max_duration_s,
+                                  timeout_s=timeout_s)
         return _finalize(data, sr, target_sr)
+    except AudioLimitError:
+        raise
     except AudioDecodeError as exc:
         problems.append(f"ffmpeg: {exc}")
 
@@ -467,6 +536,8 @@ __all__ = [
     "SR_IN",
     "SR_OUT",
     "AudioDecodeError",
+    "AudioLimitError",
+    "upload_limits",
     "pcm16_to_float32",
     "float32_to_pcm16",
     "pcm16_samples",

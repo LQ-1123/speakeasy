@@ -1,3 +1,4 @@
+import { reconnectDelay } from "../clientRefresh";
 import { API_ORIGIN } from "../api";
 import { clientApi, currentClientIdentity, nativeBridge, websocketUrl, type CallTicket } from "./clientApi";
 import { emailCodeAuthEnabled } from "./authMode";
@@ -487,7 +488,7 @@ export class CallSessionController {
       if (Date.now() >= this.reconnectUntil) { this.update({ phase: "error", error: "Connection lost" }); return; }
       await this.connect(ticket);
     } catch {
-      window.setTimeout(() => void this.reconnect(), 1200);
+      window.setTimeout(() => void this.reconnect(), reconnectDelay(1));
     }
   }
 

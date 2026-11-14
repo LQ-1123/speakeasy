@@ -47,6 +47,7 @@ onnxruntime>=1.19        # silero-vad 的 onnx 路径 / faster-whisper 的依赖
 # ---- LLM ----
 openai>=1.55,<2.0
 httpx>=0.27
+cryptography>=43
 
 # ---- 工具 ----
 rich>=13.9

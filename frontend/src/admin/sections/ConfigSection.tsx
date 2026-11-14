@@ -22,6 +22,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AdminApiError, apiGet, apiPost, apiPut } from "../api";
 import { adminKeys } from "../queryKeys";
 import { Badge, Button, ErrorState, Field, LoadingState, TextInput, useToasts, ToastStack } from "../ui";
+import type { ProviderModes, ResourceDraft, ResourceProvider } from "../providerResources";
+import ProviderResources from "./ProviderResources";
 
 /* -------------------------------------------------------------------------- */
 /* 类型                                                                        */
@@ -42,6 +44,7 @@ interface ConfigSnapshot {
     error?: string;
   };
   client_locked?: boolean;
+  provider_modes?: ProviderModes;
 }
 
 type Target = "llm" | "stt" | "tts" | "deepgram" | "jpush";
@@ -144,10 +147,12 @@ function ConfigCard({
   target,
   data,
   onSaved,
+  poolActive = false,
 }: {
   target: Target;
   data: Record<string, unknown> | undefined;
   onSaved: () => void;
+  poolActive?: boolean;
 }) {
   const fields = CARD_FIELDS[target];
   const { toasts, push } = useToasts();
@@ -161,6 +166,9 @@ function ConfigCard({
   useEffect(() => {
     setDraft({});
   }, [data]);
+  useEffect(() => {
+    if (poolActive) setDraft((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !fields.some((field) => field.key === key && field.secret))));
+  }, [poolActive, fields]);
 
   const error = typeof data?.error === "string" ? data.error : "";
   const maskedKey = typeof data?.masked_key === "string" ? data.masked_key : "";
@@ -177,6 +185,7 @@ function ConfigCard({
     // 只提交真正改过的字段——避免把没动的 secret 字段用空串覆盖掉。
     const payload: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(draft)) {
+      if (poolActive && fields.some((field) => field.key === key && field.secret)) continue;
       if (value === "") continue;
       payload[key] = key === "temperature" || key === "max_tokens" || key === "timeout_s"
         ? Number(value)
@@ -252,6 +261,7 @@ function ConfigCard({
       ) : null}
 
       {target === "jpush" ? <JpushSourceNote data={data} /> : null}
+      {poolActive ? <p className="admin-muted">资源池已启用，旧密钥编辑已停用。模型与默认设置仍可管理；如需恢复旧密钥，请在上方明确选择“回退旧配置”。</p> : null}
 
       <div className="admin-form-grid">
         {fields.map((field) => (
@@ -263,8 +273,9 @@ function ConfigCard({
           >
             <TextInput
               id={`${target}-${field.key}`}
-              value={valueOf(field.key)}
+              value={field.secret ? draft[field.key] ?? "" : valueOf(field.key)}
               type={field.secret ? "password" : "text"}
+              disabled={poolActive && field.secret}
               placeholder={field.secret ? "留空表示不修改" : ""}
               onChange={(value) => setDraft((current) => ({ ...current, [field.key]: value }))}
             />
@@ -314,24 +325,22 @@ function ConfigCard({
 /* -------------------------------------------------------------------------- */
 
 export default function ConfigSection() {
+  const [modes, setModes] = useState<ProviderModes>({});
   const query = useQuery({
     queryKey: adminKeys.config(),
     queryFn: () => apiGet<ConfigSnapshot>("/api/admin/config"),
   });
 
-  if (query.isPending) return <LoadingState label="正在读取配置…" />;
-  if (query.isError) {
-    const error = query.error;
-    return (
-      <ErrorState
-        title="读取配置失败"
-        message={error instanceof AdminApiError ? error.detail : String(error)}
-        onRetry={() => void query.refetch()}
-      />
-    );
-  }
-
   const data = query.data;
+  const activeModes = { ...data?.provider_modes, ...modes };
+  const text = (value: unknown) => typeof value === "string" ? value : "";
+  const defaults: Partial<Record<ResourceProvider, Partial<ResourceDraft>>> = {
+    fish: { base_url: text(data?.fish?.base_url || data?.tts?.fish_base_url), model: text(data?.fish?.model || data?.tts?.fish_model) },
+    deepgram: { base_url: text(data?.deepgram?.base_url) || "https://api.deepgram.com", model: text(data?.deepgram?.model) || "nova-3" },
+    llm: { base_url: text(data?.llm?.base_url), model: text(data?.llm?.model) },
+    siliconflow: { base_url: text(data?.stt?.base_url), model: text(data?.stt?.model) },
+  };
+  const legacyProvider: Record<Exclude<Target, "jpush">, ResourceProvider> = { llm: "llm", stt: "siliconflow", tts: "fish", deepgram: "deepgram" };
 
   return (
     <section className="admin-section">
@@ -339,7 +348,7 @@ export default function ConfigSection() {
         <div>
           <h1 className="admin-section-title">API 与密钥</h1>
           <p className="admin-section-desc">
-            密钥只以指纹形式显示，改动需要先通过连通测试才会落盘。保存后立即生效，不需要重启。
+            统一管理多账号密钥、共享配额和同模型路由。新资源先保存为待验证，通过业务探测后可用，不需要重启。
           </p>
         </div>
         <div className="admin-section-actions">
@@ -350,14 +359,15 @@ export default function ConfigSection() {
       </div>
 
       <div className="admin-col" style={{ gap: 20 }}>
-        {(["llm", "stt", "tts", "deepgram", "jpush"] as Target[]).map((target) => (
-          <ConfigCard
-            key={target}
-            target={target}
-            data={data[target] as Record<string, unknown> | undefined}
-            onSaved={() => void query.refetch()}
-          />
-        ))}
+        <ProviderResources defaults={defaults} onModesChange={setModes} />
+        <details className="admin-card">
+          <summary>旧配置、模型默认设置与回退</summary>
+          <p className="admin-muted">保留原来的 LLM、STT、TTS 与 Deepgram 配置。资源池启用时旧密钥不可修改；回退操作由上方各提供方卡片显式切换。</p>
+          {query.isPending ? <LoadingState label="正在读取旧配置…" /> : query.isError ? <ErrorState title="读取旧配置失败" message={query.error instanceof AdminApiError ? query.error.detail : String(query.error)} onRetry={() => void query.refetch()} /> : <div className="admin-col" style={{ gap: 20 }}>
+            {(["llm", "stt", "tts", "deepgram"] as const).map((target) => <ConfigCard key={target} target={target} data={data?.[target] as Record<string, unknown> | undefined} poolActive={activeModes[legacyProvider[target]] === true} onSaved={() => void query.refetch()} />)}
+          </div>}
+        </details>
+        {data ? <ConfigCard target="jpush" data={data.jpush} onSaved={() => void query.refetch()} /> : null}
       </div>
 
       <p className="admin-muted" style={{ fontSize: 12 }}>

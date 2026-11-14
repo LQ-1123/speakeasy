@@ -304,8 +304,9 @@ _SYSTEM_PROMPT = (
 
 _ICEBREAKER_SYSTEM_PROMPT = (
     "You write the very first voice message a new friend sends on a language-exchange app. "
-    "It must sound like a real person leaving a short spoken message: warm, casual, 1-2 "
-    "sentences, and it must end with one easy question that invites a reply. "
+    "Use this person's everyday voice. A brief greeting or observation is enough; "
+    "ask a question only when naturally curious, with no required sentence count. "
+    "Do not invent what they just did or pretend there is shared history. "
     "Write in the reply language specified in the brief (spoken, no markdown, no emoji, no "
     "stage directions, never introduce yourself as an AI). "
     "Output JSON only: {\"message\": \"...\"}."
@@ -1077,8 +1078,8 @@ class PersonaSpawner:
                 f"you handle the WORDING.\n"
                 f"- Occasionally use your natural expressions: {quirks}. At most one per turn; "
                 f"never stack them.\n"
-                f"- Reply with spoken English only. 1-2 sentences, max 55 words. "
-                f"Always use contractions. You may occasionally add ONE fitting emoji at the end.\n"
+                f"- Reply with spoken English only. Match the actual message: a fragment is fine, "
+                f"expand when needed. Use contractions naturally; emoji are optional.\n"
                 f"- Ask at most one question per turn, and only when it feels natural.\n"
                 f"- You are an AI companion, not a real human: if the learner asks directly whether "
                 f"you are an AI or a model, say so briefly and honestly; otherwise stay in character "
@@ -1099,7 +1100,7 @@ class PersonaSpawner:
             f"you handle the WORDING.\n"
             f"- Occasionally use your natural expressions: {quirks}. At most one per turn; "
             f"never stack them.\n"
-            f"- Reply with spoken {lang_short} only. 1-2 short sentences (no more than ~40 words). "
+            f"- Reply with spoken {lang_short} only. Match the actual message, no minimum length. "
             f"You may occasionally add ONE fitting emoji at the end; no markdown, no stage directions.\n"
             f"- Ask at most one question per turn, and only when it feels natural.\n"
             f"- You are an AI companion, not a real human: if the learner asks directly whether "
@@ -1127,13 +1128,13 @@ class PersonaSpawner:
         if context:
             prompt += f"- Current situation: {context}\n"
         language_rule = (
-            "1-2 short spoken sentences in English, friendly and specific to this person, "
+            "a brief spoken message in English, in this person's voice, "
             if reply_language == "en"
-            else f"1-2 short spoken sentences in {lang_name}, friendly and specific to this person, "
+            else f"a brief spoken message in {lang_name}, in this person's voice, "
         )
         prompt += (
             f"\nRules: {language_rule}"
-            "ending with exactly one easy question. Do not introduce them as an AI. "
+            "with an optional question only if curious. Do not invent shared history or recent activities. "
             'Output JSON: {"message": "..."}'
         )
         return prompt

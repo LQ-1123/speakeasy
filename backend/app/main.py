@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     db = app.state.v2.db
     ensure_schema(db, seed=False)
     ensure_client_schema(db)
+    from app.providers.runtime import initialize_pool
+    await initialize_pool(app.state.v2, engines, settings.data_path)
     # 账号体系（邮箱凭据/邀请码/邮箱令牌/可撤销设备会话/年龄核验）
     from app.v3.accounts import ensure_accounts_schema  # noqa: PLC0415
     from app.v3.media_access import ensure_media_schema  # noqa: PLC0415
@@ -106,11 +108,13 @@ async def lifespan(app: FastAPI):
     app.state.background_jobs = DurableJobQueue(db.conn, lock=db._lock)
 
     # No provider or world generation is awaited before serving requests.
+    from app.providers.metrics import periodic_flush
     tasks = [
         asyncio.create_task(maintenance_loop(app, settings, engines, app.state.background_jobs),
                             name="durable-maintenance"),
         asyncio.create_task(client_events.event_worker(db, app.state.v3), name="client-events"),
         asyncio.create_task(calls.cleanup_sessions(app), name="call-cleanup"),
+        asyncio.create_task(periodic_flush(app.state.v2.provider_pool), name='provider-metrics'),
     ]
     app.state.maintenance_task = tasks[0]
     app.state.client_events_task = tasks[1]
@@ -131,7 +135,18 @@ async def lifespan(app: FastAPI):
         cache.stop()
         if cache._worker is not None:
             await asyncio.gather(cache._worker, return_exceptions=True)
+        stopper = getattr(app.state.v2, 'stop_workers', None)
+        if stopper is not None:
+            await stopper()
+        pool = getattr(app.state.v2, 'provider_pool', None)
+        if pool is not None:
+            await pool.aclose()
+            from app.providers.runtime import unbind_pool
+            unbind_pool(pool)
         await app.state.v2.aclose()
+        from app.voice import fish_tts, sensevoice
+        await fish_tts.aclose()
+        await sensevoice.aclose()
         await engines.aclose()
         log.info("SpeakEasy backend stopped")
 
@@ -146,6 +161,11 @@ def create_app() -> FastAPI:
         description="本地语音栈（Silero-VAD + faster-whisper + CosyVoice2/F5-TTS）+ 云端 LLM 的实时英语口语对练。",
         lifespan=lifespan,
     )
+    from app.capacity import CapacityError
+    @app.exception_handler(CapacityError)
+    async def capacity_error(request: Request, exc: CapacityError):
+        return JSONResponse({'detail': str(exc)}, status_code=exc.status_code,
+                            headers={'Retry-After': str(exc.retry_after)})
 
     # 前后端分离：CORS 白名单可用环境变量覆盖（逗号分隔）
     import os as _os

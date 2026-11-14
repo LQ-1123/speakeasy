@@ -1356,7 +1356,8 @@ def test_generate_narrative_events_validates_participants_and_conflicts(world):
     # 落库 → 还是 planned（计划不等于事实）
     event_id, created = le.add_event(world, event)
     assert created is True
-    assert le.events_for_persona(world, "p_designer", statuses=["planned"])
+    # This checks persisted status, independent of how far the fixture day is in the past.
+    assert le.events_for_persona(world, "p_designer", statuses=["planned"], since_days=0)
     assert event_id
 
 

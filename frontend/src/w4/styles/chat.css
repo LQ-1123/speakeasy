@@ -688,6 +688,46 @@
   animation: chat-voice-pulse 1.1s var(--ease-standard) infinite;
 }
 
+/* 音频还在后台合成：三点轻微呼吸，明确「不是坏了，是在生成」 */
+.w4-voice.is-pending .w4-voice-dur {
+  color: color-mix(in srgb, currentColor 62%, transparent);
+}
+
+.w4-voice-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.w4-voice-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+  animation: chat-voice-dot 1s var(--ease-standard) infinite;
+}
+
+.w4-voice-dots i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.w4-voice-dots i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes chat-voice-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
 @keyframes chat-voice-pulse {
   0%,
   100% {

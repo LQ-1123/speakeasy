@@ -93,9 +93,8 @@ def _parse_iso(value: Any) -> datetime | None:
         text = str(value or "").strip()
         if not text:
             return None
-        if text.endswith("+00:00"):
-            return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S+00:00").replace(tzinfo=timezone.utc)
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
 
@@ -243,6 +242,7 @@ class TurnPlan:
     activity: dict | None = None
     language: str = "en"
     degraded: bool = False
+    moment: datetime | None = None
 
 
 def _recent_behaviors(friend: dict) -> list[str]:
@@ -278,7 +278,7 @@ def build_turn_plan(
     （聊天链路默认走后者，实现「A 的私聊情绪不影响 B」）。
     """
     friend = friend if isinstance(friend, dict) else {}
-    moment = now or _now()
+    moment = _parse_iso(now) or _now()
     persona_id = persona_id_for_friend(db, friend)
     row = _persona_row(db, persona_id)
     persona = row if row is not None else _friend_as_persona(friend, persona_id)
@@ -289,7 +289,7 @@ def build_turn_plan(
         or persona.get("language") or "en"
     ).strip().lower() or "en"
 
-    plan = TurnPlan(persona_id=persona_id, user_id=uid, persona=persona, language=language)
+    plan = TurnPlan(persona_id=persona_id, user_id=uid, persona=persona, language=language, moment=moment)
 
     # --- Speech DNA ---
     try:
@@ -380,7 +380,7 @@ def build_turn_plan(
     if persona_id:
         try:
             plan.life_block = event_posts_mod.persona_recent_facts(
-                db, persona_id, str(user_text or ""), limit=3
+                db, persona_id, str(user_text or ""), limit=3, now=moment
             )
         except Exception as exc:  # noqa: BLE001
             log.debug("生活事实检索失败（忽略）: %s", exc)
@@ -405,7 +405,7 @@ def build_persona_layer(db: Any, friend: dict, plan: TurnPlan, *, language: str 
 
     life_lines: list[str] = []
     activity = plan.activity or {}
-    now_line = _life_now_line(activity, moment=_now())
+    now_line = _life_now_line(activity, moment=plan.moment)
     if now_line:
         life_lines.append(now_line)
     # 你身边的人（关系深度 / 张力）：比事件更稳定，放在事件事实前面
@@ -472,6 +472,8 @@ _CALL_DIRECTIVE_PREFIXES: tuple[str, ...] = (
     "Length:",
     "Do not end",
     "This is the one turn",
+    "Questions are optional",
+    "Their actual message",
     "Write the reply in",
 )
 
@@ -540,7 +542,7 @@ def build_call_layer(db: Any, friend: dict, plan: TurnPlan, *, language: str = "
         log.debug("通话 DNA 行构造失败（忽略）: %s", exc)
 
     life_lines: list[str] = []
-    now_line = _life_now_line(plan.activity or {}, moment=_now())
+    now_line = _life_now_line(plan.activity or {}, moment=plan.moment)
     if now_line:
         life_lines.append(now_line)
     # 生活事实只取前两条「- 」行，避免通话 prompt 变长
@@ -642,22 +644,36 @@ def _people_lines(db: Any, persona_id: str) -> list[str]:
 
 
 def _life_now_line(activity: dict, *, moment: datetime | None = None) -> str:
-    """「你现在在做什么」一行。只陈述规则/事件给出的事实，不编造。
+    """人物当地时间的当前活动；作息推断明确保留不确定性。
 
     已结束的 ongoing 事件（后台还没刷状态）在这里被忽略，避免人物「11:15 还在做项目」到半夜。
     """
     if not isinstance(activity, dict) or not activity:
         return ""
-    label = str(activity.get("label") or "").strip()
+    label = str(activity.get("label") or activity.get("title") or "").strip()
     if not label:
         return ""
-    current = moment or _now()
+    if activity.get("event_status") in {"completed", "cancelled"}:
+        return ""
+    current = _parse_iso(moment) or _now()
+    started = _parse_iso(activity.get("start_time"))
     ended = _parse_iso(activity.get("end_time"))
+    if started is not None and started > current:
+        return ""
     if ended is not None and ended <= current:
         return ""
-    started = activity.get("start_time") or ""
-    if started:
-        return f"- Right now: {label} (started {str(started)[11:16]})."
+    metadata = _loads(activity.get("metadata"), {})
+    if metadata.get("inferred"):
+        return f"- Usual schedule (unconfirmed): {label}. This does not establish what you are doing now."
+    if started is not None:
+        tz_name = str(metadata.get("timezone") or "UTC")
+        try:
+            from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+            local_start = started.astimezone(ZoneInfo(tz_name))
+        except (KeyError, ValueError):
+            tz_name, local_start = "UTC", started
+        return f"- Right now: {label} (started {local_start:%H:%M}, {tz_name})."
     return f"- Right now: {label}."
 
 

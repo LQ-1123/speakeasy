@@ -189,15 +189,19 @@ async def bind_current_user(request: Request) -> str:
         if db is None:  # pragma: no cover - 装配异常
             raise HTTPException(status_code=503, detail="服务未初始化")
         accounts = _accounts()
-        session = await asyncio.to_thread(accounts.authenticate_session, db, token)
+        # CSRF 不通过的请求不更新活跃时间；仍保持「会话无效 401 优先于 CSRF 403」
+        if from_cookie and request.method not in _SAFE_METHODS and not _csrf_ok(request):
+            session = await asyncio.to_thread(accounts.authenticate_session, db, token)
+            if session is None:
+                raise HTTPException(status_code=401, detail="会话已失效，请重新登录")
+            raise HTTPException(status_code=403, detail="CSRF 校验失败")
+        # 校验 + 活跃时间合并成一次线程切换（每个带登录态的请求都走这里）
+        session = await asyncio.to_thread(accounts.authenticate_and_touch, db, token)
         if session is None:
             raise HTTPException(status_code=401, detail="会话已失效，请重新登录")
-        if from_cookie and request.method not in _SAFE_METHODS and not _csrf_ok(request):
-            raise HTTPException(status_code=403, detail="CSRF 校验失败")
         user_id = str(session["user_id"])
         request.state.session_id = str(session["session_id"])
         set_current_user(user_id)
-        await asyncio.to_thread(accounts.touch_session, db, str(session["session_id"]))
         return user_id
 
     raw_id = (request.headers.get("x-user-id") or "").strip()

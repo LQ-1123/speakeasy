@@ -287,6 +287,16 @@ def test_system_prompt_includes_mode(personas):
     assert free != drill, "不同模式应产生不同 system prompt"
 
 
+def test_classic_prompts_keep_identity_truthful_and_questions_optional(personas):
+    for persona_id in ("oliver", "raj", "marco", "emily", "priya"):
+        prompt = personas.system_prompt_for(persona_id, "free")
+        assert "answer honestly" in prompt
+        assert "Questions are optional" in prompt
+        for obsolete in ("Never say you are an AI", "Never mention you are an AI", "End most turns", "An adult Chinese speaker", "Contractions everywhere", "Never more than 55 words"):
+            assert obsolete not in prompt
+    assert "Repeatedly model one target structure" in personas.system_prompt_for("oliver", "drill")
+
+
 def test_modes_available(personas):
     modes = personas.modes()
     ids = {m.id for m in modes}

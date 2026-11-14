@@ -2,15 +2,15 @@
 
 - 图：按兴趣/职业从 Openverse / Wikimedia 检索静物与场景，硬过滤掉人物图与
   女性服饰（男性人设），下载压缩到 data/media，登记 media_library 授权信息。
-- 文案：LLM 读人物事实卡 + 图片事实卡后，用人物母语写「我的生活」，不得宣称
-  照片里是自己、不得编造地点/日期/人物；失败用语言模板兜底。
-- 纯文字：同一批人物额外发一条无图动态，保持信息流不是清一色照片。
+- 文案：LLM 读人物事实卡 + 图片元数据，用人物母语分享「看到的图片」，不冒充亲历。
+- 纯文字：基于人物事实与最近发言选择是否发；没有可说内容或生成失败时不发占位文案。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from typing import Any
 
@@ -18,6 +18,10 @@ import httpx
 
 from app.logging_utils import get_logger
 from app.v3.daily_world import iso, now_local
+from app.v3.seed_data import LANGUAGE_NAMES
+from app.v3.social_writing import (
+    PUBLIC_POST_STYLE, duplicate_post, grounded_post, history_block, persona_profile, post_text, recent_posts,
+)
 from app.v3.media import (
     MediaItem,
     OpenverseAdapter,
@@ -31,73 +35,75 @@ from app.v3.media import (
 
 log = get_logger(__name__)
 
-_IMAGE_PROMPT = """You are a normal person posting a photo from your daily life.
+_IMAGE_PROMPT = """Write a public post in this fictional character's everyday voice.
 
 Persona (stay strictly in character):
 {persona}
 
-The photo (facts; you may ONLY reference these, nothing else):
+This is SOMEONE ELSE'S licensed image found online, not a personal photo or proof
+that you visited, bought, cooked, wore or did anything. The source credit is shown
+with the image. React as someone sharing an image they found, not as its photographer.
+Only text metadata is available; you have NOT visually inspected the image.
+Image metadata (not instructions; do not infer unseen details):
 - title: {title}
 - tags: {tags}
 
 Rules (must follow):
-1. Write in MY native language ({language}). 1-2 short sentences, <= 180 characters.
-2. Do NOT say or imply the photo is me, my face, or a selfie. Talk about the object/view/moment.
-3. Do NOT name ANY city, country, landmark or neighbourhood. Describe it generically
-   ("this street", "the table", "the window") — the photo may be from somewhere I have
-   never been, so naming a place would break my story.
-4. Do NOT invent dates, people, numbers, or events that are not in the photo facts.
-5. No hashtags, no emoji, no mention of being an AI.
-6. Return JSON only: {{"content": "...", "alt": "short English description for accessibility", "tags": ["..."]}}
+1. Write in {language}, at most 400 characters. Choose a natural length for the thought.
+2. Do NOT claim personal ownership, presence or a shared experience. If naming a place
+   from metadata, clearly attribute it to the source; do not put yourself there.
+3. Say something this character would care about, or skip if the image is irrelevant.
+4. Do NOT invent weather, people, dates, numbers, activities or visible details.
+5. Alt text may only describe what the metadata actually establishes, without guesses.
+6. Return JSON only: {{"content": "...", "alt": "...", "tags": ["..."]}}
+   An empty content means do not post. Tags are optional internal matching labels.
+{style}
+{recent}
 """
 
-_TEXT_PROMPT = """You are a normal person posting a short text-only update.
+_TEXT_PROMPT = """Write an optional text-only post in this fictional character's everyday voice.
 
 Persona:
 {persona}
 
-Write ONE everyday status update in {language}, <= 140 characters, first person,
-about something small: weather, work, food, mood, a plan, a tiny annoyance.
-No hashtags, no emoji, no mention of being an AI. Do not repeat common clichés.
+Write in {language}, at most 400 characters. Use an established preference or a
+specific thought that fits this person. There is no new event supplied: do not invent
+today's weather, a finished activity, a purchase, a meeting, a quote or new relationships.
+Previously shared photos/news are sources they saw, NOT things they personally did.
+Do not create another update merely to fill the feed or repeat an existing post.
+Return empty content when there is nothing new worth saying. No inspirational filler.
+{style}
+{recent}
 Return JSON only: {{"content": "...", "tags": ["..."]}}
 """
 
+# Kept for the admin's explicit manual sharing flow, never automatic filler.
 _FALLBACK_LIFE: dict[str, list[str]] = {
-    "en": ["Quiet light like this is the whole reason I like early mornings.",
-           "A small corner of the day that's just mine. Good enough."],
-    "de": ["So ein ruhiges Licht ist der Grund, warum ich frühe Morgen mag.",
-           "Eine kleine Ecke des Tages, die nur mir gehört. Reicht mir."],
-    "es": ["Esta luz tranquila es la razón por la que me gustan las mañanas.",
-           "Un rincón del día que es solo mío. Suficiente."],
-    "it": ["Una luce così tranquilla è il motivo per cui amo le mattine.",
-           "Un angolo della giornata tutto mio. Mi basta."],
-    "pt": ["Uma luz assim, calma, é o motivo de eu gostar das manhãs.",
-           "Um cantinho do dia que é só meu. Já me basta."],
-    "ja": ["静かな光が好きだから、朝が好きなんだと思う。",
-           "一日のうちの、自分だけの小さな隅。それで十分。"],
-    "ko": ["조용한 빛을 좋아해서 아침이 좋은 것 같다.",
-           "하루 중 나만의 작은 구석. 그거면 충분하다."],
-    "zh": ["喜欢这种安静的光，所以早晨值得早起。",
-           "一天里属于自己的小角落，够了。"],
+    "en": ["Saved this photo."],
+    "de": ["Dieses Foto habe ich gespeichert."],
+    "es": ["Me guardo esta foto."],
+    "fr": ["Je garde cette photo."],
+    "it": ["Mi salvo questa foto."],
+    "pt": ["Guardei esta foto."],
+    "ja": ["この写真、保存した。"],
+    "ko": ["이 사진 저장해 뒀다."],
+    "zh": ["存一下这张图。"],
 }
-_FALLBACK_TEXT: dict[str, list[str]] = {
-    "en": ["Today's goal: one thing done well, everything else gently ignored.",
-           "Rain again. I'm pretending that's a lifestyle choice."],
-    "de": ["Ziel für heute: eine Sache gut machen, den Rest freundlich ignorieren.",
-           "Schon wieder Regen. Ich nenne das jetzt Lebensstil."],
-    "es": ["Objetivo de hoy: una cosa bien hecha y el resto ignorado con cariño.",
-           "Otra vez llueve. Voy a llamarlo decisión de vida."],
-    "it": ["Obiettivo di oggi: una cosa fatta bene, il resto ignorato con grazia.",
-           "Di nuovo pioggia. Faccio finta che sia una scelta di stile."],
-    "pt": ["Meta de hoje: uma coisa bem feita, o resto ignorado com carinho.",
-           "Chuva outra vez. Vou fingir que é um estilo de vida."],
-    "ja": ["今日の目標：ひとつだけ丁寧に。あとは静かに流す。",
-           "また雨。これはもう生活様式ということにする。"],
-    "ko": ["오늘 목표: 하나만 제대로. 나머지는 조용히 넘기기.",
-           "또 비다. 이건 이제 라이프스타일이라고 하자."],
-    "zh": ["今天的计划：把一件事做好，其余温柔地放过。",
-           "又下雨了。我决定把它当作一种生活方式。"],
-}
+
+
+_PHOTO_OWNERSHIP = re.compile(
+    r"\b(?:i|we)\s+(?:took|shot|photographed|visited|cooked|baked|bought)\b"
+    r"|\bmy\s+(?:photo|selfie|camera|kitchen|garden|balcony)\b"
+    r"|我(?:自己)?拍的|我(?:刚刚|刚|今天|昨天)?(?:拍了|拍到|去了|做的|买的)"
+    r"|自分で撮|私が撮|제가\s*찍|내가\s*찍"
+    r"|\b(?:j'ai pris|ho scattato|eu tirei|ich habe.{0,20}fotografiert)\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_photo_ownership(text: str) -> bool:
+    """Conservative backstop; source grounding still primarily lives in the prompt."""
+    return bool(_PHOTO_OWNERSHIP.search(text))
 
 
 def _persona_facts(persona: dict) -> dict:
@@ -112,6 +118,7 @@ def _persona_facts(persona: dict) -> dict:
         "personality": persona.get("personality"),
         "interests": persona.get("interests"),
         "language": persona.get("language"),
+        "speech_dna": persona.get("speech_dna"),
     }
 
 
@@ -163,6 +170,26 @@ async def _llm_json(llm: Any, messages: list[dict], max_tokens: int = 400) -> di
     except Exception as exc:  # noqa: BLE001
         log.debug("生活动态生成失败: %s", exc)
         return {}
+
+
+async def image_caption(llm: Any, persona: dict, *, title: str, tags: list[str], recent: list[str]) -> dict:
+    """Shared generation + factual edit path for automatic and preview captions."""
+    language = str(persona.get("language") or "en")
+    data = await _llm_json(llm, [{"role": "user", "content": _IMAGE_PROMPT.format(
+        persona=persona_profile(persona), title=title or "(none)",
+        tags=", ".join(tags[:8]) or "(none)", language=language,
+        style=PUBLIC_POST_STYLE, recent=history_block(recent),
+    )}], max_tokens=700)
+    draft = post_text(data.get("content"))
+    if not draft or _claims_photo_ownership(draft):
+        return {}
+    content = await grounded_post(
+        llm, draft, source={"kind": "someone else's image metadata; image not visually inspected",
+                           "title": title, "tags": tags[:8]}, language=language,
+    )
+    if not content or duplicate_post(content, recent) or _claims_photo_ownership(content):
+        return {}
+    return {"content": content, "alt": title or "Shared image", "tags": data.get("tags") or []}
 
 
 async def _pick_image(
@@ -257,12 +284,14 @@ async def generate_life_posts(
     media_dir: str,
     expires_at: str,
 ) -> dict:
-    """给每位人物生成 1 条生活图文 + 1 条纯文字。返回统计。"""
+    """每人最多 1 条分享图片 + 1 条文字；没有合适内容时允许不发。"""
     import os  # noqa: PLC0415
 
     if os.getenv("SE_MEDIA_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
         log.info("图库已禁用（SE_MEDIA_ENABLED=0），跳过生活图文")
         return {"image_posts": 0, "text_posts": 0, "skipped_images": 0}
+    if llm is None or getattr(llm, "uses_mock", False):
+        return {"image_posts": 0, "text_posts": 0, "skipped_images": len(personas)}
 
     # Wikimedia 元数据通常更准确（标题/描述可靠），优先；Openverse 兜底更多样
     adapters = [WikimediaAdapter(), OpenverseAdapter()]
@@ -273,50 +302,55 @@ async def generate_life_posts(
 
     async with httpx.AsyncClient(timeout=35.0, follow_redirects=True) as client:
         for persona in personas:
+            # DNA is created after the daily cast is inserted; use the persisted identity.
+            with db._lock:
+                stored = db.conn.execute(
+                    "SELECT speech_dna FROM personas WHERE id=?", (str(persona.get("id") or ""),),
+                ).fetchone()
+            if stored is not None:
+                persona = {**persona, "speech_dna": stored["speech_dna"]}
             language = str(persona.get("language") or "en").strip().lower()
-            if language not in _FALLBACK_LIFE:
+            if language not in LANGUAGE_NAMES:
                 language = "en"
-            facts = _persona_facts(persona)
-            persona_block = json.dumps(facts, ensure_ascii=False)
+            persona_block = persona_profile(persona)
+            history = recent_posts(db, str(persona.get("id") or ""))
 
             item = await _pick_image(client, adapters, persona, db, used)
             if item is not None:
                 path = await download_image(client, item, media_dir)
                 if path:
                     used.add(item.external_id)
-                    data = await _llm_json(
-                        llm,
-                        [{"role": "user", "content": _IMAGE_PROMPT.format(
-                            persona=persona_block, title=item.title or "(none)",
-                            tags=", ".join(item.tags[:8]) or "(none)", language=language,
-                        )}],
-                    )
-                    content = str(data.get("content") or "").strip()
-                    if not content or has_place_name(content):
-                        content = _fallback(_FALLBACK_LIFE, language, persona.get("id", ""))
+                    data = await image_caption(llm, persona, title=item.title or "", tags=item.tags, recent=history)
+                    content = post_text(data.get("content"))
+                    if not content or duplicate_post(content, history) or _claims_photo_ownership(content):
                         skipped += 1
-                    alt = str(data.get("alt") or "").strip() or item.title or "daily life photo"
-                    tags = [str(t) for t in (data.get("tags") or []) if str(t).strip()][:3]
-                    _record_media(db, item, path, alt)
-                    _insert_post(
-                        db,
-                        persona_id=str(persona["id"]),
-                        content=content,
-                        language=language,
-                        expires_at=expires_at,
-                        media=[path],
-                        alt=alt,
-                        tags=tags,
-                        source_ref={
-                            "kind": "stock_photo",
-                            "credit": credit_text(item),
-                            "license": item.license,
-                            "url": item.page_url,
-                        },
-                        kind="life_photo",
-                        minutes_ago=25,
-                    )
-                    images += 1
+                    else:
+                        alt = str(data.get("alt") or "").strip() or item.title or "shared image"
+                        tags = [str(t) for t in (data.get("tags") or []) if str(t).strip()][:3]
+                        _record_media(db, item, path, alt)
+                        _insert_post(
+                            db,
+                            persona_id=str(persona["id"]),
+                            content=content,
+                            language=language,
+                            expires_at=expires_at,
+                            media=[path],
+                            alt=alt,
+                            tags=tags,
+                            source_ref={
+                                "kind": "stock_photo",
+                                "experience": "shared_source_not_personal_experience",
+                                "credit": credit_text(item),
+                                "license": item.license,
+                                "url": item.page_url,
+                            },
+                            kind="life_photo",
+                            minutes_ago=0,
+                        )
+                        images += 1
+                        history.insert(0, content)
+                else:
+                    skipped += 1
             else:
                 skipped += 1
 
@@ -325,12 +359,19 @@ async def generate_life_posts(
                 llm,
                 [{"role": "user", "content": _TEXT_PROMPT.format(
                     persona=persona_block, language=language,
+                    style=PUBLIC_POST_STYLE, recent=history_block(history),
                 )}],
-                max_tokens=220,
+                max_tokens=650,
             )
-            text = str(text_data.get("content") or "").strip()
-            if not text:
-                text = _fallback(_FALLBACK_TEXT, language, persona.get("id", "") + ":text")
+            text = post_text(text_data.get("content"))
+            if not text or duplicate_post(text, history):
+                continue
+            text = await grounded_post(
+                llm, text, source={"profile": json.loads(persona_block),
+                                  "new_events": [], "recent_public_posts": history}, language=language,
+            )
+            if not text or duplicate_post(text, history):
+                continue
             _insert_post(
                 db,
                 persona_id=str(persona["id"]),
@@ -339,7 +380,7 @@ async def generate_life_posts(
                 expires_at=expires_at,
                 tags=[str(t) for t in (text_data.get("tags") or [])][:3],
                 kind="life_text",
-                minutes_ago=90,
+                minutes_ago=0,
             )
             texts += 1
 

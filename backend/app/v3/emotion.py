@@ -429,7 +429,7 @@ def emotion_prompt_block(state: dict, *, language: str = "en") -> str:
     """
     current = normalize_state(state)
     lines = [
-        "How you feel right now (qualitative only, never say this out loud):",
+        "How you feel right now (internal guidance, not a script):",
         f"- mood: {_mood_word(current['mood'])}",
         f"- energy: {_energy_word(current['energy'])}",
         f"- stress: {_stress_word(current['stress'])}",
@@ -440,7 +440,9 @@ def emotion_prompt_block(state: dict, *, language: str = "en") -> str:
         lines.append(f"- underlying: {context}")
     lines.append(
         "Let this quietly colour how much you say and how warm you sound. "
-        "Do not announce, name or explain your mood."
+        "Do not recite these labels or make every reply about your mood. "
+        "If asked how you are, a plain answer such as feeling tired is fine; "
+        "do not invent a cause."
     )
     return "\n".join(lines)
 

@@ -166,6 +166,8 @@ CREATE TABLE IF NOT EXISTS persona_relationships (
     updated_at TEXT NOT NULL,
     UNIQUE(persona_a, persona_b)
 );
+-- 「我的熟人」按 persona_a OR persona_b 查：UNIQUE 只覆盖 persona_a 这一半
+CREATE INDEX IF NOT EXISTS idx_persona_rel_b ON persona_relationships(persona_b);
 
 -- 人物作息（规则引擎的基座，不是逐分钟模拟）
 CREATE TABLE IF NOT EXISTS persona_schedules (
@@ -190,6 +192,8 @@ CREATE TABLE IF NOT EXISTS friendships (
     UNIQUE(user_id, persona_id)
 );
 CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id, status);
+-- 好友行 → 人物的反查（好友主页动态 / 老好友的 persona 解析）
+CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id);
 
 CREATE TABLE IF NOT EXISTS user_posts (
     id TEXT PRIMARY KEY,
@@ -240,6 +244,10 @@ CREATE TABLE IF NOT EXISTS social_events (
 );
 CREATE INDEX IF NOT EXISTS idx_social_events_user ON social_events(user_id, scheduled_at DESC);
 CREATE INDEX IF NOT EXISTS idx_social_events_pending ON social_events(user_id, status, scheduled_at);
+-- 事件收集循环每 2 秒要找「到期未物化」「未读未入发件箱」的行：用局部索引，
+-- 成本只跟待处理的行数有关，不随 social_events 总量增长。
+CREATE INDEX IF NOT EXISTS idx_social_events_due ON social_events(scheduled_at) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_social_events_unread ON social_events(scheduled_at) WHERE is_read=0;
 
 CREATE TABLE IF NOT EXISTS social_event_attempts (
     id TEXT PRIMARY KEY,
@@ -465,12 +473,70 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
+def _ensure_event_membership(db: Any) -> None:
+    """Index exact membership once; triggers cover worker, admin and archive writes."""
+    db.conn.executescript("""
+        CREATE TABLE IF NOT EXISTS persona_event_participants (
+            persona_id TEXT NOT NULL,
+            event_id TEXT NOT NULL REFERENCES persona_events(id) ON DELETE CASCADE,
+            event_status TEXT NOT NULL,
+            happened_at REAL,
+            starts_at REAL,
+            PRIMARY KEY (persona_id, event_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_members_completed
+            ON persona_event_participants(persona_id, event_status, happened_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_event_members_planned
+            ON persona_event_participants(persona_id, event_status, starts_at);
+        CREATE INDEX IF NOT EXISTS idx_event_members_event
+            ON persona_event_participants(event_id);
+    """)
+    # json_valid protects upgrades from malformed legacy values. A non-array is
+    # ignored, matching the public event decoder's participant contract.
+    def membership_select(alias: str) -> str:
+        return (
+            f"SELECT {alias}.persona_id, {alias}.id, {alias}.event_status,"
+            f" julianday(COALESCE(NULLIF({alias}.end_time,''), NULLIF({alias}.start_time,''), {alias}.completed_at)),"
+            f" julianday({alias}.start_time)"
+            f" FROM persona_events {alias} WHERE {alias}.id=new.id"
+            " UNION SELECT CAST(j.value AS TEXT), e.id, e.event_status,"
+            " julianday(COALESCE(NULLIF(e.end_time,''), NULLIF(e.start_time,''), e.completed_at)),"
+            " julianday(e.start_time) FROM persona_events e,"
+            " json_each(CASE WHEN json_valid(e.participants) THEN"
+            " CASE WHEN json_type(e.participants)='array' THEN e.participants ELSE '[]' END"
+            " ELSE '[]' END) j WHERE e.id=new.id"
+        )
+    select = membership_select("e")
+    db.conn.executescript(f"""
+        CREATE TRIGGER IF NOT EXISTS event_members_insert AFTER INSERT ON persona_events BEGIN
+            INSERT OR IGNORE INTO persona_event_participants {select};
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_members_update
+        AFTER UPDATE OF id, persona_id, participants, event_status, end_time, start_time, completed_at ON persona_events BEGIN
+            DELETE FROM persona_event_participants WHERE event_id=old.id;
+            INSERT OR IGNORE INTO persona_event_participants {select};
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_members_delete AFTER DELETE ON persona_events BEGIN
+            DELETE FROM persona_event_participants WHERE event_id=old.id;
+        END;
+    """)
+    if db.conn.execute("SELECT 1 FROM v3_meta WHERE key='event_membership_v1'").fetchone() is None:
+        # Reuse the same SELECT for the initial whole-table migration only.
+        backfill = select.replace(" WHERE e.id=new.id", "")
+        db.conn.execute("INSERT OR IGNORE INTO persona_event_participants " + backfill)
+        db.conn.execute("INSERT INTO v3_meta(key,value) VALUES ('event_membership_v1','1')")
+
+
 def ensure_schema(db: Any, *, seed: bool = True) -> None:
     """建表（幂等）+ 首次入库 Persona 语料。
 
     ``seed=False`` 时只建表，由调用方决定世界生成方式（见 ``app.v3.world``）。
     """
     with db._lock, db.conn:  # noqa: SLF001 - 与 DB 层共用连接与锁
+        if getattr(db, "_v3_schema_connection", None) is db.conn:
+            if seed:
+                seed_if_needed(db)
+            return
         db.conn.executescript(DDL)
         from app.v3.account_archive import ensure_archive_schema
         ensure_archive_schema(db)
@@ -575,6 +641,7 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
         )
         # 依赖新列的索引必须在这里建（DDL 里的 CREATE TABLE IF NOT EXISTS 不会给老表补列）
         _ensure_extra_indexes(db)
+        _ensure_event_membership(db)
         # 老库的 lifecycle 是「ALTER TABLE 加列」产生的 DEFAULT ''，
         # 而新表默认是 'permanent'。统一一下，否则「常驻人物」过滤器找不到人。
         try:
@@ -586,6 +653,7 @@ def ensure_schema(db: Any, *, seed: bool = True) -> None:
                 log.info("migrated personas: %d 行 lifecycle '' → permanent", cur.rowcount)
         except sqlite3.Error as exc:  # pragma: no cover
             log.debug("lifecycle 归一化失败（忽略）: %s", exc)
+    db._v3_schema_connection = db.conn
     if seed:
         seed_if_needed(db)
 

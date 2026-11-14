@@ -9,3 +9,17 @@ it("refreshes recent messages without losing earlier pages and replaces optimist
   expect(merged.map((item) => item.id)).toEqual(["old", "recent", "sent"]);
   expect(merged[1].read).toBe(true);
 });
+
+it("keeps a confirmed voice bubble while the deferred audio is still missing", () => {
+  const voice = { ...message("m1", "2026-01-01"), kind: "voice" as const, durationMs: 3200, audio: undefined };
+  const refreshed = { ...message("m1", "2026-01-01"), kind: "text" as const, durationMs: 0 };
+  const merged = mergeMessages([voice], [refreshed]);
+  expect(merged[0].kind).toBe("voice");
+  expect(merged[0].durationMs).toBe(3200);
+});
+
+it("clears pending audio when generation fails instead of preserving a permanent spinner", () => {
+  const pending = { ...message("m1", "2026-01-01"), kind: "voice" as const, audioPending: true, audioStatus: "generating" as const };
+  const failed = { ...pending, audioStatus: "failed" as const, audioPending: false, audioError: "deadline_exceeded" };
+  expect(mergeMessages([pending], [failed])[0].audioPending).toBe(false);
+});

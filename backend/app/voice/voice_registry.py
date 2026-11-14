@@ -36,6 +36,18 @@ from app.v3.seed_data import voice_for_language
 
 log = get_logger(__name__)
 
+
+def get_pool():
+    from app.providers.runtime import get_pool as current_pool
+
+    return current_pool()
+
+
+def _fish_pool(cfg: Any = None):
+    pool = get_pool()
+    model = str(getattr(cfg, "fish_model", "") or "s2.1-pro")
+    return pool if pool is not None and pool.applies("fish", model) else None
+
 #: 合法 Edge 声线名（例：en-GB-RyanNeural / de-DE-FlorianMultilingualNeural）
 _EDGE_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z]+(?:Multilingual)?Neural$")
 
@@ -77,6 +89,8 @@ def fish_configured(cfg: Any) -> bool:
     # SE_TTS_FISH=0（测试/离线）时视为未配置：所有调用点都不再联网
     if str(os.getenv("SE_TTS_FISH", "1")).strip().lower() in ("0", "false", "no", "off"):
         return False
+    if _fish_pool(cfg) is not None:
+        return True
     return bool(
         cfg is not None
         and str(getattr(cfg, "provider", "") or "") == "fish"
@@ -93,16 +107,24 @@ def fish_usable(cfg: Any, *, now: float | None = None) -> bool:
     """
     if not fish_configured(cfg):
         return False
+    if _fish_pool(cfg) is not None:
+        # A route retains ownership while accounts cool or drain. Acquisition
+        # waits/rejects inside the pool instead of selecting a legacy account.
+        return True
     return (now or time.time()) >= float(_FISH_STATE.get("down_until") or 0.0)
 
 
 def mark_fish_failure(exc: Any) -> None:
+    if _fish_pool(load_cfg()) is not None:
+        return
     _FISH_STATE["down_until"] = time.time() + FISH_DOWN_SECONDS
     _FISH_STATE["last_error"] = f"{type(exc).__name__}: {exc}"[:240]
     _FISH_STATE["attempt_ok"] = False
 
 
 def mark_fish_success() -> None:
+    if _fish_pool(load_cfg()) is not None:
+        return
     _FISH_STATE["down_until"] = 0.0
     _FISH_STATE["last_ok"] = time.time()
     _FISH_STATE["attempt_ok"] = True
@@ -113,6 +135,12 @@ async def probe(cfg: Any = None) -> bool:
     cfg = cfg if cfg is not None else load_cfg()
     if not fish_configured(cfg):
         return False
+    pool = _fish_pool(cfg)
+    if pool is not None:
+        # Resource verification is an explicit business probe in providers;
+        # do not let a catalog request rewrite per-account health.
+        available = getattr(pool, "available", None)
+        return bool(available("fish", str(getattr(cfg, "fish_model", "") or "s2.1-pro"))) if available else True
     if (time.time()) < float(_FISH_STATE.get("down_until") or 0.0):
         return False
     try:
@@ -134,6 +162,14 @@ async def probe(cfg: Any = None) -> bool:
 
 def fish_status() -> dict:
     """给 /health、/stats 用的诊断快照（不含任何密钥）。"""
+    cfg = load_cfg()
+    pool = _fish_pool(cfg)
+    if pool is not None:
+        model = str(getattr(cfg, "fish_model", "") or "s2.1-pro")
+        available = getattr(pool, "available", None)
+        reachable = bool(available("fish", model)) if available is not None else True
+        return {"reachable": reachable, "retry_in_s": 0.0, "last_ok_at": 0.0,
+                "last_error": "", "attempt_ok": None, "source": "pool"}
     now = time.time()
     down_until = float(_FISH_STATE.get("down_until") or 0.0)
     return {

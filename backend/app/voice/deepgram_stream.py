@@ -9,13 +9,21 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, AsyncIterator
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import websockets
 
 DEFAULT_WS = "wss://api.deepgram.com/v1/listen"
+
+
+def get_pool():
+    from app.providers.runtime import get_pool as current_pool
+
+    return current_pool()
 
 # Deepgram 支持的语言码基本与 BCP-47 前两位一致，这里做一次兜底映射
 _LANG_MAP = {
@@ -91,6 +99,11 @@ def deepgram_key() -> str:
 
 
 def deepgram_status() -> dict:
+    pool = get_pool()
+    if pool is not None and pool.applies("deepgram", "nova-3"):
+        available = getattr(pool, "available", None)
+        return {"available": bool(available("deepgram", "nova-3")) if available is not None else True,
+                "configured": True, "source": "pool", "key_masked": ""}
     runtime = load_runtime_key()
     env = (os.environ.get("DEEPGRAM_API_KEY") or "").strip()
     key = runtime or env
@@ -100,6 +113,11 @@ def deepgram_status() -> dict:
         "source": "app" if runtime else ("env" if env else "none"),
         "key_masked": _mask(key),
     }
+
+
+def deepgram_configured(model: str = "nova-3") -> bool:
+    pool = get_pool()
+    return bool((pool is not None and pool.applies("deepgram", model)) or deepgram_key())
 
 
 def language_code(lang: str | None) -> str:
@@ -113,9 +131,20 @@ class DeepgramStreamer:
         self.language = language_code(language)
         self.model = model
         self._ws: Any = None
+        self._lease: Any = None
+        self._lease_context: Any = None
+        self._client_context: Any = None
+        self._lease_failed = False
+        self._close_lock = asyncio.Lock()
         self.final_text = ""
 
     async def connect(self) -> None:
+        pool = get_pool()
+        if self._ws is not None or self._lease_context is not None:
+            raise StreamUnavailable("already connected")
+        if pool is not None and pool.applies("deepgram", self.model):
+            await self._connect_pooled(pool)
+            return
         url = (
             f"{DEFAULT_WS}?model={self.model}&language={self.language}"
             "&encoding=linear16&sample_rate=16000&channels=1"
@@ -129,38 +158,133 @@ class DeepgramStreamer:
         except Exception as exc:  # noqa: BLE001 - 统一转成可回退错误
             raise StreamUnavailable(str(exc)) from exc
 
+    @staticmethod
+    def _status(exc: BaseException) -> int:
+        return int(getattr(exc, "status_code", 0) or
+                   getattr(getattr(exc, "response", None), "status_code", 0) or 0)
+
+    def _failure(self, exc: BaseException, *, code: str = "") -> None:
+        if self._lease is not None and not self._lease_failed:
+            self._lease_failed = True
+            self._lease.failure(status=self._status(exc), code=code or type(exc).__name__)
+
+    async def _release_lease(self) -> None:
+        client_context, self._client_context = self._client_context, None
+        context, self._lease_context = self._lease_context, None
+        self._lease = None
+        try:
+            if client_context is not None:
+                await client_context.__aexit__(None, None, None)
+        finally:
+            if context is not None:
+                await context.__aexit__(None, None, None)
+
+    async def _connect_pooled(self, pool: Any) -> None:
+        excluded: set[str] = set()
+        deadline = asyncio.get_running_loop().time() + 10.0
+        for candidate in range(2):
+            try:
+                context = pool.lease("deepgram", self.model, priority="call", deadline=deadline,
+                                     exclude_resource_ids=excluded)
+                lease = await context.__aenter__()
+                self._lease_context, self._lease = context, lease
+                self._lease_failed = False
+                parsed = urlsplit(lease.base_url or DEFAULT_WS)
+                scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
+                path = parsed.path.rstrip("/")
+                if not path:
+                    path = "/v1/listen"
+                elif not path.endswith("/listen"):
+                    path += "/listen" if path.endswith("/v1") else "/v1/listen"
+                query = urlencode({"model": lease.model, "language": self.language,
+                                   "encoding": "linear16", "sample_rate": 16000, "channels": 1,
+                                   "interim_results": "true", "smart_format": "true", "punctuate": "true",
+                                   "endpointing": 150, "vad_events": "true", "utterance_end_ms": 1200})
+                url = urlunsplit((scheme, parsed.netloc, path, query, ""))
+                async def factory(resource):
+                    return await websockets.connect(
+                        url, additional_headers={"Authorization": f"Token {resource.api_key}"},
+                        max_size=None, open_timeout=max(0.001, deadline - asyncio.get_running_loop().time()),
+                    )
+
+                client_context = pool.client(lease, factory, kind="ws")
+                self._ws = await client_context.__aenter__()
+                self._client_context = client_context
+                return
+            except asyncio.CancelledError:
+                await self._release_lease()
+                raise
+            except Exception as exc:
+                status = self._status(exc)
+                if self._lease is not None:
+                    excluded.add(self._lease.resource_id)
+                    self._failure(exc)
+                await self._release_lease()
+                if status in (429, 503) and candidate == 0:
+                    continue
+                raise StreamUnavailable(f"Deepgram connection unavailable ({status or type(exc).__name__})") from exc
+
     async def send(self, pcm: bytes) -> None:
         if self._ws is None:
             raise StreamUnavailable("not connected")
-        await self._ws.send(pcm)
+        try:
+            await self._ws.send(pcm)
+        except Exception as exc:
+            self._failure(exc)
+            raise
 
     async def finalize(self) -> None:
         if self._ws is None:
             return
-        await self._ws.send(json.dumps({"type": "Finalize"}))
+        try:
+            await self._ws.send(json.dumps({"type": "Finalize"}))
+        except Exception as exc:
+            self._failure(exc)
+            raise
 
     async def keepalive(self) -> None:
         if self._ws is not None:
-            await self._ws.send(json.dumps({"type": "KeepAlive"}))
+            try:
+                await self._ws.send(json.dumps({"type": "KeepAlive"}))
+            except Exception as exc:
+                self._failure(exc)
+                raise
 
     async def close(self) -> None:
-        if self._ws is None:
-            return
+        async with self._close_lock:
+            await self._close_connection()
+
+    async def _close_connection(self) -> None:
+        ws, self._ws = self._ws, None
         try:
-            await self._ws.send(json.dumps({"type": "CloseStream"}))
-        except Exception:  # noqa: BLE001
-            pass
+            if ws is not None:
+                try:
+                    await ws.send(json.dumps({"type": "CloseStream"}))
+                except Exception as exc:
+                    self._failure(exc)
+                if self._client_context is None:
+                    try:
+                        await ws.close()
+                    except Exception as exc:
+                        self._failure(exc)
+            if self._lease is not None and not self._lease_failed:
+                self._lease.success()
+        finally:
+            await self._release_lease()
+
+    async def _messages(self) -> AsyncIterator[Any]:
         try:
-            await self._ws.close()
-        except Exception:  # noqa: BLE001
-            pass
-        self._ws = None
+            async for raw in self._ws:
+                yield raw
+        except Exception as exc:
+            self._failure(exc)
+            raise StreamUnavailable("Deepgram transcription unavailable") from None
 
     async def events(self) -> AsyncIterator[dict[str, Any]]:
         """把 Deepgram 原始消息归一化成 {type: partial|final|metadata|error}。"""
         if self._ws is None:
             return
-        async for raw in self._ws:
+        async for raw in self._messages():
             try:
                 msg = json.loads(raw)
             except Exception:  # noqa: BLE001 - 非 JSON 忽略
@@ -169,6 +293,8 @@ class DeepgramStreamer:
             if kind == "Results":
                 alt = (msg.get("channel") or {}).get("alternatives") or [{}]
                 text = (alt[0].get("transcript") or "").strip()
+                if text and self._lease is not None:
+                    self._lease.mark_output_started()
                 if not text:
                     # 空结果也通知一次 metadata 进度
                     if msg.get("is_final"):
@@ -187,4 +313,5 @@ class DeepgramStreamer:
             elif kind == "Metadata":
                 yield {"type": "metadata"}
             elif kind == "Error":
-                yield {"type": "error", "message": str(msg.get("message") or "deepgram error")}
+                self._failure(StreamUnavailable("upstream error"), code="upstream_error")
+                yield {"type": "error", "message": "Deepgram transcription unavailable"}

@@ -239,6 +239,43 @@ async def test_after_turn_preserves_existing_memory(db):
     assert "past tense" in fact["language_profile"]["weaknesses"]
 
 
+async def test_after_turn_preserves_user_profile_fields(db):
+    """用户主动设置的性别/等级/沟通偏好不能被后台记忆整理清空。"""
+    db.update_profile(
+        fact_sheet={
+            "profile": {
+                "nickname": "Alex",
+                "city": "Shanghai",
+                "major_or_job": "student",
+                "routine": "night owl",
+                "gender": "female",
+                "level": "日常对话",
+            },
+            "interests": ["hiking"],
+            "language_profile": {"target": "en", "weaknesses": []},
+            "recent_events": [],
+            "communication_preference": "improve",
+        }
+    )
+    friend = make_friend(db)
+    add_turn(db, friend["id"], "I have an exam next week and I'm studying Python")
+
+    result = await MemoryManager(db, MockLLM()).after_turn(db.get_friend(friend["id"]))
+    assert result["updated"] is True
+
+    fact = db.get_profile()["fact_sheet"]
+    assert fact["profile"]["gender"] == "female"
+    assert fact["profile"]["level"] == "日常对话"
+    assert fact["communication_preference"] == "improve"
+
+    # 重复整理也不漂移（用户没改，后台就不该改）
+    await MemoryManager(db, MockLLM()).after_turn(db.get_friend(friend["id"]))
+    fact = db.get_profile()["fact_sheet"]
+    assert fact["profile"]["gender"] == "female"
+    assert fact["profile"]["level"] == "日常对话"
+    assert fact["communication_preference"] == "improve"
+
+
 async def test_after_turn_is_idempotent(db):
     friend = make_friend(db)
     add_turn(db, friend["id"], "I have a tech interview tomorrow")
@@ -409,6 +446,23 @@ async def test_followup_message_failure_uses_fallback(db):
     manager = MemoryManager(db, BrokenLLM())
     message = await manager.followup_message(friend, {"event": "技术面试", "status": "pending"})
     assert "interview" in message.lower()
+
+
+async def test_followup_keeps_chat_language_when_model_uses_english(db):
+    friend = make_friend(db, reply_language="zh")
+    llm = FakeJSONLLM({"message": "How did your interview go?"})
+    manager = MemoryManager(db, llm)
+    reply = await manager.followup_message(friend, {"event": "面试"})
+    assert reply == "你上次说的那件事，后来怎么样了？"
+    assert "Chinese" in llm.calls[0][0]["content"]
+
+
+def test_memory_omits_default_nickname_and_keeps_job():
+    from app.v2.memory import _format_fact_sheet
+
+    text = "\n".join(_format_fact_sheet({"profile": {"nickname": "Traveler", "major_or_job": "editor"}}))
+    assert "Traveler" not in text
+    assert "editor" in text
 
 # --------------------------------------------------------------------------- #
 # Lead 集成测试反馈：兜底提取覆盖 + 多轮合并 + interview loop 全链路

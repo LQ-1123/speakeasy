@@ -2,6 +2,7 @@ import { clientApi, currentClientIdentity, websocketUrl, type ClientBootstrap } 
 import { queryClient } from "../queryClient";
 import { AUTH_EXPIRED_EVENT, AUTH_LOGOUT_EVENT } from "./session";
 import { EventBatch } from "./eventBatch";
+import { reconnectDelay } from "../clientRefresh";
 
 export interface ClientEvent { id: string; sequence: number; type: string; is_read?: boolean; replay?: boolean; friend_id?: string; post_id?: string; payload?: Record<string, unknown> }
 
@@ -57,7 +58,7 @@ export function connectClientEvents(onEvent: (events: ClientEvent[]) => void, on
   const schedule = () => {
     if (stopped) return;
     window.clearTimeout(timer);
-    timer = window.setTimeout(() => void connect(), Math.min(20_000, 1000 * 2 ** attempts++));
+    timer = window.setTimeout(() => void connect(), reconnectDelay(attempts++));
   };
   const online = () => { socket?.close(); window.clearTimeout(timer); void connect(); };
   window.addEventListener("online", online);

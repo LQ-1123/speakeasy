@@ -41,7 +41,7 @@ def test_active_calls_block_background_claims(tmp_path):
 
 
 def test_async_dispatcher_awaits_handlers_and_yields_to_any_call(tmp_path):
-    db = sqlite3.connect(tmp_path / "jobs.sqlite")
+    db = sqlite3.connect(tmp_path / "jobs.sqlite", check_same_thread=False)
     queue = DurableJobQueue(db, lock=threading.RLock())
     job_id = queue.enqueue("daily", {}, dedupe_key="daily:async")
     seen = []

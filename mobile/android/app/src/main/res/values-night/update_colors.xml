@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="update_scrim">#D90B0A10</color>
+    <color name="update_surface">#FF1A1922</color>
+    <color name="update_ink">#FFF5F2FB</color>
+    <color name="update_muted">#FFA7A1B4</color>
+    <color name="update_brand">#FFB4B8F5</color>
+    <color name="update_brand_deep">#FF9A9FF0</color>
+    <color name="update_brand_soft">#FF2A2940</color>
+    <color name="update_track">#FF353242</color>
+    <color name="update_badge">#FF9EA3EE</color>
+    <color name="update_primary_bg">#FF5F65D1</color>
+    <color name="update_primary_ink">#FFFFFFFF</color>
+    <color name="update_secondary_bg">#FF262432</color>
+    <color name="update_secondary_ink">#FFEDEAF6</color>
+</resources>

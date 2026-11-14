@@ -112,6 +112,7 @@ def env(tmp_path, monkeypatch):
     )
     # 后台旁路（润色/记忆/表达本）与广告无关；直接关闭协程，避免测试里出现游离任务
     chat.spawn_bg = lambda coro: (coro.close(), None)[1]  # type: ignore[assignment]
+    chat._schedule_memory = lambda _: None  # memory is an unrelated side effect in this fixture
     yield SimpleNamespace(db=db, chat=chat, data_dir=tmp_path)
     db.close()
 

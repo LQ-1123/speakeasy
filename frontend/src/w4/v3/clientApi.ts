@@ -44,6 +44,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const clientApi = {
+  suggestMessage: (messageId: string) => request<{ message?: Record<string, unknown> }>(
+    `/api/v2/messages/${encodeURIComponent(messageId)}/suggestion`, { method: "POST", signal: AbortSignal.timeout(35_000) },
+  ),
+  retryAudio: (messageId: string) => request<{ message?: Record<string, unknown> }>(
+    `/api/v2/messages/${encodeURIComponent(messageId)}/audio/retry`, { method: "POST", signal: AbortSignal.timeout(35_000) },
+  ),
   bootstrap: () => request<ClientBootstrap>("/api/v3/client/bootstrap"),
   messages: (friendId: string, cursor?: string) => {
     const q = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";

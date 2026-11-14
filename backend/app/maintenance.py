@@ -1,14 +1,48 @@
-"""One durable maintenance worker; active calls preempt low-priority generation."""
+"""One durable maintenance worker; chat/calls pause each next provider request."""
 from __future__ import annotations
 
 import asyncio
 import os
 import time
 
-from app.jobs import DurableJobQueue
+from app.jobs import DurableJobQueue, background_scope, wait_for_background_capacity, run_db_thread
+from app.voice import fish_tts
 from app.logging_utils import get_logger
 
 log = get_logger(__name__)
+
+
+def foreground_busy(app, *, active_calls: int = 0) -> bool:
+    chat = getattr(app.state.v2, "chat", None)
+    admission = getattr(chat, "admission", None)
+    return bool(active_calls or getattr(admission, "busy", False))
+
+
+class PeriodicSchedule:
+    """Track due buckets locally and commit changed jobs together."""
+    def __init__(self) -> None:
+        self.slots: dict[str, str] = {}
+
+    def enqueue_due(self, queue: DurableJobQueue, *, now: float, day: str,
+                    rhythm: dict) -> int:
+        periods = {
+            "life_events": max(5.0, rhythm["life_tick_s"]),
+            "event_posts": max(60.0, rhythm["posts_tick_s"]),
+            "voice_readiness": 300, "audio_warm": 600, "cleanup": 3600,
+            "persona_dna": 3600, "followups": 60,
+        }
+        slots = {"daily_world": str(day),
+                 **{kind: str(int(now // period)) for kind, period in periods.items()}}
+        changed = {kind: slot for kind, slot in slots.items() if self.slots.get(kind) != slot}
+        if not changed:
+            return 0
+        queue.enqueue_many([
+            {"kind": kind, "payload": {"day": day}, "dedupe_key": f"{kind}:{slot}",
+             "priority": 120 if kind == "daily_world" else 110 if kind == "voice_readiness" else 200}
+            for kind, slot in changed.items()
+        ])
+        self.slots.update(changed)
+        return len(changed)
 
 
 async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> None:
@@ -29,6 +63,9 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
 
     db = app.state.v2.db
     media_dir = os.path.join(str(settings.data_path), "media")
+
+    def busy() -> bool:
+        return foreground_busy(app, active_calls=calls.REGISTRY.active_count())
 
     async def world_job(payload):
         lexicon.refresh()
@@ -85,8 +122,7 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
     async def audio_job(payload):
         cache = app.state.v3_audio
         for post in app.state.v3.recent_persona_posts(limit=3):
-            if calls.REGISTRY.active_count():
-                raise RuntimeError("maintenance_paused_for_call")
+            await wait_for_background_capacity()
             persona = app.state.v3.persona_by_id(post["persona_id"])
             if persona:
                 await cache.get_or_synth(post, persona)
@@ -100,6 +136,7 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
         await asyncio.to_thread(_ads.cleanup_audit, db)
         await asyncio.to_thread(enforce_cap,
             db_path=db.path, audio_dir=os.path.join(str(settings.data_path), "audio"), max_bytes=MAX_BYTES)
+        await asyncio.to_thread(queue.prune_periodic)
 
     async def posts_job(payload):
         # 节奏参数从词库读（保存即生效）。环境变量若设置仍优先，
@@ -120,7 +157,8 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
                 "call_memory": call_memory_job, "followups": followups_job,
                 "followup": lambda p: deliver_followup(app.state.v2,p)}
     boot = str(time.time_ns())
-    queue.enqueue("world", {}, dedupe_key=f"world:startup:{boot}", priority=100)
+    await run_db_thread(queue.enqueue, "world", {}, dedupe_key=f"world:startup:{boot}", priority=100)
+    schedule = PeriodicSchedule()
     running = None
     try:
         while True:
@@ -129,33 +167,15 @@ async def maintenance_loop(app, settings, engines, queue: DurableJobQueue) -> No
             # 每轮重新读节奏参数：运营在后台保存后**下一轮即生效**，无需重启。
             # （2026-11 前的实现直接读 os.getenv，导致这 4 个参数改了等于没改。）
             rhythm = lexicon.rhythm_params()
-            periods = {
-                "life_events": max(5.0, rhythm["life_tick_s"]),
-                "event_posts": max(60.0, rhythm["posts_tick_s"]),
-                "voice_readiness": 300, "audio_warm": 600, "cleanup": 3600,
-                "persona_dna": 3600, "followups": 60,
-            }
-            queue.enqueue("daily_world", {"day": day}, dedupe_key=f"daily_world:{day}", priority=120)
-            for kind, period in periods.items():
-                queue.enqueue(kind, {"day": day}, dedupe_key=f"{kind}:{int(now // period)}",
-                              priority=110 if kind == "voice_readiness" else 200)
-            if calls.REGISTRY.active_count():
+            await run_db_thread(schedule.enqueue_due, queue, now=now, day=day, rhythm=rhythm)
+            if busy():
                 await asyncio.sleep(1)
                 continue
-            running = asyncio.create_task(queue.run_one_async(handlers), name="maintenance-job")
-            while not running.done():
-                done, _ = await asyncio.wait({running}, timeout=0.25)
-                if done:
-                    break
-                if calls.REGISTRY.active_count():
-                    running.cancel()
-                    break
-            try:
-                worked = await running
-            except asyncio.CancelledError:
-                if asyncio.current_task().cancelling():
-                    raise
-                worked = False
+            with background_scope(busy), fish_tts.priority("background"):
+                running = asyncio.create_task(queue.run_one_async(handlers), name="maintenance-job")
+            # An in-flight paid request may finish. Each following provider call
+            # waits for foreground capacity, without consuming retries/attempts.
+            worked = await running
             running = None
             await asyncio.sleep(0.1 if worked else 1)
     finally:

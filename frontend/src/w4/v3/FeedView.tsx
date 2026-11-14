@@ -1,4 +1,6 @@
 "use client";
+import { CoalescedRefresh } from "../clientRefresh";
+import type { ClientEvent } from "./clientEvents";
 
 import { useShallow } from "zustand/react/shallow";
 
@@ -182,11 +184,16 @@ export function FeedView({
         /* 轮询失败静默 */
       }
     };
-    void tick();
-    const onEvent = () => void tick();
+    const refresh = new CoalescedRefresh(tick);
+    void refresh.run();
+    const onEvent = (raw: Event) => {
+      const events = (raw as CustomEvent<ClientEvent[]>).detail;
+      if (events?.some((event) => event.type === "social" || event.type === "friend_request")) void refresh.run();
+    };
     window.addEventListener("speakeasy:client-event", onEvent);
     return () => {
       alive = false;
+      refresh.stop();
       window.removeEventListener("speakeasy:client-event", onEvent);
     };
   }, [localMode, showToast]);

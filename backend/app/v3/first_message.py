@@ -17,8 +17,8 @@
 - **按人物分桶**：先用 ``ai_config.temperament`` / ``speech_dna`` / 性格关键词
   归到 outgoing / reserved / witty_sarcastic / warm / dry / playful / poetic，
   不同桶的模板完全不同，避免「12 个人一个开场」。
-- **语言干净**：en / zh 两套模板（其它语言回退 en）。中文模板里不放英文词，
-  英文模板里不放中日韩文字，防止把人物带跑到错误语言。
+- **语言干净**：支持产品的九种目标语言；中英文按风格分桶，其余语言有本地化开场。
+  开场没有当天事件上下文，因此不声称刚做过某事，也不预设和用户已有交情。
 - **水平低更短**：``level`` 命中「入门/初级/A1-A2/beginner」时用短句池。
 """
 
@@ -39,8 +39,8 @@ BUCKETS: tuple[str, ...] = (
     "poetic",
 )
 
-#: 支持的语言模板（其余语言回退 en，见模块 docstring）。
-SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh")
+#: 支持的语言模板。
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "zh", "ja", "ko", "pt", "es", "de", "fr", "it")
 
 #: 低水平关键词（英文小写 / 中文原样）。命中即用短句池。
 _LOW_LEVEL_TOKENS: tuple[str, ...] = (
@@ -49,189 +49,64 @@ _LOW_LEVEL_TOKENS: tuple[str, ...] = (
     "初级", "入门", "零基础", "刚开始", "不熟", "只会一点", "很难", "很差", "一点点",
 )
 
-#: 正常长度模板池。``{city}`` / ``{interest}`` 只在英文模板里出现。
-_TEMPLATES: dict[str, dict[str, tuple[str, ...]]] = {
-    "en": {
-        "outgoing": (
-            "Just got back from walking around {city}. The light was doing that late-afternoon thing. What's your day been like?",
-            "I'm at a café with a coffee going cold and a hundred things to do. What are you up to?",
-            "Quick, no-pressure question: {interest} — waste of time or actually good? I have opinions.",
-            "You caught me mid-something. I'm somewhere in {city}, slightly lost, and in the mood to talk. What's going on with you?",
-            "Say something interesting. I'm bored and {city} is suspiciously quiet today.",
-        ),
-        "reserved": (
-            "Not sure how to start these. I'm around {city} today, taking it slow. What about you?",
-            "I had a quiet morning. Still deciding whether that's a good thing. You?",
-            "I'm not much of a texter, so bear with me. What's your day like so far?",
-            "There's a cat outside my window and it's judging me. That's my news. Yours?",
-            "I'm here. Not doing anything exciting. You?",
-        ),
-        "witty_sarcastic": (
-            "I've been productively staring at a wall for ten minutes. How's your day going?",
-            "My plan for today was to be productive. Bold of me, honestly.",
-            "I'm around {city}, pretending I know where I'm going. You?",
-            "Small-talk time: what's the least boring thing that happened to you today?",
-            "I was told I should text first. So: here I am, being a person. You?",
-        ),
-        "warm": (
-            "I was just thinking about you — hope today's been kind. What's on your mind?",
-            "Just made tea and sat down. Perfect timing to hear how your day went.",
-            "You crossed my mind earlier. How are you holding up?",
-            "Spent the afternoon around {city} and saw something you'd like. Tell me about your day?",
-            "No agenda — just wanted to check in. How's your day going?",
-        ),
-        "dry": (
-            "Coffee. Then more coffee. That's the update. Yours?",
-            "Nothing to report. Which is usually when something happens. You?",
-            "I'm around {city}, avoiding responsibilities. What's your day doing?",
-            "Today has been a long sentence with no full stop. What about you?",
-            "I have one biscuit left and no plan. What's going on with you?",
-        ),
-        "playful": (
-            "Important: I found the best {interest} place near {city}. I'll tell you where if you ask nicely.",
-            "I'm on a quest for the best coffee in {city}. Current score: not great.",
-            "Quick question with no stakes: {interest} — yes or no? I have thoughts.",
-            "I did something slightly reckless today. Not telling you until you tell me about your day.",
-            "Reporting live from my sofa. Nothing is happening. It's great. You?",
-        ),
-        "poetic": (
-            "The light over {city} turned gold for about four minutes and everyone stopped looking at their phones. What did you see today?",
-            "I keep noticing small things today — steam off a cup, a dog waiting by a door. What stuck with you?",
-            "Rain all afternoon here. I don't mind it. What's your weather like, inside and out?",
-            "I walked home the long way and the city felt like it was holding its breath. What's new with you?",
-            "I was thinking how strange it is that we just talk in these little rectangles. Anyway. How's your day?",
-        ),
-    },
-    "zh": {
-        "outgoing": (
-            "刚在外面转了一圈回来，风有点凉。你今天怎么样？",
-            "我正在喝一杯凉掉的咖啡，突然想找人说说话。你在忙什么？",
-            "突然想起你，最近怎么样？",
-            "今天过得有点乱，想听听你的。",
-            "刚忙完一阵，脑子还在转。你今天顺利吗？",
-        ),
-        "reserved": (
-            "我不太会主动开口。今天有点安静，你呢？",
-            "刚从午睡里醒过来，还没想好要说什么。你今天过得怎么样？",
-            "窗外有只猫一直在看我。这就是今天的新鲜事，你的呢？",
-            "没什么特别的事，就是想找个人聊聊。你今天呢？",
-            "我在，今天挺安静的。你那边怎么样？",
-        ),
-        "witty_sarcastic": (
-            "我最近十分钟的成就，是认真盯着一面墙。你今天怎么样？",
-            "原本打算今天很有效率。想想而已。",
-            "先聊起来吧：你今天遇到最不无聊的事是什么？",
-            "有人说第一次开口要自然一点。那我来了。你怎么样？",
-            "今天的主要计划是发呆，目前执行得很顺利。你呢？",
-        ),
-        "warm": (
-            "刚泡了茶坐下来，正好想听听你今天怎么样。",
-            "今天想到你了，希望你还好。有没有什么想说的？",
-            "没什么事，就是确认一下你还好吗。",
-            "下午路过一条街，想如果你在应该会喜欢。你今天怎么样？",
-            "不用有压力，就是来问问你今天过得如何。",
-        ),
-        "dry": (
-            "咖啡，然后更多咖啡。这就是今天的情况。你呢？",
-            "今天没什么可报告的。通常这种时候会出事。你今天怎么样？",
-            "今天像一句没有句号的长句子。你那边呢？",
-            "我只有一块饼干和一堆没做完的事。你在忙什么？",
-            "没什么新闻。天气一般，人还在。你呢？",
-        ),
-        "playful": (
-            "紧急消息：我找到一家不错的咖啡。想听就好好问。",
-            "我来问一个没有压力的问题：咖啡还是茶？我有自己的答案。",
-            "今天做了一件有点冲动的事。先说说你的今天。",
-            "从我家的沙发发来现场报道：什么都没发生，很好。你呢？",
-            "刚发现一个新地方，正在犹豫要不要告诉你。你今天怎么样？",
-        ),
-        "poetic": (
-            "今天傍晚的光很好，整条街都安静了一会儿。你今天看到什么了？",
-            "今天老在注意小东西：杯口的热气、等在门口的狗。什么让你停了一下？",
-            "这边下了一下午的雨。我不讨厌。你那边呢？",
-            "我绕远路走回家，城市像屏住呼吸。你最近怎么样？",
-            "今天的云很低，走得也慢。你那边是什么样子？",
-        ),
-    },
-}
+# No event context is available here: avoid invented activities and prior intimacy.
+_TEMPLATES = {'en': {'outgoing': ["Hey, what have you been up to?",
+                     'Anything you feel like talking about?',
+                     "I'm curious what you like talking about once the small talk is out of the way."],
+        'reserved': ["Hey. Thought I'd say hello.",
+                     'We can skip the introductions if you want.',
+                     'No big opening line from me.'],
+        'witty_sarcastic': ['I was going to write a clever first message. This is what survived.',
+                            'Do we have to do the awkward introductions?',
+                            "I'm counting this as a perfectly adequate first message."],
+        'warm': ['Hey, nice to meet you.',
+                 "What's been on your mind lately?",
+                 'We can start wherever you like.'],
+        'dry': ["Hey. What's up?",
+                'So. Where do we start?',
+                "A first message. There, that's done."],
+        'playful': ["Hey, you get to pick what we talk about. I'm delegating.",
+                    'Should we skip straight past the awkward bit?',
+                    'Okay, first message sent. That was the hard part.'],
+        'poetic': ["Hey. No idea where to start, so here we are.",
+                   "What's something small you've noticed lately?",
+                   "We don't have to start with the big questions."]},
+ 'zh': {'outgoing': ['嗨，你最近在忙什么？', '有什么想聊的，随便说。', '比起自我介绍，我更想知道你平时爱聊什么。'],
+        'reserved': ['嗨，来打个招呼。', '不想自我介绍的话，直接聊也行。', '我好像想不出什么特别的开场白。'],
+        'witty_sarcastic': ['本来想了个很聪明的开场白，发出来就只剩这句了。', '客套的自我介绍可以跳过吗？', '这条就算合格的第一句话吧。'],
+        'warm': ['嗨，认识你很开心。', '你最近有没有什么想聊的？', '从哪儿聊起都行。'],
+        'dry': ['长篇自我介绍就省了。', '那，从哪儿开始？', '第一条消息，发完了。'],
+        'playful': ['开场话题交给你选，我先偷个懒。', '要不直接跳过尴尬的开场？', '第一条发出来了，最难的部分结束。'],
+        'poetic': ['一段聊天从一个空白的小框开始，还挺奇妙的。', '你最近注意到过什么很小的事吗？', '我们可以从很小的事聊起。']}}
 
-#: 低水平短句池：更短、更简单，不问复杂问题。
-_SHORT_TEMPLATES: dict[str, dict[str, tuple[str, ...]]] = {
-    "en": {
-        "outgoing": (
-            "What's your day like?",
-            "I just got back from a walk around {city}. You?",
-            "Say something. I'm bored.",
-        ),
-        "reserved": (
-            "I'm around. You?",
-            "Quiet day here. Your day?",
-            "Not much here. You?",
-        ),
-        "witty_sarcastic": (
-            "Productive wall-staring over here. You?",
-            "Nothing to report. Suspicious. You?",
-            "Coffee count: two. You?",
-        ),
-        "warm": (
-            "Just wanted to check in. You okay?",
-            "Made tea. How's your day?",
-            "Thought of you. What's up?",
-        ),
-        "dry": (
-            "Coffee. Work. Repeat. You?",
-            "Nothing much. You?",
-            "Long day here. Yours?",
-        ),
-        "playful": (
-            "I found good coffee. Ask me. You?",
-            "Busy or bored today?",
-            "Two coffees, zero plan. You?",
-        ),
-        "poetic": (
-            "Rain here. You?",
-            "This light is nice. Your day?",
-            "The city is quiet. You?",
-        ),
-    },
-    "zh": {
-        "outgoing": (
-            "刚回来。你今天怎么样？",
-            "在忙什么？",
-            "突然想找你聊两句。",
-        ),
-        "reserved": (
-            "今天挺安静的。你呢？",
-            "我还在。你怎么样？",
-            "没什么事。你那边呢？",
-        ),
-        "witty_sarcastic": (
-            "今天的主要成就是发呆。你呢？",
-            "没什么可报告的。你呢？",
-            "咖啡第二杯了。你怎么样？",
-        ),
-        "warm": (
-            "刚泡了茶，想问问你怎么样。",
-            "今天过得还好吗？",
-            "想到你，来说说话。",
-        ),
-        "dry": (
-            "咖啡、工作、重复。你呢？",
-            "今天一般。你那边呢？",
-            "没什么事。你怎么样？",
-        ),
-        "playful": (
-            "我找到一家好咖啡，想知道就问我。",
-            "今天忙还是无聊？",
-            "两杯咖啡，零计划。你呢？",
-        ),
-        "poetic": (
-            "这边在下雨。你那边呢？",
-            "今天的光很好看。你怎么样？",
-            "城市很安静。你最近怎么样？",
-        ),
-    },
-}
+_SHORT_TEMPLATES = {'en': {'outgoing': ["What's new?", 'You pick the topic.', "Let's talk."],
+        'reserved': ["I'm here.", 'Not sure where to start.', 'We can start small.'],
+        'witty_sarcastic': ['Well, this is a start.', 'One message. Done.', 'Here goes nothing.'],
+        'warm': ['Nice to meet you.', "What's on your mind?", 'Take your time.'],
+        'dry': ['So.', 'Where to start?', 'First message. Done.'],
+        'playful': ['You go first.', 'Your turn.', 'Okay, here goes.'],
+        'poetic': ['Start anywhere.', 'Small things count.', 'A few words is fine.']},
+ 'zh': {'outgoing': ['聊什么？', '你来选话题。', '聊两句吧。'],
+        'reserved': ['我在。', '先聊两句。', '慢慢聊吧。'],
+        'witty_sarcastic': ['这就算开场了。', '第一条，搞定。', '开场白省了。'],
+        'warm': ['认识你很开心。', '想聊什么？', '慢慢来。'],
+        'dry': ['那，开始吧。', '从哪儿聊起？', '第一条，发完。'],
+        'playful': ['你先说。', '轮到你了。', '好，开聊。'],
+        'poetic': ['从哪儿都行。', '小事也可以聊。', '几句话就好。']}}
+
+_LOCALIZED_OPENERS = {'ja': ['何から話そうか。', '気軽に話せたらいいな。', '最近、気になってることある？'],
+ 'ko': ['무슨 얘기부터 할까?', '편하게 얘기하자.', '요즘 관심 가는 거 있어?'],
+ 'pt': ['Por onde começamos?',
+        'Podemos conversar sem aquela apresentação toda.',
+        'O que tem chamado sua atenção?'],
+ 'es': ['¿Por dónde empezamos?', 'Podemos saltarnos las presentaciones.', '¿Qué te interesa últimamente?'],
+ 'de': ['Womit fangen wir an?',
+        'Die lange Vorstellung können wir uns sparen.',
+        'Was beschäftigt dich gerade?'],
+ 'fr': ['On commence par quoi ?',
+        'On peut sauter les grandes présentations.',
+        "Qu'est-ce qui t'intéresse en ce moment ?"],
+ 'it': ['Da dove cominciamo?', 'Possiamo saltare le presentazioni.', 'Cosa ti interessa in questo periodo?']}
 
 #: 用固定顺序的替换词表计算哈希（不用 Python hash()，跨进程稳定）。
 _SALT = "sonder-first-message-v1"
@@ -255,14 +130,14 @@ def _digest(*parts: Any) -> int:
 
 
 def _base_language(language: str) -> str:
-    """语言代码 → 模板语言（zh-* → zh，其余只保留 en，其它回退 en）。"""
+    """语言代码 → 模板语言。"""
     code = str(language or "").strip().lower().replace("_", "-")
     if not code:
         return "en"
     head = code.split("-")[0]
     if head == "zh" or head == "cn":
         return "zh"
-    return "en"
+    return head if head in SUPPORTED_LANGUAGES else "en"
 
 
 def _is_low_level(level: str) -> bool:
@@ -370,6 +245,8 @@ def _purify(text: str, language: str) -> str:
         return ""
     if language == "zh":
         return "".join(ch for ch in body if not ("a" <= ch.lower() <= "z"))
+    if language != "en":
+        return body
     # en：去掉 CJK / 假名 / 韩文
     out = []
     for ch in body:
@@ -381,9 +258,11 @@ def _purify(text: str, language: str) -> str:
 
 
 def _pool(persona: dict, language: str, level: str) -> tuple[str, ...]:
+    if language in _LOCALIZED_OPENERS:
+        return tuple(_LOCALIZED_OPENERS[language])
     bucket = persona_bucket(persona)
     source = _SHORT_TEMPLATES if _is_low_level(level) else _TEMPLATES
-    return source[language][bucket]
+    return tuple(source[language][bucket])
 
 
 def first_message_variants(
@@ -396,7 +275,7 @@ def first_message_variants(
 ) -> list[str]:
     """按人物桶返回 k 条不同的开场（确定性顺序，可直接给前端轮播/管理端对比）。
 
-    - ``language``：目标回复语言（en / zh 有模板，其它回退 en）；
+    - ``language``：目标回复语言（支持产品的九种目标语言）；
     - ``level``：学习者在该语言的水平，命中低水平词时用短句池；
     - ``seed``：额外扰动（同一人物想换一组开场时用），默认只由人物决定。
     """
@@ -435,7 +314,7 @@ def first_message(
 
 
 #: opening_style_line 里「不要这样开场」的示例（英文元指令用）。
-_NO_WELCOME = "Never a customer-service welcome (\"Hi! How are you?\") or a mini self-introduction."
+_NO_WELCOME = "No customer-service welcome or biography. A simple greeting is fine when they greet you."
 
 
 def opening_style_line(persona: dict, language: str) -> str:
@@ -451,14 +330,15 @@ def opening_style_line(persona: dict, language: str) -> str:
         "outgoing": "you start like someone glad to have a person to talk to",
         "reserved": "you start small and a little careful, never performatively friendly",
         "witty_sarcastic": "you start with a dry, slightly self-deprecating observation",
-        "warm": "you start by checking in on them, gently, with no agenda",
+        "warm": "you make room for them without presuming closeness or checking their feelings",
         "dry": "you start flat and factual, one short line, no sparkle",
         "playful": "you start with something light and slightly mischievous",
-        "poetic": "you start with a small concrete image you noticed today",
+        "poetic": "you notice their wording without inventing a scene or writing a poem",
     }[bucket]
-    parts = [f"You almost never open with a greeting: {flavor}.", _NO_WELCOME]
-    if lang not in SUPPORTED_LANGUAGES:
-        parts.append("Write that first line in your own language, not English.")
+    parts = [f"If an opening is needed, {flavor}.", _NO_WELCOME,
+             "Answer their message first; do not invent what you did today or imply you already know them."]
+    if lang != "en":
+        parts.append("Write that first line in the target language.")
     return " ".join(parts)
 
 

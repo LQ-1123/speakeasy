@@ -7,7 +7,8 @@ import { useShallow } from "zustand/react/shallow";
 import { useEffect, useRef, useState } from "react";
 import { Check, Play, X } from "lucide-react";
 
-import { playVoiceUrl, synthesizeVoice, ttsSampleUrl } from "../apiFacade";
+import { prefetchVoiceUrl } from "../apiFacade";
+import { resolveGreetingVoice } from "../greetingVoice";
 import type { Route } from "../model";
 import { useApp } from "../store";
 import { haptic } from "../../theme/haptics";
@@ -15,7 +16,7 @@ import { Avatar, Empty, Icon } from "../ui";
 import type { Friend } from "../model";
 
 export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
-  const { requests, acceptRequest, declineRequest } = useApp(useShallow((state) => ({ requests: state.requests, acceptRequest: state.acceptRequest, declineRequest: state.declineRequest })));
+  const { requests, acceptRequest, declineRequest, showToast } = useApp(useShallow((state) => ({ requests: state.requests, acceptRequest: state.acceptRequest, declineRequest: state.declineRequest, showToast: state.showToast })));
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /* 离开新的朋友页暂停预览 */
@@ -27,35 +28,18 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
     [],
   );
 
-  /* 预取：把每条申请的招呼语音提前加载好，点下去直接响 */
+  /* 预取：把每条申请的招呼语音提前取成 blob，点下去直接响。
+     不能只 `new Audio(url).load()`：签名过期/旧数据里 greeting_audio 缺失时，
+     浏览器原生 <audio> 无法带身份头，onerror 后只能用 /tts/sample 现场合成。 */
   useEffect(() => {
-    const warmed: HTMLAudioElement[] = [];
-    for (const r of requests) {
+    for (const r of requests.slice(0, 4)) {
       if (!r.greetingAudio) continue;
-      const a = new Audio(r.greetingAudio);
-      a.preload = "auto";
-      try {
-        a.load();
-      } catch {
-        /* 忽略 */
-      }
-      warmed.push(a);
+      void prefetchVoiceUrl(r.greetingAudio);
     }
-    return () => {
-      warmed.forEach((a) => {
-        try {
-          a.src = "";
-        } catch {
-          /* 忽略 */
-        }
-      });
-    };
   }, [requests]);
 
   /** 试听：有预生成的语音文件就直接播（即时）；没有才现场合成兜底 */
   const playPreview = (friend: Friend) => {
-    const src = friend.greetingAudio || (friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice, friend.id) : "");
-    if (!src) return;
     if (playingId === friend.id) {
       audioRef.current?.pause();
       audioRef.current = null;
@@ -63,23 +47,25 @@ export function RequestsPane({ navigate }: { navigate: (r: Route) => void }) {
       return;
     }
     audioRef.current?.pause();
-    const a = new Audio(src);
-    a.preload = "auto";
-    a.onended = () => setPlayingId(null);
-    a.onerror = () => {
-      // 预生成音频缺失（例如旧数据）→ 现场用 /tts/sample 合成
-      const fb = friend.greeting ? ttsSampleUrl(friend.greeting, friend.voice, friend.id) : "";
-      if (fb && !a.src.endsWith(fb)) {
-        a.src = fb;
-        a.play().then(() => setPlayingId(friend.id)).catch(() => setPlayingId(null));
+    setPlayingId(friend.id);
+    void (async () => {
+      /* 招呼语音：服务端已生成就直接用；只有在完全缺失/失效时才现场合成 */
+      const src = await resolveGreetingVoice(friend);
+      if (!src) {
+        setPlayingId(null);
+        showToast("招呼语音暂时无法播放，请点击重试", "error");
         return;
       }
-      setPlayingId(null);
-    };
-    audioRef.current = a;
-    a.play()
-      .then(() => setPlayingId(friend.id))
-      .catch(() => setPlayingId(null));
+      const a = new Audio(src);
+      audioRef.current = a;
+      a.onended = () => setPlayingId(null);
+      a.onerror = () => setPlayingId(null);
+      try {
+        await a.play();
+      } catch {
+        setPlayingId(null);
+      }
+    })();
   };
 
   return (

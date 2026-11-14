@@ -3,7 +3,7 @@
 # characters here would corrupt the parser.
 #
 # Usage:
-#   .\mobile\build-apk.ps1 -ApiBase http://47.104.24.236:8000            # cloud (default)
+#   .\mobile\build-apk.ps1 -ApiBase https://47-104-24-236.sslip.io       # cloud (default)
 #   .\mobile\build-apk.ps1 -ApiBase http://192.168.0.108:8000 -Mode debug # LAN test
 #   .\mobile\build-apk.ps1 -ApiBase http://127.0.0.1:8000 -AllowLocalhost # dev only
 #
@@ -30,6 +30,9 @@ if ($isLocal -and (-not $AllowLocalhost)) {
 }
 if ($ApiBase -notmatch "^https?://") { Fail "ApiBase must start with http(s)://, got: $ApiBase" }
 if ($Mode -eq "release" -and $ApiBase -notmatch "^https://") { Fail "Release API base must use HTTPS." }
+if ($Mode -eq "release" -and -not (Test-Path -LiteralPath "$Root/mobile/android/keystore.properties")) {
+    Fail "Release signing configuration is required; refusing debug-signing fallback."
+}
 
 Write-Host "==> 1/6 build frontend (NEXT_PUBLIC_API_BASE=$ApiBase)"
 Set-Location "$Root/frontend"

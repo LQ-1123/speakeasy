@@ -34,6 +34,7 @@ from app.v3.schema import (
 )
 from app.v3.avatar_style import ensure_avatar_options
 from app.v3.seed_data import PERSONAS, POSTS
+from app.v3.social_writing import PUBLIC_POST_STYLE, duplicate_post, post_text
 
 log = get_logger(__name__)
 
@@ -92,22 +93,27 @@ def _post_rows() -> list[tuple[str, str, list[str], list[str]]]:
 # --------------------------------------------------------------------------- #
 # LLM 世界生成
 # --------------------------------------------------------------------------- #
-_WORLD_PROMPT = """You are designing the AI cast of a language-learning social app.
-Create ONE fictional AI persona and 2 short social posts written in their voice.
+_WORLD_PROMPT = """Create ONE coherent fictional character and 2 recent public posts
+from that character's personal account. This is a shared social world.
 
 Rules:
-- The persona is clearly an AI character living a plausible daily life abroad.
+- The character has an ordinary daily life, not a generic cheerful helper personality.
+- Describe personality through concrete habits, preferences, boundaries and blind spots.
+  People can be reserved, blunt, distracted, serious or enthusiastic in different contexts.
+  Do not give everyone the same coffee/book/rain identity or constant dry humour.
 - **All fields and posts must be written in the persona's native language** (`language`).
   Examples: Korean persona -> Korean text; Italian persona -> Italian text.
-- Posts must sound like that exact person: hobbies, job, humour, city.
-- Each post <= 240 characters, first person, no hashtags.
+- Keep job, age, city/country, bio, interests and the experiences in posts consistent.
+- Each post <= 400 characters. Vary length, subject and form; avoid two matching punchlines.
+  The newest post comes first. Do not mention a time of day or today's weather without
+  supplied context. These posts establish the character's story, not real-world news.
 - interests: 3-4 lowercase english tags (e.g. coffee, running, books) for matching only.
 
 Output JSON only:
 {"nickname","bio","personality","interests":[...],"language":"en|ja|ko|de|es|it|pt|zh",
  "country","city","timezone","occupation","age","gender":"male|female",
  "posts":[{"content","tags":[...]}]}
-"""
+""" + "\n" + PUBLIC_POST_STYLE
 
 #: 语言 → 可用声线（保证文字与朗读同语言）
 _VOICE_BY_LANG: dict[str, list[str]] = {
@@ -185,10 +191,14 @@ def _insert_persona(db: Any, persona: dict, posts: list[dict]) -> int:
             ),
         )
         written = 0
+        seen: list[str] = []
         for index, post in enumerate(posts[:3]):
-            content = str(post.get("content") or "").strip()[:400]
-            if not content:
+            if not isinstance(post, dict):
                 continue
+            content = post_text(post.get("content"))
+            if not content or duplicate_post(content, seen):
+                continue
+            seen.append(content)
             post_id = f"pp_{uuid.uuid4().hex[:12]}"
             created = now - timedelta(hours=1 + index * 6 + (written % 5))
             db.conn.execute(

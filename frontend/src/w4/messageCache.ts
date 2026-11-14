@@ -52,6 +52,23 @@ export function mergeMessages(current: Message[], incoming: Message[], removeIds
       byId.delete(existingId);
     }
     const merged: Message = previous ? { ...previous, ...item } : { ...item };
+    /* 好友语音在服务端是「先落文字、后台补音频」：短轮询拿到音频前，同一条消息
+       会以 text 形态出现。这里把已经确认是语音的消息保留成语音气泡，避免
+       气泡先显示文字、过几秒才“变成”语音。 */
+    if (previous?.kind === "voice" && merged.kind === "text") {
+      merged.kind = "voice";
+    }
+    if (previous?.durationMs && !item.durationMs) {
+      merged.durationMs = previous.durationMs;
+    }
+    /* 音频补全后清掉「生成中」，避免到达后还显示等待态 */
+    if (merged.audio) {
+      delete merged.audioPending;
+    } else if (merged.audioStatus === "failed" || merged.audioStatus === "ready") {
+      merged.audioPending = false;
+    } else if (previous?.audioPending && item.audioPending === undefined) {
+      merged.audioPending = true;
+    }
     /* 服务端确认过 clientId 的消息不再处于失败态 */
     if (item.clientId) {
       byClientId.set(item.clientId, item.id);

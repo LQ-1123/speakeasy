@@ -1,47 +1,10 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { X } from "lucide-react";
+import "../styles/auth.css";
 import { normalizeEmail, validateEmail } from "./authFlow";
 import { AuthError, requestEmailCode, verifyEmailCode, type EmailCodeChallenge } from "./session";
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 42,
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid rgba(120,120,120,.28)",
-  background: "var(--w4-input-bg, rgba(127,127,127,.08))",
-  color: "inherit",
-  fontSize: 14,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 12,
-  opacity: 0.75,
-  marginBottom: 6,
-};
-
-const primaryStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 44,
-  borderRadius: 12,
-  border: "none",
-  background: "var(--accent, #4f7cff)",
-  color: "#fff",
-  fontSize: 15,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const linkStyle: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "var(--accent, #4f7cff)",
-  fontSize: 13,
-  cursor: "pointer",
-  padding: 0,
-};
 
 export function AuthScreen({ onClose, onAuthenticated }: { onClose?: () => void; onAuthenticated?: () => void }) {
   const [email, setEmail] = useState("");
@@ -92,19 +55,36 @@ export function AuthScreen({ onClose, onAuthenticated }: { onClose?: () => void;
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="邮箱登录" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(0,0,0,.42)" }}>
-      <div style={{ width: "min(420px, 100%)", borderRadius: 18, padding: "22px 22px 18px", background: "var(--w4-surface, #fff)", color: "var(--w4-fg, #111)", boxShadow: "0 24px 60px rgba(0,0,0,.28)" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}><strong>邮箱验证码登录</strong><span style={{ flex: 1 }} />{onClose ? <button type="button" onClick={onClose} style={linkStyle}>关闭</button> : null}</div>
-        <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-          <div><label htmlFor="auth-email" style={labelStyle}>邮箱</label><input id="auth-email" type="email" required autoComplete="email" placeholder="you@example.com" value={email} disabled={Boolean(challenge)} onChange={(e) => setEmail(e.target.value)} style={inputStyle} /></div>
+    <div className={`w4-root se-auth-screen${onClose ? " is-modal" : ""}`} role={onClose ? "dialog" : "main"} aria-modal={onClose ? true : undefined} aria-label="邮箱登录">
+      <div className="se-auth-panel">
+        <div className="se-auth-brand">
+          <span className="se-auth-wordmark">SONDER</span>
+          {onClose ? <button type="button" className="w4-icon-btn" onClick={onClose} aria-label="关闭"><X size={20} /></button> : null}
+        </div>
+        <h1 className="se-auth-title">邮箱验证码登录</h1>
+        <form onSubmit={submit} className="se-auth-form" aria-busy={busy}>
+          <div className="w4-field">
+            <label htmlFor="auth-email" className="w4-field-label">邮箱</label>
+            <input id="auth-email" className="w4-input" type="email" required autoComplete="email" placeholder="you@example.com" value={email} disabled={Boolean(challenge)} onChange={(e) => setEmail(e.target.value)} />
+          </div>
           {challenge ? <>
-            <div><label htmlFor="auth-code" style={labelStyle}>邮箱验证码（10 分钟内有效）</label><input id="auth-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setInviteRequired(false); }} style={inputStyle} /></div>
-            {inviteRequired ? <div><label htmlFor="auth-invite" style={labelStyle}>新账号邀请码（内测）</label><input id="auth-invite" autoComplete="off" value={invite} onChange={(e) => setInvite(e.target.value)} style={inputStyle} /><p style={{ fontSize: 12, opacity: .72 }}>验证码已通过。首次创建账号需要邀请码，填写后继续即可。</p></div> : null}
-            <div style={{ display: "flex", justifyContent: "space-between" }}><button type="button" disabled={busy || seconds > 0} onClick={() => void send()} style={linkStyle}>{seconds > 0 ? `${seconds} 秒后重发` : "重新发送验证码"}</button><button type="button" disabled={busy} onClick={() => { setChallenge(null); setInviteRequired(false); setError(""); }} style={linkStyle}>更换邮箱</button></div>
+            <div className="w4-field">
+              <label htmlFor="auth-code" className="w4-field-label">邮箱验证码（10 分钟内有效）</label>
+              <input id="auth-code" className="w4-input se-auth-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setInviteRequired(false); }} />
+            </div>
+            {inviteRequired ? <div className="w4-field">
+              <label htmlFor="auth-invite" className="w4-field-label">新账号邀请码（内测）</label>
+              <input id="auth-invite" className="w4-input" autoComplete="off" value={invite} onChange={(e) => setInvite(e.target.value)} />
+              <p className="w4-field-hint">验证码已通过。首次创建账号需要邀请码，填写后继续即可。</p>
+            </div> : null}
+            <div className="se-auth-actions">
+              <button type="button" className="w4-btn is-tonal" disabled={busy || seconds > 0} onClick={() => void send()}>{seconds > 0 ? `${seconds} 秒后重发` : "重新发送验证码"}</button>
+              <button type="button" className="w4-btn" disabled={busy} onClick={() => { setChallenge(null); setInviteRequired(false); setError(""); }}>更换邮箱</button>
+            </div>
           </> : null}
-          {error ? <div role="alert" style={{ color: "#d33", fontSize: 13 }}>{error}</div> : null}
-          <button type="submit" disabled={busy || (!challenge && seconds > 0)} style={primaryStyle}>{busy ? "处理中…" : challenge ? inviteRequired ? "创建账号并登录" : "验证并登录" : seconds > 0 ? `${seconds} 秒后重试` : "发送验证码"}</button>
-          <p style={{ margin: 0, fontSize: 12, opacity: .7, lineHeight: 1.5 }}>登录后保存你的聊天、表达和人物关系。已有账号直接登录，新账号在验证邮箱后填写邀请码。</p>
+          {error ? <div role="alert" className="se-auth-error">{error}</div> : null}
+          <button type="submit" className="w4-btn is-primary se-auth-submit" disabled={busy || (!challenge && seconds > 0)}>{busy ? "处理中…" : challenge ? inviteRequired ? "创建账号并登录" : "验证并登录" : seconds > 0 ? `${seconds} 秒后重试` : "发送验证码"}</button>
+          <p className="w4-field-hint se-auth-note">登录后保存你的聊天、表达和人物关系。已有账号直接登录，新账号在验证邮箱后填写邀请码。</p>
         </form>
       </div>
     </div>

@@ -238,6 +238,14 @@ function mapMessage(raw: RawMessage, fallbackFriend: string): Message | null {
   if (raw.client_message_id) mapped.clientId = String(raw.client_message_id);
   if (typeof raw.duration_ms === "number") mapped.durationMs = raw.duration_ms;
   if (raw.audio_url) mapped.audio = mediaUrl(String(raw.audio_url));
+  /* 好友语音已落库但音频还没补全（服务端延后合成）：显示语音气泡而不是文字 */
+  if (["queued", "generating", "ready", "failed"].includes(String(raw.audio_status))) {
+    mapped.audioStatus = raw.audio_status as Message["audioStatus"];
+  }
+  mapped.audioError = raw.audio_error ? String(raw.audio_error) : undefined;
+  if (kind === "voice" && sender !== "user") {
+    mapped.audioPending = !mapped.audio && mapped.audioStatus !== "failed" && mapped.audioStatus !== "ready";
+  }
   if (raw.image_url) mapped.image = mediaUrl(String(raw.image_url));
   if (raw.suggestion) {
     const rawSug = raw.suggestion as unknown;
@@ -372,6 +380,16 @@ export async function fetchMessages(friendId: string, before?: string): Promise<
   return (r.messages ?? [])
     .map((m) => mapMessage(m, friendId))
     .filter((m): m is Message => m !== null);
+}
+
+export async function retryMessageAudio(messageId: string, friendId: string): Promise<Message | null> {
+  const result = await clientApi.retryAudio(messageId);
+  return result?.message ? mapMessage(result.message, friendId) : null;
+}
+
+export async function requestMessageSuggestion(messageId: string, friendId: string): Promise<Message | null> {
+  const result = await clientApi.suggestMessage(messageId);
+  return result?.message ? mapMessage(result.message, friendId) : null;
 }
 
 /** 翻译一条 */

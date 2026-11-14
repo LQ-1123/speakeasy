@@ -1,0 +1,112 @@
+.se-auth-screen {
+  display: flex;
+  padding: calc(var(--space-6) + var(--safe-top)) var(--space-4) calc(var(--space-6) + var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.se-auth-screen.is-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: var(--scrim);
+}
+
+.se-auth-panel {
+  flex: none;
+  width: min(440px, 100%);
+  margin: auto;
+  padding: var(--space-7);
+  border: 1px solid var(--material-hairline);
+  border-radius: var(--shape-2xl);
+  background: var(--md-surface);
+  box-shadow: var(--shadow-1);
+  animation: se-fade-in var(--dur-base) var(--ease-standard);
+}
+
+.se-auth-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.se-auth-wordmark {
+  color: var(--md-primary);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.24em;
+  line-height: var(--leading-tight);
+}
+
+.se-auth-title {
+  margin: 0 0 var(--space-6);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+}
+
+.se-auth-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.se-auth-form .w4-input {
+  min-width: 0;
+}
+
+.se-auth-form .w4-input:disabled {
+  color: var(--md-on-surface-variant);
+  opacity: 0.7;
+}
+
+.se-auth-code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.24em;
+}
+
+.se-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.se-auth-error {
+  color: var(--md-error);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.se-auth-submit {
+  width: 100%;
+}
+
+.se-auth-form p {
+  margin: 0;
+}
+
+.se-auth-note {
+  padding-top: var(--space-2);
+}
+
+.se-auth-status {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-5);
+  text-align: center;
+  color: var(--md-on-surface-variant);
+}
+
+.se-auth-status p {
+  margin: 0;
+}
+
+@media (max-width: 479px) {
+  .se-auth-panel {
+    padding: var(--space-6);
+  }
+}

@@ -1291,7 +1291,10 @@ def example_block(rows: Any, *, language: str, max_chars: int = 700) -> str:
     lang = str(language or "").strip().lower()
     if lang:
         items.sort(key=lambda item: 0 if item["language"] == lang else 1)
-    header = "[Example voice references — imitate the VOICE, never copy the lines]"
+    header = (
+        "[Example voice references — imitate the VOICE, never copy the lines]\n"
+        "Invented demonstrations, not memories or facts. Don't borrow their events or relationships."
+    )
     parts = [header]
     for idx, item in enumerate(items, start=1):
         parts.append(f"{idx}. scene={item['scene']}")

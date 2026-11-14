@@ -664,66 +664,16 @@ def rebuild_preview(db: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # 动态素材（本地语言模板 + 种子语料，不调 LLM）
 # --------------------------------------------------------------------------- #
-_POST_BANK_CACHE: dict[str, list[str]] = {}
+def _post_bank(language: str, *, source_posts: list | None = None) -> list[str]:
+    """Only accept drafts created together with this persona; language is not ownership."""
+    from app.v3.social_writing import duplicate_post, post_text  # noqa: PLC0415
 
-
-def _seed_posts_by_language() -> dict[str, list[str]]:
-    try:
-        from app.v3.seed_data import PERSONAS, POSTS  # noqa: PLC0415
-
-        lang_by_pid = {str(p.get("id")): str(p.get("language") or "").lower() for p in PERSONAS}
-        out: dict[str, list[str]] = {}
-        for item in POSTS:
-            try:
-                pid, content = str(item[0]), str(item[1]).strip()
-            except (IndexError, TypeError):
-                continue
-            lang = lang_by_pid.get(pid, "")
-            if content and lang:
-                out.setdefault(lang, []).append(content)
-        return out
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _post_bank(language: str) -> list[str]:
-    """每种语言的一批候选动态：生活模板 + 兜底人设文案 + 种子语料。"""
-    from app.v3 import daily_world  # noqa: PLC0415
-
-    lang = language if language in daily_world._FALLBACK_LANG else "en"  # noqa: SLF001
-    if lang in _POST_BANK_CACHE:
-        return _POST_BANK_CACHE[lang]
     bank: list[str] = []
-    try:
-        from app.v3.life_posts import _FALLBACK_LIFE, _fallback as _lp_fallback  # noqa: PLC0415
-
-        if lang in _FALLBACK_LIFE:
-            for seed in ("a", "b", "c", "d"):
-                text = str(_lp_fallback(_FALLBACK_LIFE, lang, seed) or "").strip()
-                if text:
-                    bank.append(text)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        spec = daily_world._FALLBACK_LANG.get(lang, {})  # noqa: SLF001
-        for raw in spec.get("posts") or []:
-            text = str(raw.get("content") if isinstance(raw, dict) else raw or "").strip()
-            if text:
-                bank.append(text)
-    except Exception:  # noqa: BLE001
-        pass
-    for text in _seed_posts_by_language().get(lang, []):
-        if text:
-            bank.append(text)
-    seen: set[str] = set()
-    unique: list[str] = []
-    for text in bank:
-        if text in seen:
-            continue
-        seen.add(text)
-        unique.append(text)
-    _POST_BANK_CACHE[lang] = unique
-    return unique
+    for raw in source_posts or []:
+        content = post_text(raw.get("content") if isinstance(raw, dict) else raw)
+        if content and not duplicate_post(content, bank):
+            bank.append(content)
+    return bank
 
 
 def _media_data_dir() -> str:
@@ -852,19 +802,18 @@ def _insert_varied_posts(
     *,
     count: int = 5,
     now: datetime | None = None,
+    source_posts: list | None = None,
 ) -> int:
-    """给一个角色插入 N 条动态：内容按语言素材库随机、时间错峰；约 1/3 带图。"""
-    bank = _post_bank(language)
+    """只写入与这个新人物一同创建的草稿，不借用别人的人生或图库作亲历。"""
+    bank = _post_bank(language, source_posts=source_posts)
     if not bank:
         return 0
-    images = _media_bank(db)
     rng = random.Random(f"{persona_id}:{time.time_ns()}")
     posts = list(bank)
     rng.shuffle(posts)
     take = posts[: min(max(1, count), len(posts))]
     base = now or datetime.now(timezone.utc)
     inserted = 0
-    used_images: set[str] = set()
     with db._lock, db.conn:  # noqa: SLF001
         for idx, content in enumerate(take):
             created = base - timedelta(minutes=rng.randint(35, 4000) + idx * 11)
@@ -872,13 +821,6 @@ def _insert_varied_posts(
             alt_text = ""
             post_kind = "life_text"
             source_ref: dict[str, Any] = {}
-            image = _match_image_for_text(content, images, used_images) if idx % 3 == 0 else None
-            if image is not None:
-                used_images.add(image["path"])
-                media = [image["path"]]
-                alt_text = image["alt"]
-                post_kind = "life_photo"
-                source_ref = {"kind": "stock_photo", **image["credit"]}
             db.conn.execute(
                 "INSERT INTO persona_posts (id, persona_id, content, media, tags, language,"
                 " visibility, like_count, comment_count, created_at, expires_at,"
@@ -1044,7 +986,7 @@ def _create_bulk(
                 f"INSERT INTO personas ({columns}) VALUES ({marks})",
                 list(persona.values()),
             )
-        _insert_varied_posts(db, pid, lang, count=5, now=now)
+        _insert_varied_posts(db, pid, lang, count=5, now=now, source_posts=base.get("posts") or [])
         created_ids.append(pid)
     return created_ids
 
@@ -1177,16 +1119,17 @@ async def _llm_caption(llm: Any, persona: dict[str, Any], image: dict[str, Any])
     """让 LLM 按图片内容（标题/标签）用人物母语写一句配图文案。"""
     from app.v3 import life_posts as lp  # noqa: PLC0415
 
-    facts = lp._persona_facts(persona)  # noqa: SLF001
-    prompt = lp._IMAGE_PROMPT.format(  # noqa: SLF001
-        persona=json.dumps(facts, ensure_ascii=False),
-        title=str(image.get("title") or "(none)"),
-        tags=", ".join(str(t) for t in (image.get("tags") or [])[:8]) or "(none)",
-        language=str(persona.get("language") or "en"),
+    tags = image.get("tags") or []
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except ValueError:
+            tags = []
+    data = await lp.image_caption(
+        llm, persona, title=str(image.get("title") or ""),
+        tags=[str(t) for t in tags] if isinstance(tags, list) else [], recent=[],
     )
-    data = await lp._llm_json(llm, [{"role": "user", "content": prompt}], max_tokens=220)  # noqa: SLF001
-    text = str(data.get("content") or "").strip()
-    return text[:400]
+    return str(data.get("content") or "")
 
 
 async def rematch_media(db: Any, llm: Any, *, limit: int = 20) -> dict[str, Any]:
@@ -1585,54 +1528,32 @@ def redistribute_voices(db: Any, service: Any) -> dict[str, Any]:
 
 
 def regenerate_posts(db: Any, service: Any, *, per_persona: int = 5) -> dict[str, Any]:
-    """重建全部角色的动态：每人 N 条，内容按语言素材库随机、时间错峰。"""
-    with db._lock:  # noqa: SLF001
-        rows = [
-            dict(r)
-            for r in db.conn.execute(
-                "SELECT id, language FROM personas WHERE status='active'"
-            ).fetchall()
-        ]
-        for row in rows:
-            try:
-                db.conn.execute(
-                    "DELETE FROM persona_post_likes WHERE post_id IN"
-                    " (SELECT id FROM persona_posts WHERE persona_id=?)",
-                    (row["id"],),
-                )
-                db.conn.execute(
-                    "DELETE FROM persona_post_comments WHERE post_id IN"
-                    " (SELECT id FROM persona_posts WHERE persona_id=?)",
-                    (row["id"],),
-                )
-                db.conn.execute("DELETE FROM persona_posts WHERE persona_id=?", (row["id"],))
-            except sqlite3.Error:
-                pass
-    total = 0
-    per: list[dict[str, Any]] = []
-    for row in rows:
-        inserted = _insert_varied_posts(
-            db, str(row["id"]), str(row.get("language") or "en"), count=per_persona
-        )
-        total += inserted
-        per.append({"id": row["id"], "posts": inserted})
-    with_media = 0
-    try:
-        with db._lock:  # noqa: SLF001
-            with_media = int(
-                db.conn.execute(
-                    "SELECT COUNT(*) FROM persona_posts WHERE media<>'[]' AND media<>''"
-                ).fetchone()[0]
-            )
-    except sqlite3.Error:
-        pass
+    """Preserve existing posts: this synchronous action has no source-grounded generator.
+
+    A shared language does not make another persona's anecdotes reusable. Fresh
+    posts come from the event pipeline or explicit author-specific drafts.
+    """
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT p.id, COUNT(pp.id) AS posts FROM personas p"
+            " LEFT JOIN persona_posts pp ON pp.persona_id=p.id"
+            " WHERE p.status='active' GROUP BY p.id"
+        ).fetchall()
+        with_media = int(db.conn.execute(
+            "SELECT COUNT(*) FROM persona_posts WHERE media<>'[]' AND media<>''"
+        ).fetchone()[0])
+    preserved = sum(int(row["posts"]) for row in rows)
     invalidate(service)
     return {
         "ok": True,
         "personas": len(rows),
-        "posts": total,
+        "posts": 0,
         "posts_with_media": with_media,
         "per_persona": per_persona,
+        "preserved_posts": preserved,
+        "skipped_personas": len(rows),
+        "reason": "source_grounded_generation_required",
+        "message": "已保留现有动态和互动。新动态请通过生活事件生成，或为该人物单独提供文案。",
     }
 
 

@@ -110,4 +110,7 @@ def archive_users(db: Any, user_ids: list[str], *, migration_id: str,
                 if owner in selected:
                     db.conn.execute("UPDATE background_jobs SET status='cancelled',lease_until=0,updated_at=?,last_error='identity_archived' WHERE id=?",
                                     (time.time(), job["id"]))
+    # Sleeping event sockets re-check their (now revoked) session right away.
+    from app.v3 import wakeups
+    wakeups.notify(ids)
     return {"archived": archived, "selected": len(ids)}

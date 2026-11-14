@@ -1,0 +1,404 @@
+{
+  "date": "2026-11-14",
+  "environment": "Local Windows / Python 3.14; not resource-limited 2C2G Linux",
+  "external_provider_spend": 0,
+  "production_acceptance": false,
+  "scenarios": [
+    {
+      "label": "final-arrival100",
+      "users": 100,
+      "mode": "arrival",
+      "provenance": {
+        "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+        "dirty": true,
+        "source_sha256": "2bc82419acd8ad980577058df9b4dc7652e63bb0733872007883205f7da9d953",
+        "source_files": 1082
+      },
+      "configuration": {
+        "max_inflight": 100,
+        "audio_deadline_s": 30,
+        "events": true,
+        "keepalive": true,
+        "warmup_s": 0.25,
+        "drain_timeout_s": 35,
+        "server": {
+          "fake_only": true,
+          "external_provider_budget": 0,
+          "threadpool_workers": 0,
+          "cpu_emulation": false,
+          "no_maintenance": true,
+          "admission": {
+            "accepted": 100,
+            "rejected": 0,
+            "timeouts": 0,
+            "completed": 100,
+            "active": 0,
+            "waiting": 0,
+            "limit": 10,
+            "queue_limit": 20,
+            "deadline_s": 30.0
+          },
+          "usage_budget": {
+            "daily_requests": 100,
+            "monthly_requests": 100,
+            "daily_limit": 0,
+            "monthly_limit": 0
+          }
+        },
+        "fake": true
+      },
+      "offering_duration_s": 30.0047,
+      "drain_s": 0.0942,
+      "counts": {
+        "arrivals.offered": 100,
+        "arrivals.started": 100,
+        "events.received": 101,
+        "http.requests": 499,
+        "net.audio_bytes": 39844350,
+        "net.bytes_down": 43419449,
+        "text_turn.ok": 100,
+        "turns.audio_within_deadline": 100,
+        "turns.completed": 100,
+        "turns.offered": 100,
+        "turns.playable_audio": 100
+      },
+      "rates": {
+        "turns_per_s": 3.322,
+        "actual_offered_per_s": 3.333,
+        "completed_per_s_including_drain": 3.322,
+        "http_rps": 16.58,
+        "down_kbps": 11540.5,
+        "up_kbps": 0.0,
+        "cpu_ms_per_turn": 49.22
+      },
+      "time_to_playable_ms": {
+        "n": 100,
+        "p50": 448.1,
+        "p95": 578.3,
+        "p99": 981.8,
+        "max": 981.8
+      },
+      "resources": {
+        "scope": "owned backend + fake upstream process trees; load generator excluded",
+        "peak_process_tree_rss_bytes": 307982336,
+        "sampled_duration_s": 30.889396400016267,
+        "process_tree_cpu_s": 6.15625,
+        "process_tree_cores_used": 0.1992997830154026,
+        "host_cpu_s": 108.3125,
+        "host_cores_used": 3.506462172240535
+      }
+    },
+    {
+      "label": "final-slow100",
+      "users": 100,
+      "mode": "arrival",
+      "provenance": {
+        "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+        "dirty": true,
+        "source_sha256": "1a28c36bb9b707ef7cdae8bb62b504bd73abf21adf561c4e64f60f8deadd3f02",
+        "source_files": 1081
+      },
+      "configuration": {
+        "max_inflight": 100,
+        "audio_deadline_s": 30,
+        "events": true,
+        "keepalive": true,
+        "warmup_s": 0.25,
+        "drain_timeout_s": 35,
+        "server": {
+          "fake_only": true,
+          "external_provider_budget": 0,
+          "threadpool_workers": 0,
+          "cpu_emulation": false,
+          "no_maintenance": true,
+          "admission": {
+            "accepted": 75,
+            "rejected": 25,
+            "timeouts": 0,
+            "completed": 75,
+            "active": 0,
+            "waiting": 0,
+            "limit": 10,
+            "queue_limit": 20,
+            "deadline_s": 30.0
+          },
+          "usage_budget": {
+            "daily_requests": 75,
+            "monthly_requests": 75,
+            "daily_limit": 0,
+            "monthly_limit": 0
+          }
+        },
+        "fake": true,
+        "fake_upstream": {
+          "host": "127.0.0.1",
+          "port": 10254,
+          "llm_ttft": 0.01,
+          "llm_tps": 2000.0,
+          "llm_json_latency": 0.01,
+          "fish_base": 3.0,
+          "fish_per_char": 0.0,
+          "fish_concurrency": 20,
+          "llm_429_every": 0,
+          "llm_error_every": 0,
+          "llm_slow_every": 0,
+          "llm_slow_seconds": 5,
+          "stt_latency": 0.4
+        }
+      },
+      "offering_duration_s": 30.0147,
+      "drain_s": 16.9108,
+      "counts": {
+        "arrivals.offered": 100,
+        "arrivals.started": 100,
+        "events.received": 150,
+        "http.requests": 549,
+        "net.audio_bytes": 29945662,
+        "net.bytes_down": 34495811,
+        "text_turn.http_429": 25,
+        "text_turn.ok": 75,
+        "turns.audio_within_deadline": 75,
+        "turns.completed": 75,
+        "turns.offered": 100,
+        "turns.playable_audio": 75,
+        "turns.rejected": 25
+      },
+      "rates": {
+        "turns_per_s": 1.598,
+        "actual_offered_per_s": 3.332,
+        "completed_per_s_including_drain": 1.598,
+        "http_rps": 11.7,
+        "down_kbps": 5880.9,
+        "up_kbps": 0.0,
+        "cpu_ms_per_turn": 44.17
+      },
+      "time_to_playable_ms": {
+        "n": 75,
+        "p50": 14117.9,
+        "p95": 18022.4,
+        "p99": 18080.4,
+        "max": 18080.4
+      },
+      "resources": {
+        "scope": "owned backend + fake upstream process trees; load generator excluded",
+        "peak_process_tree_rss_bytes": 300838912,
+        "sampled_duration_s": 47.93030710000312,
+        "process_tree_cpu_s": 4.078125,
+        "process_tree_cores_used": 0.08508447466216494,
+        "host_cpu_s": 108.43749999953434,
+        "host_cores_used": 2.2623994411988084
+      }
+    },
+    {
+      "label": "final-burst100",
+      "users": 100,
+      "mode": "burst",
+      "provenance": {
+        "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+        "dirty": true,
+        "source_sha256": "1a28c36bb9b707ef7cdae8bb62b504bd73abf21adf561c4e64f60f8deadd3f02",
+        "source_files": 1081
+      },
+      "configuration": {
+        "max_inflight": 100,
+        "audio_deadline_s": 30,
+        "events": true,
+        "keepalive": true,
+        "warmup_s": 0.25,
+        "drain_timeout_s": 35,
+        "server": {
+          "fake_only": true,
+          "external_provider_budget": 0,
+          "threadpool_workers": 0,
+          "cpu_emulation": false,
+          "no_maintenance": true,
+          "admission": {
+            "accepted": 30,
+            "rejected": 70,
+            "timeouts": 0,
+            "completed": 30,
+            "active": 0,
+            "waiting": 0,
+            "limit": 10,
+            "queue_limit": 20,
+            "deadline_s": 30.0
+          },
+          "usage_budget": {
+            "daily_requests": 30,
+            "monthly_requests": 30,
+            "daily_limit": 0,
+            "monthly_limit": 0
+          }
+        },
+        "fake": true,
+        "fake_upstream": {
+          "host": "127.0.0.1",
+          "port": 10258,
+          "llm_ttft": 0.01,
+          "llm_tps": 2000.0,
+          "llm_json_latency": 0.01,
+          "fish_base": 0.01,
+          "fish_per_char": 0.0,
+          "fish_concurrency": 20,
+          "llm_429_every": 0,
+          "llm_error_every": 0,
+          "llm_slow_every": 0,
+          "llm_slow_seconds": 5,
+          "stt_latency": 0.4
+        }
+      },
+      "offering_duration_s": 1.0036,
+      "drain_s": 0.8591,
+      "counts": {
+        "arrivals.offered": 100,
+        "arrivals.started": 100,
+        "events.received": 30,
+        "http.requests": 214,
+        "net.audio_bytes": 12020506,
+        "net.bytes_down": 12987663,
+        "text_turn.http_429": 70,
+        "text_turn.ok": 30,
+        "turns.audio_within_deadline": 30,
+        "turns.completed": 30,
+        "turns.offered": 100,
+        "turns.playable_audio": 30,
+        "turns.rejected": 70
+      },
+      "rates": {
+        "turns_per_s": 16.105,
+        "actual_offered_per_s": 99.646,
+        "completed_per_s_including_drain": 16.105,
+        "http_rps": 114.88,
+        "down_kbps": 55778.8,
+        "up_kbps": 0.0,
+        "cpu_ms_per_turn": 42.71
+      },
+      "time_to_playable_ms": {
+        "n": 30,
+        "p50": 1494.3,
+        "p95": 1792.6,
+        "p99": 1808.4,
+        "max": 1808.4
+      },
+      "resources": {
+        "scope": "owned backend + fake upstream process trees; load generator excluded",
+        "peak_process_tree_rss_bytes": 278061056,
+        "sampled_duration_s": 2.650277400010964,
+        "process_tree_cpu_s": 1.71875,
+        "process_tree_cores_used": 0.6485170193855517,
+        "host_cpu_s": 12.28125,
+        "host_cores_used": 4.633948883973124
+      }
+    },
+    {
+      "label": "verified-final100-maintenance-on",
+      "users": 100,
+      "mode": "arrival",
+      "provenance": {
+        "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+        "dirty": true,
+        "source_sha256": "4bda0d030f3cbba7e1da0fd56a08c89d81cda0d61309128b97f8012daf7bef61",
+        "source_files": 1081
+      },
+      "configuration": {
+        "max_inflight": 100,
+        "audio_deadline_s": 30,
+        "events": true,
+        "keepalive": true,
+        "warmup_s": 0.25,
+        "drain_timeout_s": 35,
+        "server": {
+          "fake_only": true,
+          "external_provider_budget": 0,
+          "threadpool_workers": 0,
+          "cpu_emulation": false,
+          "no_maintenance": false,
+          "admission": {
+            "accepted": 100,
+            "rejected": 0,
+            "timeouts": 0,
+            "completed": 100,
+            "active": 0,
+            "waiting": 0,
+            "limit": 10,
+            "queue_limit": 20,
+            "deadline_s": 30.0
+          },
+          "usage_budget": {
+            "daily_requests": 135,
+            "monthly_requests": 135,
+            "daily_limit": 0,
+            "monthly_limit": 0
+          }
+        },
+        "fake": true,
+        "fake_upstream": {
+          "host": "127.0.0.1",
+          "port": 6922,
+          "llm_ttft": 0.01,
+          "llm_tps": 2000.0,
+          "llm_json_latency": 0.01,
+          "fish_base": 0.01,
+          "fish_per_char": 0.0,
+          "fish_concurrency": 5,
+          "llm_429_every": 0,
+          "llm_error_every": 0,
+          "llm_slow_every": 0,
+          "llm_slow_seconds": 5,
+          "stt_latency": 0.4
+        }
+      },
+      "offering_duration_s": 30.0157,
+      "drain_s": 0.1374,
+      "counts": {
+        "arrivals.offered": 100,
+        "arrivals.started": 100,
+        "events.received": 100,
+        "http.requests": 499,
+        "net.audio_bytes": 39844350,
+        "net.bytes_down": 43434209,
+        "text_turn.ok": 100,
+        "turns.audio_within_deadline": 100,
+        "turns.completed": 100,
+        "turns.offered": 100,
+        "turns.playable_audio": 100
+      },
+      "rates": {
+        "turns_per_s": 3.316,
+        "actual_offered_per_s": 3.332,
+        "completed_per_s_including_drain": 3.316,
+        "http_rps": 16.55,
+        "down_kbps": 11523.7,
+        "up_kbps": 0.0,
+        "cpu_ms_per_turn": 45.62
+      },
+      "time_to_playable_ms": {
+        "n": 100,
+        "p50": 447.1,
+        "p95": 569.9,
+        "p99": 619.1,
+        "max": 619.1
+      },
+      "resources": {
+        "scope": "owned backend + fake upstream process trees; load generator excluded",
+        "peak_process_tree_rss_bytes": 324005888,
+        "sampled_duration_s": 31.58498270000564,
+        "process_tree_cpu_s": 6.390625,
+        "process_tree_cores_used": 0.2023311223785745,
+        "host_cpu_s": 102.296875,
+        "host_cores_used": 3.2387820494193824
+      }
+    }
+  ],
+  "verification": {
+    "backend_passed": 1445,
+    "backend_skipped": 1,
+    "backend_skip_reason": "optional real ffmpeg integration unavailable locally",
+    "frontend_passed": 183,
+    "frontend_typecheck": "passed",
+    "production_static_build": "passed and copied to backend",
+    "independent_review": "no blockers remain",
+    "nginx_runtime_test": "not available locally",
+    "deployment": "not performed"
+  }
+}

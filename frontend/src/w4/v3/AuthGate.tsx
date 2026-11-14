@@ -49,5 +49,15 @@ export function AuthGate({ children, preview = false }: { children?: ReactNode; 
   }, [retry, preview]);
   if (status === "ready") return <>{children}</>;
   if (status === "login") return <AuthScreen onAuthenticated={() => { setError(""); setStatus("ready"); }} />;
-  return <div role="status" style={{ padding: 32, textAlign: "center" }}>{status === "restoring" ? "正在恢复登录…" : <><p>{error}</p><button type="button" onClick={() => { setStatus("restoring"); setRetry((value) => value + 1); }}>重新连接</button></>}</div>;
+  return (
+    <div className="w4-root se-auth-screen">
+      <div className="se-auth-panel se-auth-status" role="status">
+        <span className="se-auth-wordmark">SONDER</span>
+        {status === "restoring" ? <p>正在恢复登录…</p> : <>
+          <p className="se-auth-error">{error}</p>
+          <button type="button" className="w4-btn is-primary" onClick={() => { setStatus("restoring"); setRetry((value) => value + 1); }}>重新连接</button>
+        </>}
+      </div>
+    </div>
+  );
 }

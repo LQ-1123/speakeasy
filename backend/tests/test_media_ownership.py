@@ -229,7 +229,7 @@ def _first_friend_audio(http, friend, headers) -> str:
 
 
 def _filename(url: str) -> str:
-    return url.rsplit("/", 1)[-1]
+    return url.split("?", 1)[0].rsplit("/", 1)[-1]
 
 
 # --------------------------------------------------------------------------- #
@@ -244,8 +244,32 @@ def test_friend_audio_is_private_to_its_owner(env):
 
     assert env.http.get(url, headers=env.headers_a).status_code == 200
     assert env.http.get(url, headers=env.headers_b).status_code == 403
-    # 不带身份头 = local，同样不能读别人的私聊音频
-    assert env.http.get(url).status_code == 403
+    # 返回给客户端的 URL 自带签名，因此不带身份头也能播放；但去掉令牌后
+    # 仍然是 local 身份，不能读别人的私聊音频。
+    assert env.http.get(url).status_code == 200
+    assert env.http.get(f"/api/v2/audio/{name}").status_code == 403
+
+
+def test_message_audio_url_is_signed_for_instant_playback(env):
+    """返回给客户端的语音 URL 必须带令牌：<audio src> 无法携带身份头。"""
+    from urllib.parse import parse_qs, urlparse
+    from app.v3.media_access import signed_url
+
+    url = _first_friend_audio(env.http, env.friend, env.headers_a)
+    query = parse_qs(urlparse(url).query)
+    assert query.get("t"), url
+    # 令牌即凭证：不带任何身份头也能直接播放（不用再现场合成）
+    played = env.http.get(url)
+    assert played.status_code == 200, played.text
+    assert played.content[:4] == b"RIFF"
+
+    # 二次序列化（bootstrap + messages）不能把已签名 URL 弄坏：
+    # path 保持不变、只保留一个 t，且新令牌依然可播放。
+    again = signed_url(env.db, env.a["user_id"], url)
+    parsed = urlparse(again)
+    assert parsed.path == urlparse(url).path
+    assert len(parse_qs(parsed.query).get("t", [])) == 1
+    assert env.http.get(again).status_code == 200
 
 
 # --------------------------------------------------------------------------- #

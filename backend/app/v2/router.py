@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from app.llm import runtime_config as llm_runtime
 from app.logging_utils import get_logger
+from app.capacity import CapacityError, env_int
 from app.v2 import moments as moments_mod
 from app.v2 import translate as translate_mod
 from app.v2 import user_moments as user_moments_mod
@@ -270,6 +271,20 @@ def _message_public(msg: dict | None) -> dict | None:
     data = dict(msg)
     name = data.get("audio_path")
     data["audio_url"] = f"/api/v2/audio/{os.path.basename(name)}" if name else None
+    # 浏览器/WebView 的 <audio src> 带不了身份头：音频 URL 也必须签名，
+    # 否则已登记的朋友语音会被归属校验 403，前端只能落到「现场合成」，
+    # 用户点一下要等好几秒才出声。
+    if data["audio_url"]:
+        try:
+            from app.v3.identity import current_user_id  # noqa: PLC0415
+            from app.v3.media_access import signed_url  # noqa: PLC0415
+            from app.v3.security import current_request_db  # noqa: PLC0415
+
+            db = current_request_db()
+            if db is not None:
+                data["audio_url"] = signed_url(db, current_user_id(), data["audio_url"])
+        except Exception:  # noqa: BLE001 - 签名失败退回原 URL（历史兼容）
+            pass
     image = data.get("image_path")
     data["image_url"] = f"/api/v2/media/{os.path.basename(image)}" if image else None
     # 浏览器 <img> 无法带身份头：自己名下的图片 URL 由服务端补短时令牌，前端无需改造。
@@ -402,12 +417,13 @@ def _user_today() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d")
 
 
-async def _friend_public(services: Any, friend: dict) -> dict:
+async def _friend_public(services: Any, friend: dict, metadata: dict | None = None) -> dict:
     db = services.db
     fid = friend["id"]
-    unread, last = await asyncio.gather(
-        _thread(db.unread_count, fid), _thread(db.last_message, fid)
-    )
+    if metadata is None:
+        unread, last = await asyncio.gather(_thread(db.unread_count, fid), _thread(db.last_message, fid))
+    else:
+        unread, last = metadata['unread'], metadata['last_message']
     state = local_state(friend.get("timezone") or "UTC")
     loops = friend.get("open_loops") or []
     now = datetime.now(timezone.utc)
@@ -446,6 +462,19 @@ async def _friend_public(services: Any, friend: dict) -> dict:
     data["greeting_audio"] = (
         f"/api/v2/audio/{os.path.basename(str(last_audio))}" if last_audio else None
     )
+    if data["greeting_audio"]:
+        try:
+            from app.v3.identity import current_user_id  # noqa: PLC0415
+            from app.v3.media_access import signed_url  # noqa: PLC0415
+            from app.v3.security import current_request_db  # noqa: PLC0415
+
+            db = current_request_db()
+            if db is not None:
+                data["greeting_audio"] = signed_url(
+                    db, current_user_id(), data["greeting_audio"]
+                )
+        except Exception:  # noqa: BLE001
+            pass
     return data
 
 
@@ -613,7 +642,11 @@ async def save_llm_settings(request: Request, body: LLMConfigIn) -> dict:
     from app.llm.client import LLMClient  # noqa: PLC0415
 
     llm_runtime.apply_to_settings(engines.settings.llm, cfg)
+    old = engines.llm
     engines.llm = LLMClient(engines.settings.llm)
+    engines.llm.usage_budget = getattr(old, 'usage_budget', None)
+    engines.llm.provider_pool = getattr(old, 'provider_pool', None)
+    await old.aclose()
     suggestions = getattr(engines, "suggestions", None)
     if suggestions is not None and hasattr(suggestions, "llm"):
         suggestions.llm = engines.llm
@@ -875,8 +908,9 @@ async def _friends_payload(services: Any) -> dict:
     active = [f for f in all_friends if f.get("status") == "active"]
     requests_ = [f for f in all_friends if f.get("status") == "pending_request"]
     await _check_followups(services, active)
-    friends_public = await asyncio.gather(*(_friend_public(services, f) for f in active))
-    requests_public = await asyncio.gather(*(_friend_public(services, f) for f in requests_))
+    metadata = await _thread(services.db.friend_message_metadata, [f['id'] for f in all_friends])
+    friends_public = await asyncio.gather(*(_friend_public(services, f, metadata.get(f['id'])) for f in active))
+    requests_public = await asyncio.gather(*(_friend_public(services, f, metadata.get(f['id'])) for f in requests_))
     return {
         "friends": list(friends_public),
         "requests": list(requests_public),
@@ -1458,12 +1492,13 @@ async def stt_stream(websocket: WebSocket, language: str = "en") -> None:
         DeepgramStreamer,
         StreamUnavailable,
         deepgram_key,
+        deepgram_configured,
         language_code,
     )
 
     await websocket.accept()
     key = deepgram_key()
-    if not key:
+    if not key and not deepgram_configured():
         await websocket.send_json({"type": "error", "message": "stream-stt-not-configured"})
         await websocket.close()
         return
@@ -1650,6 +1685,9 @@ async def chat_image(
             image.content_type or "",
             text,
         )
+    except CapacityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc),
+                            headers={'Retry-After': str(exc.retry_after)}) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     # 多用户隔离：本轮的用户图片与好友语音条在落盘后登记归属
@@ -1679,11 +1717,17 @@ async def chat_voice(
     if friend is None:
         raise HTTPException(status_code=404, detail="好友不存在")
     await _teen_gate(request, services, user_id, friend)
-    data = await audio.read()
     try:
-        result = await services.chat.handle_voice(
-            friend_id, data, audio.filename or "voice.webm", duration_ms
-        )
+        async with services.chat.foreground_turn(user_id):
+            max_bytes = env_int('SE_AUDIO_MAX_BYTES', 8 * 1024 * 1024, 1024, 64 * 1024 * 1024)
+            data = await audio.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise HTTPException(status_code=413, detail='语音文件过大，请缩短录音')
+            result = await services.chat._handle_voice_admitted(
+                friend_id, data, audio.filename or 'voice.webm', duration_ms, None)
+    except CapacityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc),
+                            headers={'Retry-After': str(exc.retry_after)}) from None
     except KeyError:
         raise HTTPException(status_code=404, detail="好友不存在") from None
     except ValueError as exc:
@@ -1705,6 +1749,9 @@ async def chat_text(request: Request, friend_id: str, body: TextTurnBody) -> dic
         result = await services.chat.handle_text(
             friend_id, body.text, body.context, client_message_id=body.client_message_id
         )
+    except CapacityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc),
+                            headers={'Retry-After': str(exc.retry_after)}) from None
     except KeyError:
         raise HTTPException(status_code=404, detail="好友不存在") from None
     except ValueError as exc:
@@ -1721,6 +1768,49 @@ def _turn_public(result: dict) -> dict:
     # 商业合作：独立广告消息（没有投放时为 None），不进 friend_messages
     data["ad_message"] = _message_public(result.get("ad_message"))
     return data
+
+
+@router.post('/messages/{message_id}/audio/retry')
+async def retry_message_audio(request: Request, message_id: str) -> dict:
+    services = _services(request)
+    message = await _thread(services.db.get_message, message_id)
+    friend = await _thread(services.db.get_friend, message['friend_id'], owner_user_id=current_user_id()) if message else None
+    if not friend:
+        raise HTTPException(status_code=404, detail='消息不存在')
+    await _teen_gate(request, services, current_user_id(), friend)
+    try:
+        return {'message': _message_public(await services.chat.retry_audio(message_id))}
+    except KeyError:
+        raise HTTPException(status_code=404, detail='消息不存在') from None
+    except CapacityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc),
+                            headers={'Retry-After': str(exc.retry_after)}) from None
+
+
+@router.post('/messages/{message_id}/suggestion')
+async def request_message_suggestion(request: Request, message_id: str) -> dict:
+    services = _services(request)
+    message = await _thread(services.db.get_message, message_id)
+    friend = await _thread(services.db.get_friend, message['friend_id'], owner_user_id=current_user_id()) if message else None
+    if not friend or message.get('sender') != 'user':
+        raise HTTPException(status_code=404, detail='消息不存在')
+    await _teen_gate(request, services, current_user_id(), friend)
+    if message.get('suggestion') is not None:
+        return {'message': _message_public(message)}
+    try:
+        async with services.chat.admission.turn(current_user_id()):
+            from app.v2.suggestion import generate_suggestion
+            suggestion = await generate_suggestion(
+                services.engines.llm, message.get('transcript') or '',
+                friend_name=friend.get('name', ''), friend_context=friend.get('personality_prompt', '')[:200],
+                language=services.chat._reply_language(friend), strict=True)
+            await _thread(services.db.update_message, message_id, suggestion=suggestion)
+    except CapacityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc),
+                            headers={'Retry-After': str(exc.retry_after)}) from None
+    except Exception:
+        raise HTTPException(status_code=502, detail='润色暂时不可用，请稍后重试') from None
+    return {'message': _message_public(await _thread(services.db.get_message, message_id))}
 
 
 @router.post("/chat/{friend_id}/idle")
@@ -2324,6 +2414,8 @@ async def v2_health(request: Request) -> dict:
         "onboarding": services.onboarding_pending,
         "llm": services.engines.llm.health(),
         "stt": _stt_payload(services.engines),
+        "capacity": services.chat.admission.stats(),
+        "llm_usage": await _thread(services.chat.usage_budget.stats),
     }
 
 

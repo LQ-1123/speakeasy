@@ -1,0 +1,680 @@
+{
+  "date": "2026-11-14",
+  "environment": "Local Windows development host, Python 3.14; not constrained 2C2G Linux",
+  "production_acceptance": false,
+  "external_provider_spend": 0,
+  "verification": {
+    "backend_passed": 1552,
+    "backend_skipped": 1,
+    "frontend_passed": 198,
+    "typecheck": "passed",
+    "static_build": "passed/copied",
+    "independent_review": "all reproduced blockers addressed",
+    "browser": "desktop1440/mobile390 flows passed"
+  },
+  "soak": {
+    "users": 100,
+    "mode": "arrival",
+    "offering_duration_s": 1800.0111,
+    "duration_s": 1803.2,
+    "drain_s": 3.1854,
+    "counts": {
+      "arrivals.offered": 6000,
+      "arrivals.started": 6000,
+      "events.received": 12000,
+      "http.requests": 41999,
+      "net.audio_bytes": 2390661000,
+      "net.bytes_down": 2780790226,
+      "text_turn.ok": 6000,
+      "turns.audio_within_deadline": 6000,
+      "turns.completed": 6000,
+      "turns.offered": 6000,
+      "turns.playable_audio": 6000
+    },
+    "rates": {
+      "turns_per_s": 3.327,
+      "actual_offered_per_s": 3.333,
+      "completed_per_s_including_drain": 3.327,
+      "http_rps": 23.29,
+      "down_kbps": 12337.2,
+      "up_kbps": 0.0,
+      "cpu_ms_per_turn": 42.29
+    },
+    "acceptance": {
+      "offered": 6000,
+      "completed": 6000,
+      "rejected": 0,
+      "failed": 0,
+      "missing_audio": 0,
+      "client_dropped": 0,
+      "user_busy": 0,
+      "cancelled": 0,
+      "playable_audio_fraction_of_offered": 1.0,
+      "within_deadline_fraction_of_offered": 1.0
+    },
+    "provenance": {
+      "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+      "dirty": true,
+      "source_sha256": "e43a5bff4347483300e809b53a8b888916e2370b41153f58f0cc0ded8d0752d6",
+      "source_files": 1103
+    },
+    "provenance_end": {
+      "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+      "dirty": true,
+      "source_sha256": "2f40cf97b9c813ddf31c2164b1b92b46d7d76bb7a714954508e6b76fca56c577",
+      "source_files": 1105
+    },
+    "source_unchanged_during_measurement": false,
+    "time_to_playable_ms": {
+      "n": 6000,
+      "p50": 3420.8,
+      "p95": 3541.4,
+      "p99": 3570.7,
+      "max": 3701.5
+    },
+    "configuration": {
+      "max_inflight": 100,
+      "audio_deadline_s": 30,
+      "events": true,
+      "keepalive": true,
+      "warmup_s": 0.25,
+      "drain_timeout_s": 35,
+      "server": {
+        "fake_only": true,
+        "external_provider_budget": 0,
+        "threadpool_workers": 0,
+        "cpu_emulation": false,
+        "no_maintenance": false,
+        "admission": {
+          "accepted": 6000,
+          "rejected": 0,
+          "timeouts": 0,
+          "completed": 6000,
+          "active": 0,
+          "waiting": 0,
+          "limit": 32,
+          "queue_limit": 64,
+          "deadline_s": 30.0
+        },
+        "usage_budget": {
+          "daily_requests": 6027,
+          "monthly_requests": 6027,
+          "daily_limit": 0,
+          "monthly_limit": 0
+        }
+      },
+      "fake": true,
+      "fake_upstream": {
+        "host": "127.0.0.1",
+        "port": 11671,
+        "llm_ttft": 0.01,
+        "llm_tps": 2000.0,
+        "llm_json_latency": 0.01,
+        "fish_base": 3.0,
+        "fish_per_char": 0.0,
+        "fish_concurrency": 0,
+        "fish_per_account": true,
+        "fish_account_concurrency": 5,
+        "llm_429_every": 0,
+        "llm_error_every": 0,
+        "llm_slow_every": 0,
+        "llm_slow_seconds": 5,
+        "stt_latency": 0.4
+      }
+    },
+    "fake_fish": {
+      "requests": 6000,
+      "inflight": 0,
+      "peak": 12,
+      "rejected_429": 0,
+      "accounts": {
+        "account-0001": {
+          "requests": 1998,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0002": {
+          "requests": 2005,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0003": {
+          "requests": 1997,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        }
+      }
+    },
+    "pool_after": {
+      "current": {
+        "providers": {
+          "fish": {
+            "enabled": true,
+            "active": 0,
+            "resources": 4
+          },
+          "deepgram": {
+            "enabled": false,
+            "active": 0,
+            "resources": 0
+          },
+          "llm": {
+            "enabled": true,
+            "active": 0,
+            "resources": 4
+          },
+          "siliconflow": {
+            "enabled": false,
+            "active": 0,
+            "resources": 0
+          }
+        },
+        "resources": [
+          {
+            "id": "ca3463fcda564fb8898c0f8b63dbf972",
+            "resource_id": "ca3463fcda564fb8898c0f8b63dbf972",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "a9128a9fa57e42da8a8ff9cba7cfdd83",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.012,
+            "completed": 1997,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "94bb5e6fa6b44e138e132d05585fa2af",
+            "resource_id": "94bb5e6fa6b44e138e132d05585fa2af",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "06d2bc1afb71458490c5d6d64ebd7de9",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.0148,
+            "completed": 2019,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "8ed67a52ed3c4f1f92884c86e575e8ce",
+            "resource_id": "8ed67a52ed3c4f1f92884c86e575e8ce",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "1e955d7636f0435588defb9b47e7d713",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.0159,
+            "completed": 2005,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "3e4071fed64d43c0bced1b3b3bc3edbb",
+            "resource_id": "3e4071fed64d43c0bced1b3b3bc3edbb",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "7d2002686b4b4b4badcffc3da920398c",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 0.3999,
+            "completed": 6027,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "5b091dfde7fb4c5c9de603fee58733e5",
+            "resource_id": "5b091dfde7fb4c5c9de603fee58733e5",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "a867e89b2af54dbabd891364c7a8dad0",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "60f6b0bea9e24ecbbb29283e0bea4b76",
+            "resource_id": "60f6b0bea9e24ecbbb29283e0bea4b76",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "f901f72d8f65464a98c332c9b5eb3f31",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "506ced1143a84893a66baeaa7f8ecc09",
+            "resource_id": "506ced1143a84893a66baeaa7f8ecc09",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "098f316e3c094850a35808d6d49be2a0",
+            "revision": 1,
+            "state": "pending",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "26bfa3ab8ea643f59f3302bcd1b8effa",
+            "resource_id": "26bfa3ab8ea643f59f3302bcd1b8effa",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "d993fc34d0194ca2a3410e1d94bbe3c9",
+            "revision": 1,
+            "state": "pending",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          }
+        ],
+        "active": 0,
+        "waiting": 0,
+        "queue_limit": 64,
+        "clients": 4,
+        "client_limit": 16,
+        "http_active": 0,
+        "ws_active": 0,
+        "accepted": 12048,
+        "completed": 12048,
+        "rejected": 0,
+        "timeouts": 0
+      },
+      "peaks": {
+        "active_peak": 13,
+        "provider_active_peaks": {
+          "fish": 12,
+          "deepgram": 0,
+          "llm": 2,
+          "siliconflow": 0
+        },
+        "resource_active_peaks": {
+          "ca3463fcda564fb8898c0f8b63dbf972": 5,
+          "94bb5e6fa6b44e138e132d05585fa2af": 5,
+          "8ed67a52ed3c4f1f92884c86e575e8ce": 5,
+          "3e4071fed64d43c0bced1b3b3bc3edbb": 2,
+          "5b091dfde7fb4c5c9de603fee58733e5": 0,
+          "60f6b0bea9e24ecbbb29283e0bea4b76": 0,
+          "506ced1143a84893a66baeaa7f8ecc09": 0,
+          "26bfa3ab8ea643f59f3302bcd1b8effa": 0
+        },
+        "quota_group_active_peaks": {
+          "a9128a9fa57e42da8a8ff9cba7cfdd83": 5,
+          "06d2bc1afb71458490c5d6d64ebd7de9": 5,
+          "1e955d7636f0435588defb9b47e7d713": 5,
+          "7d2002686b4b4b4badcffc3da920398c": 2,
+          "a867e89b2af54dbabd891364c7a8dad0": 0,
+          "f901f72d8f65464a98c332c9b5eb3f31": 0,
+          "098f316e3c094850a35808d6d49be2a0": 0,
+          "d993fc34d0194ca2a3410e1d94bbe3c9": 0
+        },
+        "sampling_interval_s": 0.02
+      }
+    },
+    "resources": {
+      "scope": "owned backend + fake upstream process trees; load generator excluded",
+      "peak_process_tree_rss_bytes": 743641088,
+      "sampled_duration_s": 1804.5003786000016,
+      "process_tree_cpu_s": 295.546875,
+      "process_tree_cores_used": 0.16378321584465183,
+      "host_cpu_s": 5193.812499999534,
+      "host_cores_used": 2.8782551456315497
+    },
+    "backend_peak_rss_mib": 525.8,
+    "provenance_note": "Source files changed during development while this already-loaded, non-reloading process continued; this soak is startup-snapshot evidence, not a frozen-final-build acceptance. Final frozen smoke recorded separately."
+  },
+  "short_burst": {
+    "counts": {
+      "arrivals.offered": 20,
+      "arrivals.started": 20,
+      "http.requests": 80,
+      "net.audio_bytes": 7968870,
+      "net.bytes_down": 8125955,
+      "text_turn.ok": 20,
+      "turns.audio_within_deadline": 20,
+      "turns.completed": 20,
+      "turns.offered": 20,
+      "turns.playable_audio": 20
+    },
+    "upstream_fish": {
+      "requests": 20,
+      "inflight": 0,
+      "peak": 15,
+      "rejected_429": 0,
+      "accounts": {
+        "account-0001": {
+          "requests": 7,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0002": {
+          "requests": 7,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0003": {
+          "requests": 6,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "soak_owned_pids": [
+      1276,
+      59804,
+      14424
+    ],
+    "still_running": []
+  },
+  "frozen_final_smoke": {
+    "users": 100,
+    "mode": "arrival",
+    "offering_duration_s": 60.0055,
+    "duration_s": 63.1,
+    "drain_s": 3.0897,
+    "counts": {
+      "arrivals.offered": 200,
+      "arrivals.started": 200,
+      "events.received": 400,
+      "http.requests": 1398,
+      "net.audio_bytes": 79688700,
+      "net.bytes_down": 90141460,
+      "text_turn.ok": 200,
+      "turns.audio_within_deadline": 200,
+      "turns.completed": 200,
+      "turns.offered": 200,
+      "turns.playable_audio": 200
+    },
+    "rates": {
+      "turns_per_s": 3.17,
+      "actual_offered_per_s": 3.333,
+      "completed_per_s_including_drain": 3.17,
+      "http_rps": 22.16,
+      "down_kbps": 11429.3,
+      "up_kbps": 0.0,
+      "cpu_ms_per_turn": 44.22
+    },
+    "acceptance": {
+      "offered": 200,
+      "completed": 200,
+      "rejected": 0,
+      "failed": 0,
+      "missing_audio": 0,
+      "client_dropped": 0,
+      "user_busy": 0,
+      "cancelled": 0,
+      "playable_audio_fraction_of_offered": 1.0,
+      "within_deadline_fraction_of_offered": 1.0
+    },
+    "provenance": {
+      "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+      "dirty": true,
+      "source_sha256": "2f40cf97b9c813ddf31c2164b1b92b46d7d76bb7a714954508e6b76fca56c577",
+      "source_files": 1105
+    },
+    "provenance_end": {
+      "git_hash": "cbde35ee6cf820049dac988000a647227580d38e",
+      "dirty": true,
+      "source_sha256": "2f40cf97b9c813ddf31c2164b1b92b46d7d76bb7a714954508e6b76fca56c577",
+      "source_files": 1105
+    },
+    "source_unchanged_during_measurement": true,
+    "time_to_playable_ms": {
+      "n": 200,
+      "p50": 3422.0,
+      "p95": 3550.5,
+      "p99": 3610.4,
+      "max": 3640.1
+    },
+    "fake_fish": {
+      "requests": 200,
+      "inflight": 0,
+      "peak": 11,
+      "rejected_429": 0,
+      "accounts": {
+        "account-0001": {
+          "requests": 68,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0002": {
+          "requests": 65,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        },
+        "account-0003": {
+          "requests": 67,
+          "inflight": 0,
+          "peak": 5,
+          "rejected_429": 0
+        }
+      }
+    },
+    "pool_after": {
+      "current": {
+        "providers": {
+          "fish": {
+            "enabled": true,
+            "active": 0,
+            "resources": 4,
+            "waiting": 0
+          },
+          "deepgram": {
+            "enabled": false,
+            "active": 0,
+            "resources": 0,
+            "waiting": 0
+          },
+          "llm": {
+            "enabled": true,
+            "active": 0,
+            "resources": 4,
+            "waiting": 0
+          },
+          "siliconflow": {
+            "enabled": false,
+            "active": 0,
+            "resources": 0,
+            "waiting": 0
+          }
+        },
+        "resources": [
+          {
+            "id": "cf9d61180bd347fdab08ab5e35c76559",
+            "resource_id": "cf9d61180bd347fdab08ab5e35c76559",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "bfe0fb4f31244b6ca4ec0f83fb74714f",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.0137,
+            "completed": 65,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "b447f614540c4e5489c9a37bfac871a3",
+            "resource_id": "b447f614540c4e5489c9a37bfac871a3",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "823263d0b52d40d6ab897626701ef4f4",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.0102,
+            "completed": 89,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "309b338b24f5444a83773ff19d878bd3",
+            "resource_id": "309b338b24f5444a83773ff19d878bd3",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "ee3b91f1e19543e880cf19e8a2c9f698",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 3.0138,
+            "completed": 67,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "79f5d4314f754b359159f08b3f7a1d9c",
+            "resource_id": "79f5d4314f754b359159f08b3f7a1d9c",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "a465744fe02348de9d319900dc8a329e",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "2e29d98d5066487b915d800ea54dcde8",
+            "resource_id": "2e29d98d5066487b915d800ea54dcde8",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "bb2998ce0be6426dae062af739078782",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "8a21aaa45d564b15aa1da609ba6bbb64",
+            "resource_id": "8a21aaa45d564b15aa1da609ba6bbb64",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "9d38db64ef284f2f90dcb1e221d35d6c",
+            "revision": 1,
+            "state": "active",
+            "active": 0,
+            "ewma_seconds": 0.3873,
+            "completed": 228,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "cd5ebbb9bcfd4195985e05b31a7cf791",
+            "resource_id": "cd5ebbb9bcfd4195985e05b31a7cf791",
+            "provider": "llm",
+            "model": "fake-chat",
+            "quota_group_id": "f91ba0a03412474185c564da7fa6de3f",
+            "revision": 1,
+            "state": "pending",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          },
+          {
+            "id": "2708de0bce954ceea2daad1bef2d349e",
+            "resource_id": "2708de0bce954ceea2daad1bef2d349e",
+            "provider": "fish",
+            "model": "s2.1-pro-free",
+            "quota_group_id": "97993d1bd3ad4b8ba6978debbf95326b",
+            "revision": 1,
+            "state": "pending",
+            "active": 0,
+            "ewma_seconds": 1.0,
+            "completed": 0,
+            "failures": 0,
+            "consecutive_failures": 0,
+            "cooldown_seconds": 0
+          }
+        ],
+        "active": 0,
+        "waiting": 0,
+        "queue_limit": 64,
+        "clients": 4,
+        "client_limit": 16,
+        "http_active": 0,
+        "ws_active": 0,
+        "accepted": 449,
+        "completed": 449,
+        "rejected": 0,
+        "timeouts": 0
+      },
+      "peaks": {
+        "active_peak": 12,
+        "provider_active_peaks": {
+          "fish": 11,
+          "deepgram": 0,
+          "llm": 2,
+          "siliconflow": 0
+        },
+        "resource_active_peaks": {
+          "cf9d61180bd347fdab08ab5e35c76559": 5,
+          "b447f614540c4e5489c9a37bfac871a3": 5,
+          "309b338b24f5444a83773ff19d878bd3": 5,
+          "79f5d4314f754b359159f08b3f7a1d9c": 0,
+          "2e29d98d5066487b915d800ea54dcde8": 0,
+          "8a21aaa45d564b15aa1da609ba6bbb64": 2,
+          "cd5ebbb9bcfd4195985e05b31a7cf791": 0,
+          "2708de0bce954ceea2daad1bef2d349e": 0
+        },
+        "quota_group_active_peaks": {
+          "bfe0fb4f31244b6ca4ec0f83fb74714f": 5,
+          "823263d0b52d40d6ab897626701ef4f4": 5,
+          "ee3b91f1e19543e880cf19e8a2c9f698": 5,
+          "a465744fe02348de9d319900dc8a329e": 0,
+          "bb2998ce0be6426dae062af739078782": 0,
+          "9d38db64ef284f2f90dcb1e221d35d6c": 2,
+          "f91ba0a03412474185c564da7fa6de3f": 0,
+          "97993d1bd3ad4b8ba6978debbf95326b": 0
+        },
+        "sampling_interval_s": 0.02
+      }
+    }
+  }
+}

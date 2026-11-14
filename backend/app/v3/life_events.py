@@ -1742,13 +1742,14 @@ def current_activity(db: Any, persona_id: str, *, now: Any = None) -> dict | Non
         return None
     now_dt = _as_utc(now) or _now_utc()
     now_iso = iso(now_dt)
+    stale_iso = iso(now_dt - timedelta(hours=STALE_GRACE_HOURS))
     rows = _query_events(
         db,
         where=(
             "persona_id=? AND event_status IN ('ongoing','planned')"
-            " AND start_time<=? AND (end_time='' OR end_time>?)"
+            " AND start_time<=? AND ((end_time='' AND start_time>?) OR end_time>?)"
         ),
-        params=[pid, now_iso, now_iso],
+        params=[pid, now_iso, stale_iso, now_iso],
         order="start_time DESC",
         limit=1,
     )
@@ -1927,7 +1928,7 @@ def upcoming_events(db: Any, persona_id: str, *, limit: int = 2) -> list[dict]:
 
 
 def _local_when(event: dict) -> str:
-    """事件时间 → 人物本地 ``"Mon 14:00"``（prompt 里给人读的时间）。
+    """事件时间 → 人物当地日期与时间，避免把上周的事情当成今天。
 
     ``event`` 可能是 :func:`_row_to_event` 解析过的 dict，也可能是 ``dict(row)``
     这种「``metadata`` 仍是 JSON 字符串」的原始 DB 行，必须都支持。
@@ -1938,7 +1939,7 @@ def _local_when(event: dict) -> str:
     metadata = _as_dict(event.get("metadata"))
     tz_name = str(metadata.get("timezone") or DEFAULT_TZ)
     local = start_dt.astimezone(_zone(tz_name))
-    return local.strftime("%a %H:%M")
+    return local.strftime("%Y-%m-%d %a %H:%M")
 
 
 def event_fact_block(event: dict, *, include_status: bool = True) -> str:
@@ -2008,6 +2009,9 @@ Today they already have this fixed routine (do NOT repeat or overlap these):
 People they actually know (participants may ONLY be these ids, or an empty list):
 {acquaintances}
 
+Their recent life (background continuity, not today's new events):
+{recent_life}
+
 Write {max_events} event(s) at most, and only events worth telling a friend about.
 Allowed event_type values: {types}
 Rules:
@@ -2024,6 +2028,16 @@ Rules:
 5. Fewer events (or zero) is perfectly fine - quality over quantity.
 6. title <= 80 chars, description <= 200 chars. English is fine: this is an internal
    fact sheet, another module re-writes it in the persona's own language.
+7. Continue the recent life above. A completed milestone stays completed: do not
+   win the same job, finish the same project or discover the same place again tomorrow.
+   An old unconfirmed plan is not evidence it happened. A small consequence is enough;
+   a quiet day with no new event is often the most believable choice.
+8. Prefer a concrete everyday detail, a small inconvenience or an unfinished attempt.
+   Do not make every day an achievement, conflict, lesson or emotional turning point.
+   Describe what happened and what remains unresolved, without a moral or a caption.
+9. Biography, location and existing relationships are constraints. Interest in a topic
+   is not a credential or an experience. Never turn an article, image or trend into
+   something this persona personally witnessed or photographed.
 
 Output JSON only:
 {{"events":[{{"event_type":"achievement","title":"...","description":"...",
@@ -2043,7 +2057,8 @@ _FALLBACK_START_HOURS: tuple[int, ...] = (9, 11, 14, 16, 19, 20)
 
 
 def _narrative_prompt(
-    persona: dict, day: str, acquaintances: list[dict], blocks: list[dict], max_events: int
+    persona: dict, day: str, acquaintances: list[dict], blocks: list[dict], max_events: int,
+    *, recent_events: list[dict] | None = None,
 ) -> str:
     routine = "\n".join(
         f"- {block.get('start')}-{block.get('end')} {block.get('label')}"
@@ -2081,8 +2096,33 @@ def _narrative_prompt(
         day=day,
         blocks=routine,
         acquaintances=people,
+        recent_life="\n".join(
+            f"- {event.get('day') or str(event.get('start_time') or '')[:10]}: "
+            f"{_clip(event_fact_block(event), 260)}"
+            for event in (recent_events or [])[:6]
+            if event.get("event_status") != "cancelled"
+        ) or "- (no recorded recent events; do not invent a past history)",
         max_events=max(1, int(max_events)),
         types=", ".join(NARRATIVE_EVENT_TYPES),
+    )
+
+
+def _recent_narrative_context(db: Any, persona_id: str, day: str, timezone_name: str) -> list[dict]:
+    """Read a bounded, dated history before the day being generated.
+
+    Routine blocks cannot crowd out the few details that make a life continuous.
+    Past plans remain plans; cancelled events and future outcomes are excluded.
+    """
+    start = datetime.combine(date.fromisoformat(day), dtime.min, tzinfo=_zone(timezone_name))
+    return _query_events(
+        db,
+        where=(
+            "persona_id=? AND event_status IN ('completed','planned')"
+            " AND start_time>=? AND start_time<? AND source_type!='rule'"
+        ),
+        params=[persona_id, iso(start - timedelta(days=7)), iso(start)],
+        order="start_time DESC",
+        limit=6,
     )
 
 
@@ -2280,7 +2320,8 @@ async def generate_narrative_events(
     except (TypeError, ValueError):
         limit = 2
 
-    prompt = _narrative_prompt(persona, str(day), acquaintances, blocks, limit)
+    recent = _recent_narrative_context(db, pid, str(day), tz_name)
+    prompt = _narrative_prompt(persona, str(day), acquaintances, blocks, limit, recent_events=recent)
     from app.v2.llm_json import complete_json_safe  # noqa: PLC0415 - 避免循环依赖
 
     try:

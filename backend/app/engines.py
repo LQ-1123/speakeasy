@@ -78,6 +78,8 @@ class Engines:
         rc.apply_to_settings(self.settings.llm, cfg)
         old = self.llm
         self.llm = LLMClient(self.settings.llm)
+        self.llm.usage_budget = getattr(old, 'usage_budget', None)
+        self.llm.provider_pool = getattr(old, 'provider_pool', None)
         self.suggestions = SuggestionService(
             self.llm, self.personas, self.settings.llm, self.settings.pipeline
         )

@@ -12,3 +12,6 @@ it("obeys notification preferences and silences sounds during a call", () => {
   expect(notificationFor([event], { ...preferences, messages: false }, { name: "me" }, false)).toBeNull();
   expect(notificationFor([event], preferences, { name: "me" }, true)?.sound).toBe(false);
 });
+it("does not create social banners or sounds for audio completion events", () => {
+  expect(notificationFor([{ ...event, type: "audio_ready" }, { ...event, type: "audio_failed" }], preferences, { name: "me" }, false)).toBeNull();
+});

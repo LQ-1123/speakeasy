@@ -106,6 +106,28 @@ def _json_loads(raw: Any, default: Any) -> Any:
         return default
 
 
+def _sqlite_synchronous() -> str:
+    """WAL 下的落盘策略（``SE_SQLITE_SYNCHRONOUS``，默认 ``NORMAL``）。
+
+    SQLite 默认 ``FULL``：**每次提交都 fsync**。一轮聊天有十来次提交，云盘上一次
+    fsync 是毫秒级，而且 fsync 期间整库的锁都被占着——并发一高，所有请求都在排队等
+    磁盘。WAL + ``NORMAL`` 只在 checkpoint 时 fsync：进程崩溃不丢数据、库文件不会损坏，
+    只有整机断电 / 内核崩溃才可能丢最后几笔提交（聊天场景可接受，客户端幂等键可重发）。
+    需要逐笔落盘时设 ``SE_SQLITE_SYNCHRONOUS=FULL``。
+    """
+    value = str(os.getenv("SE_SQLITE_SYNCHRONOUS", "NORMAL")).strip().upper()
+    return value if value in ("OFF", "NORMAL", "FULL", "EXTRA") else "NORMAL"
+
+
+def _sqlite_cache_kb() -> int:
+    """页缓存大小（KB，``SE_SQLITE_CACHE_KB``，默认 16MB；SQLite 自带默认只有 2MB）。"""
+    try:
+        value = int(os.getenv("SE_SQLITE_CACHE_KB", "16000"))
+    except ValueError:
+        value = 16000
+    return max(2000, min(value, 262144))
+
+
 def legacy_shared_enabled() -> bool:
     """老库单用户兼容开关：owner='local' 的历史数据对当前身份只读可见。
 
@@ -149,6 +171,11 @@ class DB:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(f"PRAGMA synchronous={_sqlite_synchronous()}")
+        conn.execute(f"PRAGMA cache_size=-{_sqlite_cache_kb()}")
+        # 排序 / 分组的临时结构放内存；WAL 文件在 checkpoint 后截到 64MB 以内
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA journal_size_limit=67108864")
         self._conn = conn
         with self._lock, conn:
             conn.executescript(
@@ -380,7 +407,12 @@ class DB:
             if msg_columns and "image_path" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN image_path TEXT DEFAULT ''")
                 log.info("migrated messages table: added image_path column")
+            for column in ("audio_status", "audio_error", "reply_to_message_id"):
+                if column not in msg_columns:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT DEFAULT ''")
             # 幂等发送：客户端消息 id（可为空；为空时唯一索引不生效）
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_reply_to "
+                         "ON messages(friend_id,reply_to_message_id) WHERE reply_to_message_id<>''")
             if msg_columns and "client_message_id" not in msg_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN client_message_id TEXT DEFAULT NULL")
                 log.info("migrated messages table: added client_message_id column")
@@ -389,6 +421,17 @@ class DB:
                 " ON messages(friend_id, client_message_id)"
                 " WHERE client_message_id IS NOT NULL"
             )
+            # 未读计数 / 轮数统计走索引：否则这两类查询会随聊天记录变长而线性变慢
+            # （好友列表、bootstrap、每一轮聊天都会用到）。
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(friend_id)"
+                " WHERE sender='friend' AND is_read=0"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_friend_sender"
+                " ON messages(friend_id, sender)"
+            )
+            self._init_message_counts(conn)
 
             # V3 多用户：用户动态 / 表达本归属
             um_columns = {
@@ -407,6 +450,14 @@ class DB:
                     "ALTER TABLE saved_expressions ADD COLUMN user_id TEXT DEFAULT 'local'"
                 )
                 log.info("migrated saved_expressions: added user_id column")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_expressions_user_review"
+                " ON saved_expressions(user_id,status,mastery_count,created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_moments_user_time"
+                " ON user_moments(user_id,created_at DESC)"
+            )
 
             row = conn.execute("SELECT id FROM user_profile WHERE id=1").fetchone()
             if row is None:
@@ -421,6 +472,42 @@ class DB:
                         _now_iso(),
                     ),
                 )
+
+    def _init_message_counts(self, conn: sqlite3.Connection) -> None:
+        """Calibrate historical user turns once, then maintain with every SQL write."""
+        conn.execute("CREATE TABLE IF NOT EXISTS db_migrations (key TEXT PRIMARY KEY)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS friend_message_counts ("
+            "friend_id TEXT PRIMARY KEY REFERENCES friends(id) ON DELETE CASCADE,"
+            "user_turns INTEGER NOT NULL DEFAULT 0)"
+        )
+        if conn.execute("SELECT 1 FROM db_migrations WHERE key='message_counts_v1'").fetchone() is None:
+            conn.execute(
+                "INSERT OR REPLACE INTO friend_message_counts(friend_id,user_turns)"
+                " SELECT friend_id,COUNT(*) FROM messages WHERE sender='user' GROUP BY friend_id"
+            )
+            conn.execute("INSERT INTO db_migrations(key) VALUES ('message_counts_v1')")
+        for statement in ("""
+            CREATE TRIGGER IF NOT EXISTS message_count_insert AFTER INSERT ON messages
+            WHEN new.sender='user' BEGIN
+                INSERT INTO friend_message_counts(friend_id,user_turns) VALUES(new.friend_id,1)
+                ON CONFLICT(friend_id) DO UPDATE SET user_turns=user_turns+1;
+            END;
+        """, """
+            CREATE TRIGGER IF NOT EXISTS message_count_delete AFTER DELETE ON messages
+            WHEN old.sender='user' BEGIN
+                UPDATE friend_message_counts SET user_turns=MAX(0,user_turns-1) WHERE friend_id=old.friend_id;
+            END;
+        """, """
+            CREATE TRIGGER IF NOT EXISTS message_count_update AFTER UPDATE OF sender,friend_id ON messages BEGIN
+                UPDATE friend_message_counts SET user_turns=MAX(0,user_turns-1)
+                    WHERE friend_id=old.friend_id AND old.sender='user';
+                INSERT INTO friend_message_counts(friend_id,user_turns)
+                    SELECT new.friend_id,1 WHERE new.sender='user'
+                    ON CONFLICT(friend_id) DO UPDATE SET user_turns=user_turns+1;
+            END;
+        """):
+            conn.execute(statement)
 
     def close(self) -> None:
         with self._lock:
@@ -636,6 +723,106 @@ class DB:
     # ------------------------------------------------------------------ #
     # 消息
     # ------------------------------------------------------------------ #
+    def start_chat_turn(
+        self, friend_id: str, transcript: str, *, msg_type: str = "text",
+        audio_path: str | None = None, image_path: str | None = None,
+        duration_ms: int = 0, context: str | None = None,
+        client_message_id: str | None = None, history_limit: int = 10,
+        review_limit: int = 2, record_message: bool = True,
+    ) -> dict:
+        """Read prompt inputs and persist a turn in one owned transaction.
+
+        A new turn's history precedes its user message; retrying an idempotency
+        key returns its original row without increasing the calibrated counter.
+        Calls can set ``record_message=False`` to retain summary-only storage.
+        """
+        from app.v2.social import closeness_level
+
+        owner = current_user_id()
+        inserted = False
+        user_message = None
+        with self._lock, self.conn:
+            # IMMEDIATE also serializes separate DB connections/processes before
+            # the history snapshot and duplicate check, not merely the INSERT.
+            self.conn.execute("BEGIN IMMEDIATE")
+            friend = self._row_to_dict(self.conn.execute(
+                "SELECT * FROM friends WHERE id=? AND owner_user_id=?", (friend_id, owner)
+            ).fetchone(), "friends")
+            if friend is None:
+                raise KeyError(friend_id)
+            if record_message and client_message_id:
+                user_message = self._row_to_dict(self.conn.execute(
+                    "SELECT * FROM messages WHERE friend_id=? AND client_message_id=?",
+                    (friend_id, client_message_id),
+                ).fetchone(), "messages")
+            history = self.recent_messages(friend_id, max(1, int(history_limit)))
+            if user_message is None and record_message:
+                message_id = _uuid()
+                self.conn.execute(
+                    "INSERT INTO messages(id,friend_id,sender,transcript,msg_type,audio_path,"
+                    "image_path,duration_ms,context,client_message_id,is_read,created_at)"
+                    " VALUES (?,?,'user',?,?,?,?,?,?,?,1,?)",
+                    (message_id, friend_id, transcript or "", msg_type, audio_path,
+                     image_path or "", int(duration_ms or 0), context,
+                     client_message_id or None, _now_iso()),
+                )
+                user_message = self._row_to_dict(self.conn.execute(
+                    "SELECT * FROM messages WHERE id=?", (message_id,)
+                ).fetchone(), "messages")
+                inserted = True
+            count = self.conn.execute(
+                "SELECT user_turns FROM friend_message_counts WHERE friend_id=?", (friend_id,)
+            ).fetchone()
+            turns = int(count[0]) if count else 0
+            level = closeness_level(turns)
+            if inserted or not record_message:
+                interaction_at = _now_iso()
+                self.conn.execute(
+                    "UPDATE friends SET total_turns=?,closeness_level=?,last_interaction_at=?"
+                    " WHERE id=? AND owner_user_id=?",
+                    (turns, level, interaction_at, friend_id, owner),
+                )
+                friend.update(total_turns=turns, closeness_level=level,
+                              last_interaction_at=interaction_at)
+            reviews = self.pick_review_expressions(review_limit)
+        return {"friend": friend, "history": history, "user_message": user_message,
+                "review_expressions": reviews, "total_turns": turns,
+                "closeness_level": level, "inserted": inserted}
+
+    def friend_message_metadata(
+        self, friend_ids: Iterable[str], *, owner_user_id: str | None = None,
+    ) -> dict[str, dict]:
+        """Batch latest previews and indexed unread counts for visible friends."""
+        ids = list(dict.fromkeys(str(fid) for fid in friend_ids if fid))
+        if not ids:
+            return {}
+        owner = owner_user_id or current_user_id()
+        owners = [owner, LOCAL_USER_ID] if legacy_shared_enabled() else [owner]
+        result: dict[str, dict] = {}
+        with self._lock:
+            # Keep below older SQLite builds' 999-variable limit.
+            for offset in range(0, len(ids), 500):
+                chunk = ids[offset:offset + 500]
+                sql = (
+                    "SELECT f.id AS metadata_friend_id,"
+                    " (SELECT COUNT(*) FROM messages u WHERE u.friend_id=f.id"
+                    " AND u.sender='friend' AND u.is_read=0) AS metadata_unread,m.*"
+                    " FROM friends f LEFT JOIN messages m ON m.rowid=("
+                    " SELECT latest.rowid FROM messages latest WHERE latest.friend_id=f.id"
+                    " ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1)"
+                    f" WHERE f.id IN ({','.join('?' for _ in chunk)})"
+                    f" AND f.owner_user_id IN ({','.join('?' for _ in owners)})"
+                )
+                for row in self.conn.execute(sql, (*chunk, *owners)).fetchall():
+                    message = self._row_to_dict(row, "messages") if row["id"] is not None else None
+                    if message is not None:
+                        message.pop("metadata_friend_id", None)
+                        message.pop("metadata_unread", None)
+                    result[str(row["metadata_friend_id"])] = {
+                        "unread": int(row["metadata_unread"]), "last_message": message,
+                    }
+        return result
+
     def add_message(
         self,
         friend_id: str,
@@ -651,6 +838,9 @@ class DB:
         context: str | None = None,
         created_at: str | None = None,
         client_message_id: str | None = None,
+        audio_status: str = "",
+        audio_error: str = "",
+        reply_to_message_id: str = "",
     ) -> dict:
         mid = _uuid()
         row = {
@@ -667,6 +857,9 @@ class DB:
             "client_message_id": client_message_id or None,
             "is_read": bool(is_read),
             "created_at": created_at or _now_iso(),
+            "audio_status": audio_status,
+            "audio_error": audio_error,
+            "reply_to_message_id": reply_to_message_id,
         }
         cols = list(row)
         verb = "INSERT OR IGNORE" if client_message_id else "INSERT"
@@ -696,7 +889,7 @@ class DB:
         return self._fetch_one("messages", "id=?", (mid,))
 
     def update_message(self, mid: str, **fields: Any) -> dict:
-        allowed = {"transcript", "audio_path", "duration_ms", "suggestion", "is_read", "context", "msg_type"}
+        allowed = {"transcript", "audio_path", "duration_ms", "suggestion", "is_read", "context", "msg_type", "audio_status", "audio_error"}
         payload = {k: v for k, v in fields.items() if k in allowed}
         if "suggestion" in payload and payload["suggestion"] is not None:
             payload["suggestion"] = _json_dumps(payload["suggestion"])
@@ -763,8 +956,11 @@ class DB:
 
     def mark_read(self, friend_id: str) -> None:
         with self._lock, self.conn:
+            # 只改真正未读的行：不加 is_read=0 的话，每次打开会话都会把这个好友的
+            # **全部**历史消息重写一遍（聊得越久，这一笔写入越大）。
             self.conn.execute(
-                "UPDATE messages SET is_read=1 WHERE friend_id=? AND sender='friend'", (friend_id,)
+                "UPDATE messages SET is_read=1 WHERE friend_id=? AND sender='friend' AND is_read=0",
+                (friend_id,),
             )
 
     # ------------------------------------------------------------------ #
